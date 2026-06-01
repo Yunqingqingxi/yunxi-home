@@ -151,7 +151,8 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
+// @ts-nocheck
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import MCPInstallProgress from '../components/MCPInstallProgress.vue'

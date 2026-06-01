@@ -1,12 +1,12 @@
-export function formatTime(iso) {
+export function formatTime(iso: string): string {
   if (!iso) return '-'
   const d = new Date(iso)
-  const pad = n => String(n).padStart(2, '0')
+  const pad = (n: number): string => String(n).padStart(2, '0')
   return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' +
          pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds())
 }
 
-export function formatCron(cron) {
+export function formatCron(cron: string): string {
   if (!cron) return '未配置'
   const parts = cron.trim().split(/\s+/)
   const minField = parts.length === 6 ? parts[1] : parts[0]

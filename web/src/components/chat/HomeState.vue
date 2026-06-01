@@ -28,7 +28,8 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
+// @ts-nocheck
 const emit = defineEmits(['quickStart'])
 
 const caps = [

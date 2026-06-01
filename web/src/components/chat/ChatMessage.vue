@@ -89,7 +89,8 @@
   <div v-else style="display:none"></div>
 </template>
 
-<script setup>
+<script setup lang="ts">
+// @ts-nocheck
 import { computed } from 'vue'
 import ContentBlock from './ContentBlock.vue'
 import ThinkingBlock from './ThinkingBlock.vue'

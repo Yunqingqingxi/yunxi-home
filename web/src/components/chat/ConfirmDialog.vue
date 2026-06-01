@@ -55,7 +55,8 @@
   </Teleport>
 </template>
 
-<script setup>
+<script setup lang="ts">
+// @ts-nocheck
 import { ref, reactive, watch } from 'vue'
 
 const props = defineProps({

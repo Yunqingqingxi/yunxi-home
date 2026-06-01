@@ -44,7 +44,8 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
+// @ts-nocheck
 defineProps({
   clickMode: String, selectedCount: Number, clipCount: Number,
   sortBy: String, sortOrder: Number, searchQuery: String,

@@ -17,7 +17,8 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
+// @ts-nocheck
 import { ref } from 'vue'
 defineProps({ tasks: Array, hasActive: Boolean })
 defineEmits(['cancel', 'clear'])

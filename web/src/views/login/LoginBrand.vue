@@ -33,7 +33,8 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
+// @ts-nocheck
 import { ref, computed, onMounted } from 'vue'
 import { useThemeStore } from '../../stores/theme'
 import api from '../../services/api'

@@ -7,7 +7,8 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
+// @ts-nocheck
 defineProps({ title: { type: String, required: true } })
 </script>
 

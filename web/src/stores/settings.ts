@@ -1,35 +1,48 @@
 import { defineStore } from 'pinia'
 import { ref, computed, reactive } from 'vue'
 import api from '../services/api'
+import type { ApiResponse } from '../types/api'
+import type { AppConfig, AliyunDNSConfig, NotifyConfig, AIConfig, DetectConfig, NASConfig, DatabaseConfig, ServerConfig, LogConfig, QQBotConfig } from '../types/config'
+
+interface TestResult {
+  ok: boolean
+  error: string
+}
+
+interface SaveResult {
+  ok: boolean
+  data?: any
+  error?: string
+}
 
 export const useSettingsStore = defineStore('settings', () => {
-  const config = ref(null)
+  const config = ref<AppConfig | null>(null)
   const loading = ref(false)
-  const saving = ref(new Set())     // Set of sections currently saving
+  const saving = ref(new Set<string>())     // Set of sections currently saving
   const error = ref('')
-  const dirtySections = reactive(new Set())  // sections with unsaved changes
-  const localValues = reactive({})          // { section: { ...formFields } }
-  const testResults = reactive({})          // { providerKey: { ok, error } }
+  const dirtySections = reactive(new Set<string>())  // sections with unsaved changes
+  const localValues = reactive<Record<string, Record<string, any>>>({})          // { section: { ...formFields } }
+  const testResults = reactive<Record<string, TestResult>>({})          // { providerKey: { ok, error } }
 
   const hasDirty = computed(() => dirtySections.size > 0)
   const dirtyList = computed(() => [...dirtySections])
 
   // Section accessors
-  const dnsConfig = computed(() => config.value?.alidns || {})
-  const notifyConfig = computed(() => config.value?.notify || {})
-  const aiConfig = computed(() => config.value?.ai || {})
-  const detectConfig = computed(() => config.value?.detect || {})
-  const nasConfig = computed(() => config.value?.nas || {})
-  const databaseConfig = computed(() => config.value?.database || {})
-  const serverConfig = computed(() => config.value?.server || {})
-  const logConfig = computed(() => config.value?.log || {})
-  const qqbotConfig = computed(() => config.value?.qqbot || {})
+  const dnsConfig = computed<AliyunDNSConfig>(() => config.value?.alidns || {})
+  const notifyConfig = computed<NotifyConfig>(() => config.value?.notify || {})
+  const aiConfig = computed<AIConfig>(() => config.value?.ai || {})
+  const detectConfig = computed<DetectConfig>(() => config.value?.detect || {})
+  const nasConfig = computed<NASConfig>(() => config.value?.nas || {})
+  const databaseConfig = computed<DatabaseConfig>(() => config.value?.database || {})
+  const serverConfig = computed<ServerConfig>(() => config.value?.server || {})
+  const logConfig = computed<LogConfig>(() => config.value?.log || {})
+  const qqbotConfig = computed<QQBotConfig>(() => config.value?.qqbot || {})
 
-  async function load() {
+  async function load(): Promise<void> {
     loading.value = true
     error.value = ''
     try {
-      const res = await api.get('/api/config')
+      const res = await api.get<ApiResponse<AppConfig>>('/api/config')
       if (res.data.code === 200) {
         config.value = res.data.data || {}
         // Init localValues from config
@@ -49,7 +62,7 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   }
 
-  function setField(section, path, value) {
+  function setField(section: string, path: string, value: any): void {
     if (!localValues[section]) localValues[section] = { ...(config.value?.[section] || {}) }
     const keys = path.split('.')
     let obj = localValues[section]
@@ -61,36 +74,31 @@ export const useSettingsStore = defineStore('settings', () => {
     dirtySections.add(section)
   }
 
-  function isDirty(section) { return dirtySections.has(section) }
+  function isDirty(section: string): boolean { return dirtySections.has(section) }
 
-  async function saveSection(section) {
+  async function saveSection(section: string): Promise<SaveResult> {
     if (!localValues[section]) return { ok: false, error: '无数据' }
     saving.value.add(section)
     error.value = ''
     try {
-      const payload = JSON.parse(JSON.stringify(localValues[section])) // deep clone
+      const payload: Record<string, any> = JSON.parse(JSON.stringify(localValues[section])) // deep clone
 
       // AI section: only clear keys that were explicitly cleared by user.
-      // If has_key was true in the original config and api_key is empty,
-      // the user didn't modify it — just omit the field (skip).
       if (section === 'ai') {
         const origAi = config.value?.ai || {}
         for (const [key, val] of Object.entries(payload)) {
           if (typeof val === 'object' && val !== null) {
             if (!val.api_key) {
               if (val._cleared) {
-                // User explicitly clicked clear → send clear
                 val._clear_key = true
-              } else if (origAi[key]?.has_key) {
-                // Masked, unchanged → omit api_key, don't clear
+              } else if (typeof origAi[key] === 'object' && (origAi[key] as any)?.has_key) {
                 delete val.api_key
               }
-              // else: never had a key and still empty → nothing to do
             } else if (val.api_key === '••••••••') {
               delete val.api_key
             }
-            delete val._cleared  // clean up internal marker
-            delete val.has_key   // clean up read-only flag
+            delete val._cleared
+            delete val.has_key
           }
         }
       }
@@ -100,7 +108,7 @@ export const useSettingsStore = defineStore('settings', () => {
           if (payload.aliyun._cleared) {
             payload.aliyun._clear_secret = true
           } else if (config.value?.dns?.aliyun?.has_secret) {
-            delete payload.aliyun.access_key_secret  // masked, skip
+            delete payload.aliyun.access_key_secret
           }
         }
         delete payload.aliyun._cleared
@@ -111,7 +119,7 @@ export const useSettingsStore = defineStore('settings', () => {
           if (payload.email._cleared) {
             payload.email._clear_password = true
           } else if (config.value?.notify?.email?.has_password) {
-            delete payload.email.password  // masked, skip
+            delete payload.email.password
           }
         }
         delete payload.email._cleared
@@ -122,7 +130,7 @@ export const useSettingsStore = defineStore('settings', () => {
           if (payload._cleared) {
             payload._clear_secret = true
           } else if (config.value?.qqbot?.has_secret) {
-            delete payload.app_secret  // masked, skip
+            delete payload.app_secret
           }
         }
         delete payload._cleared
@@ -133,16 +141,18 @@ export const useSettingsStore = defineStore('settings', () => {
           if (payload.mysql._cleared) {
             payload.mysql._clear_password = true
           } else if (config.value?.database?.mysql?.has_password) {
-            delete payload.mysql.password  // masked, skip
+            delete payload.mysql.password
           }
         }
         delete payload.mysql._cleared
         delete payload.mysql.has_password
       }
 
-      const res = await api.put('/api/config/' + section, payload)
+      const res = await api.put<ApiResponse<any>>('/api/config/' + section, payload)
       if (res.data.code === 200) {
-        config.value[section] = JSON.parse(JSON.stringify(payload))
+        if (config.value) {
+          config.value[section] = JSON.parse(JSON.stringify(payload))
+        }
         dirtySections.delete(section)
         return { ok: true, data: res.data.data }
       }
@@ -156,11 +166,11 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   }
 
-  async function testProvider(key) {
+  async function testProvider(key: string): Promise<TestResult> {
     if (!localValues.ai?.[key]) return { ok: false, error: '无配置' }
     try {
-      const res = await api.post('/api/config/ai/test', { [key]: localValues.ai[key] })
-      const tests = res.data?.data?.tests || res.data?.tests || {}
+      const res = await api.post<ApiResponse<any>>('/api/config/ai/test', { [key]: localValues.ai[key] })
+      const tests = res.data?.data?.tests || {}
       const t = tests[key]
       testResults[key] = t ? { ok: t.enabled, error: t.error || '' } : { ok: false, error: '无响应' }
       return testResults[key]
@@ -170,16 +180,16 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   }
 
-  async function saveAll() {
+  async function saveAll(): Promise<SaveResult[]> {
     const sections = [...dirtySections]
-    const results = []
+    const results: SaveResult[] = []
     for (const s of sections) {
       results.push(await saveSection(s))
     }
     return results
   }
 
-  function resetSection(section) {
+  function resetSection(section: string): void {
     if (config.value?.[section]) {
       localValues[section] = { ...config.value[section] }
     }

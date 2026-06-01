@@ -97,7 +97,8 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
+// @ts-nocheck
 import { ref, reactive, onMounted, computed } from 'vue'
 import api from '../services/api'
 import { useToast } from '../composables/useToast.js'

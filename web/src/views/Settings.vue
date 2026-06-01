@@ -172,7 +172,8 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
+// @ts-nocheck
 import { ref, reactive, computed, onMounted } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 import api from '../services/api'

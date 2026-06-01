@@ -1,6 +1,6 @@
-﻿import { createApp } from 'vue'
+import { createApp } from 'vue'
 import { createPinia } from 'pinia'
-import { createRouter, createWebHashHistory } from 'vue-router'
+import { createRouter, createWebHashHistory, Router } from 'vue-router'
 import ArcoVue from '@arco-design/web-vue'
 import '@arco-design/web-vue/dist/arco.css'
 import './styles/arco.css'
@@ -9,8 +9,9 @@ import './styles/base.css'
 import './styles/dark.css'
 import App from './App.vue'
 import { useThemeStore } from './stores/theme'
+import type { RouteRecordRaw } from 'vue-router'
 
-const routes = [
+const routes: RouteRecordRaw[] = [
   { path: '/', name: 'dashboard', component: () => import('./views/Dashboard.vue'), meta: { requiresAuth: true } },
   { path: '/domains', name: 'domains', component: () => import('./views/Domains.vue'), meta: { requiresAuth: true } },
   { path: '/files', name: 'files', component: () => import('./views/Files.vue'), meta: { requiresAuth: true } },
@@ -25,7 +26,7 @@ const routes = [
   { path: '/login', name: 'login', component: () => import('./views/Login.vue') },
 ]
 
-const router = createRouter({ history: createWebHashHistory(), routes })
+const router: Router = createRouter({ history: createWebHashHistory(), routes })
 
 router.beforeEach((to, from, next) => {
   const token = localStorage.getItem('token')

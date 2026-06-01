@@ -96,7 +96,8 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
+// @ts-nocheck
 import { ref, reactive, computed, watch, nextTick, onBeforeUnmount } from 'vue'
 import api from '../services/api'
 import ConfirmDialog from '../components/ui/ConfirmDialog.vue'

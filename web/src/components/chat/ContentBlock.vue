@@ -5,7 +5,8 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
+// @ts-nocheck
 import { computed } from 'vue'
 import { renderMarkdown } from '../../stores/chat'
 

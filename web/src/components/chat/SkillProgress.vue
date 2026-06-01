@@ -10,7 +10,8 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
+// @ts-nocheck
 import { renderMarkdown } from '../../stores/chat'
 
 defineProps({

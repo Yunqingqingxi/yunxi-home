@@ -54,7 +54,8 @@
   </Transition>
 </template>
 
-<script setup>
+<script setup lang="ts">
+// @ts-nocheck
 import { ref, reactive, watch, onUnmounted, computed } from 'vue'
 
 const props = defineProps({

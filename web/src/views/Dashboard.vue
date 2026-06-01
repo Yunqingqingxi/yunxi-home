@@ -127,7 +127,8 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
+// @ts-nocheck
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { Doughnut, Bar } from 'vue-chartjs'
 import { Chart as ChartJS, ArcElement, BarElement, CategoryScale, LinearScale, Filler, Tooltip, Legend } from 'chart.js'

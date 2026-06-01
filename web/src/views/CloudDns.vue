@@ -66,7 +66,8 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
+// @ts-nocheck
 import { ref, computed, onMounted } from 'vue'
 import api from '../services/api'
 import PageHeader from '../components/ui/PageHeader.vue'

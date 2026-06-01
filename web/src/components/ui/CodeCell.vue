@@ -2,6 +2,9 @@
   <code class="cell-code"><slot /></code>
 </template>
 
+<script setup lang="ts">
+</script>
+
 <style scoped>
 .cell-code {
   font-family: var(--font-mono);

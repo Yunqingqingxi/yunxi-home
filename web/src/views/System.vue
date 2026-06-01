@@ -69,7 +69,8 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
+// @ts-nocheck
 import { ref, onMounted } from 'vue'
 import { Message } from '@arco-design/web-vue'
 import api from '../services/api'

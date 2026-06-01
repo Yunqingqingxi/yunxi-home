@@ -192,7 +192,8 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
+// @ts-nocheck
 import { ref, computed, reactive, onMounted } from 'vue'
 import api from '../services/api'
 import { useUploadStore } from '../stores/upload'

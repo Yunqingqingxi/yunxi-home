@@ -24,7 +24,8 @@
   </Transition>
 </template>
 
-<script setup>
+<script setup lang="ts">
+// @ts-nocheck
 import { ref, watch, nextTick } from 'vue'
 
 const props = defineProps({
