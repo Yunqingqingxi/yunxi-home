@@ -1,0 +1,29 @@
+[Unit]
+Description=Yunxi Home - Dynamic DNS Updater
+Documentation=https://github.com/yxd/yunxi-home
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=yunxi
+Group=yunxi
+WorkingDirectory=/opt/yunxi-home
+ExecStart=/opt/yunxi-home/yunxi-home
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=10
+LimitNOFILE=65536
+
+# 安全加固（yunxi 用户拥有提升的操作权限）
+NoNewPrivileges=no
+PrivateTmp=yes
+ProtectSystem=no
+ProtectHome=no
+ReadWritePaths=/opt/yunxi-home
+
+# 敏感信息通过环境变量文件注入
+EnvironmentFile=-/opt/yunxi-home/.env
+
+[Install]
+WantedBy=multi-user.target

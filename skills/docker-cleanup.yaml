@@ -1,0 +1,15 @@
+name: docker-cleanup
+description: 清理未使用的 Docker 镜像、容器和卷，释放磁盘空间
+category: ops
+risk: mutation
+steps:
+  - id: 1
+    tool: docker_list_containers
+    args: {}
+    purpose: 列出所有容器（含已停止的）
+  - id: 2
+    tool: run_command
+    args:
+      command: "docker system prune -af --volumes 2>&1 || echo 'Docker cleanup skipped'"
+    depends: [1]
+    purpose: 清理未使用的 Docker 资源

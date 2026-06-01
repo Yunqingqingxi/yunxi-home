@@ -1,0 +1,109 @@
+﻿# =============================================================================
+# Authelia 配置文件 - Yunxi Home 安全认证
+# =============================================================================
+# 参考: https://www.authelia.com/configuration/prologue/introduction/
+# =============================================================================
+
+theme: dark
+log:
+  level: info
+
+# JWT 密钥通过 Docker secret 注入
+identity_validation:
+  reset_password:
+    jwt_secret: ${AUTHELIA_JWT_SECRET}
+
+# 认证后端 - 使用文件存储用户
+authentication_backend:
+  file:
+    path: /config/users.yml
+    password:
+      algorithm: argon2id
+      iterations: 3
+      salt_length: 16
+      key_length: 32
+      memory: 1024
+      parallelism: 8
+
+# 访问控制 - 子域名策略
+access_control:
+  default_policy: deny
+  
+  rules:
+    # NPM 管理界面 - 仅内网
+    - domain: "admin.{{DOMAIN}}"
+      policy: deny
+      networks:
+        - 192.168.0.0/16
+        - 172.25.0.0/16
+        - 10.0.0.0/8
+
+    # AI 对话 - 需要认证
+    - domain: "ai.{{DOMAIN}}"
+      policy: one_factor
+
+    # 私有云盘 - 需要认证
+    - domain: "cloud.{{DOMAIN}}"
+      policy: one_factor
+
+    # 照片 - 需要认证
+    - domain: "photo.{{DOMAIN}}"
+      policy: one_factor
+
+    # 影音 - 需要认证
+    - domain: "media.{{DOMAIN}}"
+      policy: one_factor
+
+    # 下载 - 需要认证
+    - domain: "dl.{{DOMAIN}}"
+      policy: one_factor
+
+    # 运维面板 - 需要双因素认证
+    - domain: "admin.{{DOMAIN}}"
+      policy: two_factor
+
+    # 管理 API - 需要双因素认证
+    - domain: "api.{{DOMAIN}}"
+      policy: two_factor
+      resources:
+        - path: "/api/config"
+        - path: "/api/system"
+
+    # 中枢 API 通用访问 - 需要认证
+    - domain: "api.{{DOMAIN}}"
+      policy: one_factor
+
+# 会话配置
+session:
+  name: yunxi_session
+  domain: "{{DOMAIN}}"
+  secret: ${AUTHELIA_STORAGE_ENCRYPTION_KEY}
+  expiration: 24h
+  inactivity: 4h
+  remember_me: 30d
+
+# 存储 - 使用本地 SQLite
+storage:
+  local:
+    path: /config/db.sqlite3
+
+# 通知 - 可选的邮件提醒
+notifier:
+  filesystem:
+    filename: /config/notifications.txt
+
+# 速率限制
+regulation:
+  max_retries: 5
+  find_time: 2m
+  ban_time: 5m
+
+# Nginx 代理头部传递
+server:
+  endpoints:
+    authz:
+      forward-auth:
+        implementation: ForwardAuth
+        authn_strategies:
+          - HeaderProxy
+          - CookieSession

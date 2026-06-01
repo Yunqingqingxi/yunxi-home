@@ -1,0 +1,213 @@
+/* ============================================
+   Design Tokens v6 — Glassmorphism
+   Floating glass console dashboard.
+   ============================================ */
+
+:root {
+  /* ── Brand Palette (cyan, matches logo: #0e7490 → #06b6d4) ── */
+  --brand-50:  #ecfeff;
+  --brand-100: #cffafe;
+  --brand-200: #a5f3fc;
+  --brand-300: #67e8f9;
+  --brand-400: #22d3ee;
+  --brand-500: #06b6d4;
+  --brand-600: #0891b2;
+  --brand-700: #0e7490;
+  --brand-800: #155e75;
+  --brand-900: #164e63;
+
+  /* ── Section Accents ── */
+  --accent-dashboard: #06b6d4;
+  --accent-files:     #10b981;
+  --accent-domains:   #6366f1;
+  --accent-history:   #f59e0b;
+  --accent-system:    #ef4444;
+  --accent-terminal:  #64748b;
+  --accent-settings:  #8b5cf6;
+  --accent-chat:      #a78bfa;
+
+  /* ── Surfaces (translucent for glass) ── */
+  --surface-page:     #e8f0f8;
+  --surface-card:     rgba(255,255,255,0.45);
+  --surface-hover:    rgba(255,255,255,0.35);
+  --surface-active:   rgba(255,255,255,0.50);
+  --surface-input:    rgba(255,255,255,0.40);
+  --surface-sidebar:  rgba(255,255,255,0.55);
+  --surface-raised:   rgba(255,255,255,0.65);
+  --surface-modal:    rgba(255,255,255,0.82);
+  --surface-tooltip:  rgba(30,41,59,0.90);
+
+  /* ── Glass Tokens ── */
+  --glass-bg-card:      rgba(255,255,255,0.45);
+  --glass-bg-nav:       rgba(255,255,255,0.28);
+  --glass-bg-elevated:  rgba(255,255,255,0.75);
+  --glass-bg-widget:    rgba(255,255,255,0.55);
+  --glass-border:       rgba(255,255,255,0.25);
+  --glass-border-strong: rgba(255,255,255,0.35);
+  --glass-highlight:    rgba(255,255,255,0.20);
+  --glass-blur-card:    16px;
+  --glass-blur-nav:     28px;
+  --glass-blur-elevated: 24px;
+  --glass-shadow:       0 1px 0 rgba(255,255,255,0.15) inset, 0 4px 20px rgba(0,0,0,0.06);
+  --glass-shadow-nav:   0 1px 0 rgba(255,255,255,0.35) inset, 0 8px 40px rgba(0,0,0,0.10);
+  --glass-shadow-elevated: 0 1px 0 rgba(255,255,255,0.22) inset, 0 8px 32px rgba(0,0,0,0.10);
+
+  /* ── Borders ── */
+  --border-default: rgba(0,0,0,0.06);
+  --border-subtle:  rgba(0,0,0,0.04);
+  --border-hr:      rgba(0,0,0,0.06);
+  --border-focus:   #06b6d4;
+  --border-strong:  rgba(0,0,0,0.10);
+
+  /* ── Text ── */
+  --font-sans: "Geist", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+  --font-mono: "Geist Mono", "Cascadia Code", "Fira Code", "JetBrains Mono", Consolas, monospace;
+
+  --text-2xs: 10px;
+  --text-xs:  11px;
+  --text-sm:  12.5px;
+  --text-base: 13.5px;
+  --text-md:  15px;
+  --text-lg:  17px;
+  --text-xl:  20px;
+  --text-2xl: 26px;
+  --text-3xl: 32px;
+
+  --weight-normal:   400;
+  --weight-medium:   500;
+  --weight-semibold: 600;
+  --weight-bold:     700;
+
+  --text-primary:   #0f172a;
+  --text-secondary: #475569;
+  --text-muted:     #94a3b8;
+  --text-inverse:   #ffffff;
+  --text-link:      #0891b2;
+
+  /* ── Colors ── */
+  --color-success:  #16a34a;
+  --color-danger:   #dc2626;
+  --color-warning:  #d97706;
+  --color-info:     #06b6d4;
+
+  /* ── Shadows ── */
+  --shadow-none:  none;
+  --shadow-xs:    0 1px 2px rgba(0,0,0,0.04);
+  --shadow-sm:    0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md:    0 4px 6px rgba(0,0,0,0.04), 0 2px 4px rgba(0,0,0,0.04);
+  --shadow-lg:    0 10px 15px rgba(0,0,0,0.06), 0 4px 6px rgba(0,0,0,0.04);
+  --shadow-xl:    0 20px 25px rgba(0,0,0,0.08), 0 8px 10px rgba(0,0,0,0.04);
+  --shadow-modal: 0 25px 50px rgba(0,0,0,0.12);
+
+  /* ── Radii ── */
+  --radius-none: 0;
+  --radius-xs:   4px;
+  --radius-sm:   6px;
+  --radius-md:   8px;
+  --radius-lg:   12px;
+  --radius-xl:   16px;
+  --radius-2xl:  20px;
+
+  /* ── Spacing ── */
+  --space-0:  0;
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  20px;
+  --space-6:  24px;
+  --space-8:  32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  /* ── Gradients ── */
+  --gradient-brand: linear-gradient(135deg, #0e7490, #06b6d4);
+  --gradient-brand-hover: linear-gradient(135deg, #155e75, #0891b2);
+
+  /* ── Tags / Badges ── */
+  --tag-success-bg:     #dcfce7;
+  --tag-success-border: #bbf7d0;
+  --tag-success-text:   #15803d;
+  --tag-danger-bg:      #fee2e2;
+  --tag-danger-border:  #fecaca;
+  --tag-danger-text:    #b91c1c;
+  --tag-warning-bg:     #fef3c7;
+  --tag-warning-border: #fde68a;
+  --tag-warning-text:   #a16207;
+  --tag-info-bg:        #cffafe;
+  --tag-info-border:    #a5f3fc;
+  --tag-info-text:      #0e7490;
+
+  /* ── Code ── */
+  --code-bg:    rgba(6,182,212,0.10);
+  --code-color: #0e7490;
+  --code-block-bg:    #1e293b;
+  --code-block-color: #e2e8f0;
+
+  /* ── Chat / AI ── */
+  --thinking-color:   #6366f1;
+  --thinking-bg:      #eef2ff;
+  --thinking-border:  #c7d2fe;
+  --thinking-text:    #4338ca;
+  --tool-tag-bg:      #dcfce7;
+  --tool-tag-border:  #bbf7d0;
+  --tool-tag-color:   #15803d;
+  --tool-bg:          #f0fdf4;
+  --tool-border:      #bbf7d0;
+  --tool-icon-done:   #16a34a;
+  --blockquote-border: #06b6d4;
+  --blockquote-bg:    #ecfeff;
+
+  /* ── Focus ── */
+  --focus-ring: rgba(6,182,212,0.25);
+
+  /* ── Progress ── */
+  --bg-progress-track: rgba(0,0,0,0.06);
+
+  /* ── Easing ── */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out-back: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ease-in-out:   cubic-bezier(0.4, 0, 0.2, 1);
+  --duration-fast:   120ms;
+  --duration-normal: 200ms;
+  --duration-slow:   350ms;
+
+  /* ── Empty state ── */
+  --empty-icon-color: #94a3b8;
+  --empty-text-color: #94a3b8;
+
+  /* ── Skeleton ── */
+  --skeleton-base:  rgba(0,0,0,0.06);
+  --skeleton-shine: rgba(0,0,0,0.04);
+
+  /* ── Text-on-brand ── */
+  --text-on-brand: #ffffff;
+
+  /* ── Alias mappings ── */
+  --gradient-brand-btn: var(--gradient-brand);
+  --gradient-brand-btn-hover: var(--gradient-brand-hover);
+  --thinking-border-streaming: var(--thinking-border);
+  --tool-border-pending: var(--tool-border);
+  --tool-block-bg-streaming: var(--tool-bg);
+  --ease-in-expo: var(--ease-in-out);
+
+  /* ── Alert ── */
+  --alert-error-bg:     #fef2f2;
+  --alert-error-border: #fecaca;
+  --alert-success-bg:   #f0fdf4;
+  --alert-success-border: #bbf7d0;
+}
+
+/* ── Mobile overrides ── */
+@media (max-width: 767px) {
+  :root {
+    --radius-md: 6px;
+    --radius-lg: 10px;
+    --radius-xl: 12px;
+    --space-3: 10px;
+    --space-4: 12px;
+    --space-5: 14px;
+    --space-6: 18px;
+    --space-8: 24px;
+  }
+}

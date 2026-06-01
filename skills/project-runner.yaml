@@ -1,0 +1,29 @@
+name: project-runner
+description: 项目运行与部署全流程。包含环境检查、构件探测、编译构建、Docker部署和错误恢复。
+category: ops
+risk: mutation
+steps:
+  - id: 1
+    tool: run_command
+    args:
+      command: "find . -type f -executable -not -name '*.sh' -not -name '*.py' 2>/dev/null | head -5 || echo 'no_executables'"
+      timeout: 10
+    purpose: 扫描项目目录下预编译的二进制文件
+  - id: 2
+    tool: run_command
+    args:
+      command: "ls -la release/ bin/ build/ out/ 2>/dev/null || echo 'no_build_dirs'"
+      timeout: 5
+    purpose: 检查常见构建输出目录
+  - id: 3
+    tool: run_command
+    args:
+      command: "docker version --format '{{.Server.Version}}' 2>/dev/null || echo 'docker_unavailable'"
+      timeout: 10
+    purpose: 检查 Docker 可用性
+  - id: 4
+    tool: run_command
+    args:
+      command: "touch /tmp/test_write 2>/dev/null && rm /tmp/test_write && echo 'writable' || echo 'readonly'"
+      timeout: 5
+    purpose: 验证文件系统写入权限

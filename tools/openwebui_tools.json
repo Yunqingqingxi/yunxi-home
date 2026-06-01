@@ -1,0 +1,182 @@
+﻿{
+  "tools": [
+    {
+      "name": "nas_list_files",
+      "description": "浏览私有云盘目录。列出指定路径下的文件和文件夹。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string", "description": "目录路径，例如 / 或 /Documents" }
+        },
+        "required": ["path"]
+      }
+    },
+    {
+      "name": "nas_search",
+      "description": "在私有云盘中搜索文件。支持文件名模糊匹配。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string", "description": "搜索关键词" },
+          "path": { "type": "string", "description": "限定搜索路径，默认根目录" }
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "nas_share",
+      "description": "生成文件或文件夹的外链分享。返回可访问的分享链接。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "file_path": { "type": "string", "description": "文件完整路径" },
+          "expire_days": { "type": "integer", "description": "过期天数，0 表示永不过期", "default": 7 },
+          "password": { "type": "string", "description": "访问密码，留空则无需密码" }
+        },
+        "required": ["file_path"]
+      }
+    },
+    {
+      "name": "aria2_add_uri",
+      "description": "添加下载任务到 Aria2。支持 HTTP、BT 磁力链接等。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "uri": { "type": "string", "description": "下载链接或磁力链接" },
+          "save_path": { "type": "string", "description": "保存目录，默认 /downloads" }
+        },
+        "required": ["uri"]
+      }
+    },
+    {
+      "name": "aria2_list_active",
+      "description": "查看 Aria2 当前正在下载的任务列表。返回任务名称、进度、速度等。",
+      "parameters": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "aria2_pause_all",
+      "description": "暂停 Aria2 所有正在下载的任务。",
+      "parameters": { "type": "object", "properties": {} }
+    },
+    {
+      "name": "aria2_resume_all",
+      "description": "恢复 Aria2 所有已暂停的下载任务。",
+      "parameters": { "type": "object", "properties": {} }
+    },
+    {
+      "name": "jellyfin_search",
+      "description": "在 Jellyfin 媒体库中搜索影片、电视剧或音乐。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "term": { "type": "string", "description": "搜索关键词" },
+          "media_type": { "type": "string", "enum": ["Movie", "Series", "MusicAlbum", "Audio"], "description": "媒体类型" }
+        },
+        "required": ["term"]
+      }
+    },
+    {
+      "name": "jellyfin_scan_library",
+      "description": "触发 Jellyfin 媒体库扫描，识别新添加的媒体文件。",
+      "parameters": { "type": "object", "properties": {} }
+    },
+    {
+      "name": "vpn_add_client",
+      "description": "为 WireGuard VPN 添加新的客户端设备，返回客户端配置文件。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string", "description": "设备名称，例如 phone、laptop" }
+        },
+        "required": ["name"]
+      }
+    },
+    {
+      "name": "vpn_list_clients",
+      "description": "查看 WireGuard VPN 所有已连接的设备列表。",
+      "parameters": { "type": "object", "properties": {} }
+    },
+    {
+      "name": "ha_get_state",
+      "description": "获取 Home Assistant 中指定设备或传感器的当前状态。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entity_id": { "type": "string", "description": "实体 ID，例如 light.living_room 或 sensor.temperature" }
+        },
+        "required": ["entity_id"]
+      }
+    },
+    {
+      "name": "ha_control",
+      "description": "控制 Home Assistant 设备（开关灯、调亮度、启动场景等）。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "entity_id": { "type": "string", "description": "实体 ID" },
+          "action": { "type": "string", "enum": ["turn_on", "turn_off", "toggle"], "description": "操作" },
+          "brightness": { "type": "integer", "description": "亮度 0-255（仅灯光）" }
+        },
+        "required": ["entity_id", "action"]
+      }
+    },
+    {
+      "name": "ha_run_scene",
+      "description": "启动 Home Assistant 场景（例如离家模式、观影模式等）。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "scene_name": { "type": "string", "description": "场景名称" }
+        },
+        "required": ["scene_name"]
+      }
+    },
+    {
+      "name": "system_status",
+      "description": "获取服务器系统状态：CPU 使用率、内存使用率、磁盘使用率、运行时间等。",
+      "parameters": { "type": "object", "properties": {} }
+    },
+    {
+      "name": "container_restart",
+      "description": "重启指定的 Docker 容器。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "container_name": { "type": "string", "description": "容器名称，例如 nextcloud、jellyfin" }
+        },
+        "required": ["container_name"]
+      }
+    },
+    {
+      "name": "container_status",
+      "description": "查看所有 Docker 容器的运行状态。返回容器名称、状态、端口等信息。",
+      "parameters": { "type": "object", "properties": {} }
+    },
+    {
+      "name": "send_notification",
+      "description": "通过 Apprise 发送通知到手机或其他设备（微信、Telegram 等）。",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string", "description": "通知标题" },
+          "message": { "type": "string", "description": "通知正文" },
+          "target": { "type": "string", "description": "通知目标，默认为 all" }
+        },
+        "required": ["title", "message"]
+      }
+    },
+    {
+      "name": "dns_list_domains",
+      "description": "查询阿里云 DNS 上配置的所有域名。",
+      "parameters": { "type": "object", "properties": {} }
+    },
+    {
+      "name": "dns_trigger_update",
+      "description": "手动触发一次 DDNS IP 检测和更新。",
+      "parameters": { "type": "object", "properties": {} }
+    }
+  ]
+}

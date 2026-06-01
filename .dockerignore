@@ -1,0 +1,35 @@
+﻿# build artifacts
+/build/
+/internal/web/static/
+
+# data and logs
+/data/
+/log/
+/web/log/
+
+# dependencies
+/web/node_modules/
+
+# git
+.git/
+.gitignore
+
+# docs - large skill files not needed for build
+/docs/skills/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# env
+.env
+.env.local
+
+# CI
+.github/

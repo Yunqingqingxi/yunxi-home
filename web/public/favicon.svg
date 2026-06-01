@@ -1,0 +1,23 @@
+﻿<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <defs>
+    <linearGradient id="g" x1="2" y1="2" x2="30" y2="30" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0e7490"/>
+      <stop offset="100%" stop-color="#06b6d4"/>
+    </linearGradient>
+  </defs>
+  <!-- Cloud: 4 smooth bumps -->
+  <path d="M5 24
+    C1 24 1 18 4 16
+    C2 11 6 7 12 8
+    C12 2 22 2 23 7
+    C28 3 32 8 31 13
+    C34 12 34 19 30 23
+    C30 26 27 27 24 27
+    L7 27
+    C3 27 3 26 5 24Z"
+    fill="url(#g)"/>
+  <!-- House -->
+  <polygon points="11,18 16,13 21,18" fill="#ecfeff"/>
+  <rect x="12.5" y="18" width="7" height="6" rx="0.5" fill="#ecfeff"/>
+  <rect x="14.5" y="20.5" width="3" height="3.5" rx="1" fill="url(#g)"/>
+</svg>

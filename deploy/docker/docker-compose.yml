@@ -1,0 +1,412 @@
+# =============================================================================
+# Yunxi Home - 全栈家庭服务器 Docker Compose 配置
+# =============================================================================
+# 架构概览:
+#   反向代理层: Nginx Proxy Manager (SSL, 子域名路由, Authelia 认证)
+#   认证层:     Authelia (SSO, 2FA)
+#   存储层:     Nextcloud (私有云盘) + Immich (照片备份)
+#   媒体层:     Jellyfin (影音中心) + Aria2 (离线下载)
+#   远控层:     RustDesk (远程桌面) + WireGuard (VPN)
+#   智能家居:   Home Assistant
+#   运维面板:   Portainer
+#   消息推送:   Apprise API
+#   AI 层:      Ollama + Open WebUI + FileBrowser 沙箱
+#   中枢 API:   yunxi-home (DDNS + 系统监控 + 工具注册)
+# =============================================================================
+
+version: "3.8"
+
+networks:
+  internal:
+    name: yunxi_internal
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.25.0.0/16
+
+  exposed:
+    name: yunxi_exposed
+    driver: bridge
+
+services:
+  # =========================================================================
+  # 反向代理与 SSL - Nginx Proxy Manager
+  # =========================================================================
+  nginx-proxy:
+    image: jc21/nginx-proxy-manager:latest
+    container_name: nginx-proxy
+    restart: unless-stopped
+    networks:
+      - internal
+      - exposed
+    ports:
+      - "80:80"
+      - "443:443"
+      - "81:81"          # NPM Web 管理界面
+    volumes:
+      - ./data/npm/data:/data
+      - ./data/npm/letsencrypt:/etc/letsencrypt
+    environment:
+      - DISABLE_IPV6=true
+
+  # =========================================================================
+  # 身份认证 - Authelia
+  # =========================================================================
+  authelia:
+    image: authelia/authelia:latest
+    container_name: authelia
+    restart: unless-stopped
+    networks:
+      - internal
+    volumes:
+      - ./configs/authelia:/config
+    environment:
+      - AUTHELIA_JWT_SECRET_FILE=/run/secrets/authelia_jwt
+      - AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE=/run/secrets/authelia_storage
+    secrets:
+      - authelia_jwt
+      - authelia_storage
+
+  # =========================================================================
+  # 私有云盘 - Nextcloud
+  # =========================================================================
+  nextcloud:
+    image: nextcloud:stable
+    container_name: nextcloud
+    restart: unless-stopped
+    networks:
+      - internal
+    volumes:
+      - ./data/nextcloud/html:/var/www/html
+      - ./data/nextcloud/data:/var/www/html/data
+      - ./data/nextcloud/config:/var/www/html/config
+      - ${NAS_STORAGE_PATH:-/mnt/nas}:/mnt/nas:ro
+    environment:
+      - MYSQL_HOST=nextcloud-db
+      - MYSQL_DATABASE=nextcloud
+      - MYSQL_USER=nextcloud
+      - MYSQL_PASSWORD=${NEXTCLOUD_DB_PASSWORD:-changeme}
+      - NEXTCLOUD_ADMIN_USER=${NEXTCLOUD_ADMIN_USER:-admin}
+      - NEXTCLOUD_ADMIN_PASSWORD=${NEXTCLOUD_ADMIN_PASSWORD:-changeme}
+      - OVERWRITEPROTOCOL=https
+      - TRUSTED_PROXIES=172.25.0.0/16
+    depends_on:
+      - nextcloud-db
+
+  nextcloud-db:
+    image: mariadb:10.11
+    container_name: nextcloud-db
+    restart: unless-stopped
+    networks:
+      - internal
+    volumes:
+      - ./data/nextcloud/db:/var/lib/mysql
+    environment:
+      - MYSQL_ROOT_PASSWORD=${NEXTCLOUD_DB_ROOT_PASSWORD:-changeme}
+      - MYSQL_DATABASE=nextcloud
+      - MYSQL_USER=nextcloud
+      - MYSQL_PASSWORD=${NEXTCLOUD_DB_PASSWORD:-changeme}
+
+  # =========================================================================
+  # 照片备份管理 - Immich
+  # =========================================================================
+  immich-server:
+    image: ghcr.io/immich-app/immich-server:release
+    container_name: immich-server
+    restart: unless-stopped
+    networks:
+      - internal
+    volumes:
+      - ${PHOTO_PATH:-./data/immich/photos}:/usr/src/app/upload
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      - DB_HOSTNAME=immich-db
+      - DB_USERNAME=postgres
+      - DB_PASSWORD=${IMMICH_DB_PASSWORD:-changeme}
+      - DB_DATABASE_NAME=immich
+      - REDIS_HOSTNAME=immich-redis
+    depends_on:
+      - immich-db
+      - immich-redis
+
+  immich-machine-learning:
+    image: ghcr.io/immich-app/immich-machine-learning:release
+    container_name: immich-ml
+    restart: unless-stopped
+    networks:
+      - internal
+    volumes:
+      - ./data/immich/model-cache:/cache
+
+  immich-db:
+    image: tensorchord/pgvecto-rs:pg14-v0.2.0
+    container_name: immich-db
+    restart: unless-stopped
+    networks:
+      - internal
+    volumes:
+      - ./data/immich/db:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_PASSWORD=${IMMICH_DB_PASSWORD:-changeme}
+      - POSTGRES_USER=postgres
+      - POSTGRES_DB=immich
+
+  immich-redis:
+    image: redis:7-alpine
+    container_name: immich-redis
+    restart: unless-stopped
+    networks:
+      - internal
+
+  # =========================================================================
+  # 影音中心 - Jellyfin
+  # =========================================================================
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    container_name: jellyfin
+    restart: unless-stopped
+    networks:
+      - internal
+    volumes:
+      - ./data/jellyfin/config:/config
+      - ./data/jellyfin/cache:/cache
+      - ${MEDIA_PATH:-/mnt/media}:/media:ro
+    devices:
+      - /dev/dri:/dev/dri    # 硬件编解码 (Intel QuickSync / VAAPI)
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+
+  # =========================================================================
+  # 离线下载 - Aria2 + AriaNg
+  # =========================================================================
+  aria2:
+    image: p3terx/aria2-pro:latest
+    container_name: aria2
+    restart: unless-stopped
+    networks:
+      - internal
+    volumes:
+      - ./data/aria2/config:/config
+      - ${DOWNLOAD_PATH:-/mnt/downloads}:/downloads
+    environment:
+      - RPC_SECRET=${ARIA2_RPC_SECRET:-changeme}
+      - TZ=${TZ:-Asia/Shanghai}
+    ports:
+      - "6800:6800"         # RPC 端口
+      - "6888:6888"         # BT 监听
+      - "6888:6888/udp"
+
+  ariang:
+    image: p3terx/ariang:latest
+    container_name: ariang
+    restart: unless-stopped
+    networks:
+      - internal
+    environment:
+      - ARIA2_RPC_URL=http://aria2:6800/jsonrpc
+      - ARIA2_RPC_SECRET=${ARIA2_RPC_SECRET:-changeme}
+
+  # =========================================================================
+  # VPN 组网 - WireGuard (wg-easy)
+  # =========================================================================
+  wireguard:
+    image: ghcr.io/wg-easy/wg-easy:latest
+    container_name: wireguard
+    restart: unless-stopped
+    networks:
+      - internal
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    sysctls:
+      - net.ipv4.ip_forward=1
+      - net.ipv4.conf.all.src_valid_mark=1
+    ports:
+      - "51820:51820/udp"
+      - "51821:51821"       # Web 管理界面
+    volumes:
+      - ./data/wireguard:/etc/wireguard
+    environment:
+      - WG_HOST=${DOMAIN:-example.com}
+      - PASSWORD=${WG_PASSWORD:-changeme}
+      - WG_DEFAULT_ADDRESS=10.8.0.x
+      - WG_DEFAULT_DNS=223.5.5.5
+      - WG_ALLOWED_IPS=0.0.0.0/0, ::/0
+
+  # =========================================================================
+  # 远程桌面中继 - RustDesk Server
+  # =========================================================================
+  rustdesk-hbbs:
+    image: rustdesk/rustdesk-server:latest
+    container_name: rustdesk-hbbs
+    restart: unless-stopped
+    networks:
+      - internal
+    volumes:
+      - ./data/rustdesk:/root
+    command: hbbs -r ${DOMAIN:-example.com}:21117
+    ports:
+      - "21115:21115"
+      - "21116:21116"
+      - "21116:21116/udp"
+      - "21118:21118"
+
+  rustdesk-hbbr:
+    image: rustdesk/rustdesk-server:latest
+    container_name: rustdesk-hbbr
+    restart: unless-stopped
+    networks:
+      - internal
+    volumes:
+      - ./data/rustdesk:/root
+    command: hbbr
+    ports:
+      - "21117:21117"
+      - "21119:21119"
+
+  # =========================================================================
+  # 智能家居中枢 - Home Assistant
+  # =========================================================================
+  homeassistant:
+    image: ghcr.io/home-assistant/home-assistant:stable
+    container_name: homeassistant
+    restart: unless-stopped
+    networks:
+      - internal
+    volumes:
+      - ./data/homeassistant:/config
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+    privileged: true        # 需要访问 USB 设备 (Zigbee/Z-Wave 等)
+
+  # =========================================================================
+  # 系统运维面板 - Portainer
+  # =========================================================================
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: portainer
+    restart: unless-stopped
+    networks:
+      - internal
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data/portainer:/data
+    command: --http-enabled
+
+  # =========================================================================
+  # 消息推送 - Apprise API
+  # =========================================================================
+  apprise:
+    image: caronc/apprise:latest
+    container_name: apprise
+    restart: unless-stopped
+    networks:
+      - internal
+    volumes:
+      - ./data/apprise/config:/config
+      - ./data/apprise/plugins:/plugins
+
+  # =========================================================================
+  # AI 推理引擎 - Ollama
+  # =========================================================================
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: unless-stopped
+    networks:
+      - internal
+    volumes:
+      - ./data/ollama:/root/.ollama
+    environment:
+      - OLLAMA_KEEP_ALIVE=24h
+      - OLLAMA_HOST=0.0.0.0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # =========================================================================
+  # AI 对话前端 - Open WebUI
+  # =========================================================================
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: open-webui
+    restart: unless-stopped
+    networks:
+      - internal
+    volumes:
+      - ./data/open-webui:/app/backend/data
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - WEBUI_SECRET_KEY=${WEBUI_SECRET_KEY:-changeme}
+    depends_on:
+      - ollama
+
+  # =========================================================================
+  # 任务队列 - Redis
+  # =========================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: yunxi-redis
+    restart: unless-stopped
+    networks:
+      - internal
+    volumes:
+      - ./data/redis:/data
+    command: redis-server --appendonly yes
+
+  # =========================================================================
+  # AI 文件沙箱 - FileBrowser (AI 专用受限文件管理)
+  # =========================================================================
+  # 根目录锁定在 /srv (= /mnt/data/yunxiFiles)，AI 无法访问上层目录
+  # 数据可通过 Nextcloud 外部存储或 Samba 与人类用户互通
+  filebrowser:
+    image: filebrowser/filebrowser:latest
+    container_name: filebrowser-sandbox
+    restart: unless-stopped
+    user: "1000:1000"
+    networks:
+      - internal
+    volumes:
+      - ${SANDBOX_PATH:-/mnt/data/yunxiFiles}:/srv
+      - ./data/filebrowser/database.db:/database.db
+      - ./data/filebrowser/config.json:/.filebrowser.json:ro
+    command: -r /srv -p 8080 -d /database.db
+    environment:
+      - FB_NOAUTH=false
+
+  # =========================================================================
+  # 中枢 API 服务 - Yunxi Home (DDNS + 监控 + 工具注册)
+  # =========================================================================
+  yunxi-home:
+    image: yunxi-home:latest
+    container_name: yunxi-home
+    restart: unless-stopped
+    networks:
+      - internal
+    volumes:
+      - ./configs/yunxi-home:/app/configs:ro
+      - ./data/yunxi-home:/app/data
+      - ./data/yunxi-home/log:/app/log
+      - ${NAS_STORAGE_PATH:-/mnt/nas}:/mnt/nas:ro
+      - ${SANDBOX_PATH:-/mnt/data/yunxiFiles}:/mnt/data/yunxiFiles
+      - /var/run/docker.sock:/var/run/docker.sock   # Docker API 访问
+    environment:
+      - TZ=${TZ:-Asia/Shanghai}
+      - DNS_UPDATER_ALIDNS_ACCESS_KEY_ID=${ALIDNS_KEY_ID}
+      - DNS_UPDATER_ALIDNS_ACCESS_KEY_SECRET=${ALIDNS_KEY_SECRET}
+      - DNS_UPDATER_AUTH_PASSWORD=${YUNXI_ADMIN_PASSWORD:-changeme}
+      - DNS_UPDATER_AUTH_JWT_SECRET=${YUNXI_JWT_SECRET:-changeme}
+      - DNS_UPDATER_ENCRYPTION_KEY=${YUNXI_ENCRYPTION_KEY:-changeme}
+    depends_on:
+      - redis
+
+secrets:
+  authelia_jwt:
+    file: ./secrets/authelia_jwt.txt
+  authelia_storage:
+    file: ./secrets/authelia_storage.txt

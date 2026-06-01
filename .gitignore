@@ -1,0 +1,50 @@
+# ── Build & Release ──
+/build/
+/release/
+/internal/web/static/assets/
+*.exe
+yunxi-home
+yunxi-home-linux
+
+# ── Frontend ──
+/web/node_modules/
+/web/dist/
+
+# ── Data & Logs ──
+/data/
+/log/
+/web/log/
+*.db
+*.db-journal
+*.db-wal
+
+# ── Config (local) ──
+/configs/
+mcp.json
+
+# ── Claude ──
+.claude/
+
+# ── IDE ──
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ── OS ──
+.DS_Store
+Thumbs.db
+
+# ── Temp / Playwright ──
+.playwright*/
+/output/
+
+# ── Environment ──
+.env
+.env.local
+.env.*.local
+
+# ── Coverage ──
+coverage.out
+*.prof

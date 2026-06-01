@@ -1,0 +1,21 @@
+name: healthcheck
+description: 执行系统健康检查，包括状态、资源、网络和日志
+category: ops
+risk: readonly
+steps:
+  - id: 1
+    tool: get_system_status
+    args: {}
+    purpose: 获取系统运行状态和资源使用
+  - id: 2
+    tool: get_network_info
+    args: {}
+    depends: []
+    purpose: 获取网络接口信息
+  - id: 3
+    tool: read_app_log
+    args:
+      lines: 20
+      level: "ERROR"
+    depends: []
+    purpose: 读取最近的错误日志

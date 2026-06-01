@@ -1,0 +1,21 @@
+﻿# =============================================================================
+# Authelia 用户数据库
+# 密码使用 argon2id 哈希: docker run authelia/authelia authelia crypto hash generate argon2 --password 'your-password'
+# =============================================================================
+
+users:
+  admin:
+    disabled: false
+    displayname: "管理员"
+    password: "$argon2id$v=19$m=1024,t=3,p=8$CHANGE_ME"  # 替换为实际哈希
+    email: "admin@example.com"
+    groups:
+      - admin
+
+  family:
+    disabled: false
+    displayname: "家人"
+    password: "$argon2id$v=19$m=1024,t=3,p=8$CHANGE_ME"  # 替换为实际哈希
+    email: "family@example.com"
+    groups:
+      - user
