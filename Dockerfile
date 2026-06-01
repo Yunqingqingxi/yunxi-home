@@ -34,7 +34,7 @@ COPY --from=backend-builder /yunxi-home .
 
 RUN mkdir -p /app/data /app/log
 
-EXPOSE 8080
+EXPOSE 9981
 
 VOLUME ["/app/configs", "/app/data", "/app/log"]
 

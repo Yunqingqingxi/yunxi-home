@@ -11,11 +11,11 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/yxd/yunxi-home/internal/ai"
-	"github.com/yxd/yunxi-home/internal/ai/base"
-	"github.com/yxd/yunxi-home/internal/ai/mcp"
-	"github.com/yxd/yunxi-home/internal/models"
-	"github.com/yxd/yunxi-home/internal/toolreg"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai/base"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai/mcp"
+	"github.com/Yunqingqingxi/yunxi-home/internal/models"
+	"github.com/Yunqingqingxi/yunxi-home/internal/toolreg"
 )
 
 // ChatHandler AI 聊天 Handler

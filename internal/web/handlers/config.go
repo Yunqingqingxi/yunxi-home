@@ -9,10 +9,10 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/yxd/yunxi-home/internal/config"
-	"github.com/yxd/yunxi-home/internal/database"
-	"github.com/yxd/yunxi-home/internal/logger"
-	"github.com/yxd/yunxi-home/internal/notifier"
+	"github.com/Yunqingqingxi/yunxi-home/internal/config"
+	"github.com/Yunqingqingxi/yunxi-home/internal/database"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
+	"github.com/Yunqingqingxi/yunxi-home/internal/notifier"
 )
 
 type ConfigHandler struct {

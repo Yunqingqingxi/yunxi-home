@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"syscall"
 
-	"github.com/yxd/yunxi-home/internal/nas/base"
+	"github.com/Yunqingqingxi/yunxi-home/internal/nas/base"
 )
 
 // GetDiskInfo 获取磁盘使用信息 (Unix)

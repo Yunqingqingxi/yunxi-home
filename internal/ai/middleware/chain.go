@@ -7,8 +7,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/yxd/yunxi-home/internal/ai/base"
-	"github.com/yxd/yunxi-home/internal/ai/register"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai/base"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai/register"
 )
 
 // Chain 工具调用中间件链

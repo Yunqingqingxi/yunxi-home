@@ -6,8 +6,13 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # ── 配置 ────────────────────────────────────────────
-SSH_HOST="yxdthird.top"
-REMOTE_DIR="/opt/yunxi-home"
+SSH_HOST="${YUNXI_SSH_HOST:-}"
+REMOTE_DIR="${YUNXI_REMOTE_DIR:-/opt/yunxi-home}"
+
+if [ -z "${SSH_HOST}" ]; then
+    echo "错误: SSH_HOST 为空。请设置 YUNXI_SSH_HOST 环境变量。"
+    exit 1
+fi
 SERVICE_NAME="yunxi-home"
 KEEP_RELEASES=3
 BINARY="yunxi-home"

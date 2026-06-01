@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yxd/yunxi-home/internal/ai/base"
-	"github.com/yxd/yunxi-home/internal/ai/register"
-	"github.com/yxd/yunxi-home/internal/nas"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai/base"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai/register"
+	"github.com/Yunqingqingxi/yunxi-home/internal/nas"
 )
 
 // RegisterFileTools 注册 NAS 文件管理工具到 AI 注册中心

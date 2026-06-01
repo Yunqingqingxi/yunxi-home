@@ -5,7 +5,7 @@ import (
         "fmt"
         "log/slog"
 
-        "github.com/yxd/yunxi-home/internal/database"
+        "github.com/Yunqingqingxi/yunxi-home/internal/database"
 )
 
 type EncryptedConfigRepo struct {

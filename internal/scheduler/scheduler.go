@@ -9,11 +9,11 @@ import (
 
 	"github.com/robfig/cron/v3"
 
-	"github.com/yxd/yunxi-home/internal/dns"
-	"github.com/yxd/yunxi-home/internal/database"
-	"github.com/yxd/yunxi-home/internal/ipdetect"
-	"github.com/yxd/yunxi-home/internal/models"
-	"github.com/yxd/yunxi-home/internal/notifier"
+	"github.com/Yunqingqingxi/yunxi-home/internal/dns"
+	"github.com/Yunqingqingxi/yunxi-home/internal/database"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ipdetect"
+	"github.com/Yunqingqingxi/yunxi-home/internal/models"
+	"github.com/Yunqingqingxi/yunxi-home/internal/notifier"
 )
 
 // Scheduler DNS 更新调度器

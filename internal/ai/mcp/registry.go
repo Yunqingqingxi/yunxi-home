@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/yxd/yunxi-home/internal/ai/base"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai/base"
 )
 
 // RegisterTools 将 MCP 管理器中所有服务器的工具注册到 AI 工具注册表。

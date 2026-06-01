@@ -1,4 +1,4 @@
-module github.com/yxd/yunxi-home
+module github.com/Yunqingqingxi/yunxi-home
 
 go 1.24.0
 

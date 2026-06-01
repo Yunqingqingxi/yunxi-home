@@ -5,7 +5,7 @@ package local
 import (
 	"io/fs"
 
-	"github.com/yxd/yunxi-home/internal/nas/base"
+	"github.com/Yunqingqingxi/yunxi-home/internal/nas/base"
 )
 
 func fillOwnerGroupFromSys(_ fs.FileInfo, _ *base.FileStat) {

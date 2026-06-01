@@ -2,15 +2,15 @@
 //
 // 消费者只需导入此包即可使用所有通知功能，无需关心底层实现。
 //
-//	import "github.com/yxd/yunxi-home/internal/notifier"
+//	import "github.com/Yunqingqingxi/yunxi-home/internal/notifier"
 //	nm := notifier.NewManager(notifier.NewThrottler())
 //	nm.Register(notifier.NewEmailNotifier(notifier.EmailConfig{...}))
 package notifier
 
 import (
-	"github.com/yxd/yunxi-home/internal/notifier/base"
-	"github.com/yxd/yunxi-home/internal/notifier/email"
-	"github.com/yxd/yunxi-home/internal/notifier/webhook"
+	"github.com/Yunqingqingxi/yunxi-home/internal/notifier/base"
+	"github.com/Yunqingqingxi/yunxi-home/internal/notifier/email"
+	"github.com/Yunqingqingxi/yunxi-home/internal/notifier/webhook"
 )
 
 // ── 类型别名（消费者直接使用 notifier.Notifier, notifier.ChangeEvent 等）─────────

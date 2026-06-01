@@ -2,12 +2,12 @@
 //
 // 消费者只需导入此包即可使用所有数据仓库接口和类型，无需关心底层实现。
 //
-//	import "github.com/yxd/yunxi-home/internal/database"
+//	import "github.com/Yunqingqingxi/yunxi-home/internal/database"
 //	var repo database.DomainRepository = database.NewDomainRepo(db)
 package database
 
 import (
-	"github.com/yxd/yunxi-home/internal/database/base"
+	"github.com/Yunqingqingxi/yunxi-home/internal/database/base"
 )
 
 // ── 基础接口 ─────────────────────────────────────────────────

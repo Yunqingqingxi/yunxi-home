@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yxd/yunxi-home/internal/util/fileio"
+	"github.com/Yunqingqingxi/yunxi-home/internal/util/fileio"
 )
 
 // ── MCP 市场：搜索 + 安装 + mcp.json 管理 ─────────────────────

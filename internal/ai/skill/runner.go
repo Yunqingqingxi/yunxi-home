@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yxd/yunxi-home/internal/ai/base"
-	"github.com/yxd/yunxi-home/internal/ai/register"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai/base"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai/register"
 )
 
 // Runner 执行 Skill 的步骤序列

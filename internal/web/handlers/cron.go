@@ -4,7 +4,7 @@ import (
 	"net/http"
 
 	"github.com/labstack/echo/v4"
-	"github.com/yxd/yunxi-home/internal/ai"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai"
 )
 
 // CronHandler 定时任务 API

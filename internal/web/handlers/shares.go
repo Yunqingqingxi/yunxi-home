@@ -7,8 +7,8 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/yxd/yunxi-home/internal/database"
-	"github.com/yxd/yunxi-home/internal/nas"
+	"github.com/Yunqingqingxi/yunxi-home/internal/database"
+	"github.com/Yunqingqingxi/yunxi-home/internal/nas"
 )
 
 // SharesHandler 分享管理 Handler

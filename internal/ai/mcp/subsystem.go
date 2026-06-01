@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yxd/yunxi-home/internal/util/fileio"
+	"github.com/Yunqingqingxi/yunxi-home/internal/util/fileio"
 )
 
 // ── MCPService / Subsystem ──────────────────────────────────────────

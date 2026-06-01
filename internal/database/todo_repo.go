@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/yxd/yunxi-home/internal/database/base"
+	"github.com/Yunqingqingxi/yunxi-home/internal/database/base"
 )
 
 // Ensure interface compliance at compile time.

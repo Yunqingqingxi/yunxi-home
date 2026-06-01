@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/yxd/yunxi-home/internal/models"
+	"github.com/Yunqingqingxi/yunxi-home/internal/models"
 )
 
 func TestHistoryRepoCreateAndList(t *testing.T) {

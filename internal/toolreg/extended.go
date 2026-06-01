@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"runtime"
 
-	"github.com/yxd/yunxi-home/internal/ai/base"
-	"github.com/yxd/yunxi-home/internal/ai/register"
-	"github.com/yxd/yunxi-home/internal/config"
-	"github.com/yxd/yunxi-home/internal/docker"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai/base"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai/register"
+	"github.com/Yunqingqingxi/yunxi-home/internal/config"
+	"github.com/Yunqingqingxi/yunxi-home/internal/docker"
 )
 
 // RegisterExtended 注册扩展模块的 AI 工具 (NAS, Docker, Sysctl)

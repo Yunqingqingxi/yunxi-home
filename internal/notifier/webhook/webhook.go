@@ -13,7 +13,7 @@ import (
 	"time"
 	"log/slog"
 
-	"github.com/yxd/yunxi-home/internal/notifier/base"
+	"github.com/Yunqingqingxi/yunxi-home/internal/notifier/base"
 )
 
 // Config Webhook 配置

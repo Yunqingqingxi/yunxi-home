@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"time"
 
-	"github.com/yxd/yunxi-home/internal/nas"
+	"github.com/Yunqingqingxi/yunxi-home/internal/nas"
 )
 
 type shareRepo struct {

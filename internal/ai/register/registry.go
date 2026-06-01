@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/yxd/yunxi-home/internal/ai/base"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai/base"
 )
 
 // Registry 工具注册中心

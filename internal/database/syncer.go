@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/yxd/yunxi-home/internal/models"
+	"github.com/Yunqingqingxi/yunxi-home/internal/models"
 )
 
 // SyncJob 同步任务

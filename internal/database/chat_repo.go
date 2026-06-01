@@ -5,7 +5,7 @@ import (
     "fmt"
     "time"
 
-    "github.com/yxd/yunxi-home/internal/models"
+    "github.com/Yunqingqingxi/yunxi-home/internal/models"
 )
 
 // ChatSessionRepo implements ChatSessionRepository against SQLite.

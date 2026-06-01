@@ -2,14 +2,14 @@
 //
 // 消费者只需导入此包即可使用所有 DNS 功能，无需关心底层实现。
 //
-//	import dns "github.com/yxd/yunxi-home/internal/dns"
+//	import dns "github.com/Yunqingqingxi/yunxi-home/internal/dns"
 //	client := dns.NewAliDNS(ak, sk, endpoint, servers)
 //	records, total, _ := client.ListAllRecords(ctx, "example.com", 1, 50)
 package dns
 
 import (
-	"github.com/yxd/yunxi-home/internal/dns/alidns"
-	"github.com/yxd/yunxi-home/internal/dns/base"
+	"github.com/Yunqingqingxi/yunxi-home/internal/dns/alidns"
+	"github.com/Yunqingqingxi/yunxi-home/internal/dns/base"
 )
 
 // ── 类型别名（消费者直接使用 dns.Provider, dns.Record 等）─────────

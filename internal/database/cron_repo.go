@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"time"
 
-	"github.com/yxd/yunxi-home/internal/ai/cron"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai/cron"
 )
 
 // CronTaskRepo SQLite 持久化 cron.Manager 的定时任务

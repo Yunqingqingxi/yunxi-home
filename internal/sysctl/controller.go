@@ -9,7 +9,7 @@ import (
 	"strings"
 	"log/slog"
 
-	"github.com/yxd/yunxi-home/internal/sysctl/base"
+	"github.com/Yunqingqingxi/yunxi-home/internal/sysctl/base"
 )
 
 // systemController 系统控制器实现

@@ -3,7 +3,7 @@ package base
 import (
 	"context"
 
-	"github.com/yxd/yunxi-home/internal/models"
+	"github.com/Yunqingqingxi/yunxi-home/internal/models"
 )
 
 // ChatService defines the AI chat service interface.

@@ -63,6 +63,9 @@ jobs:
       - name: Build frontend
         run: cd web && npm ci && npm run build
 
+      - name: Type-check frontend
+        run: cd web && npx vue-tsc --noEmit
+
       - name: Copy frontend to embed
         run: mkdir -p internal/web/static && cp -r web/dist/* internal/web/static/
 

@@ -1,6 +1,6 @@
 package alidns
 
-import "github.com/yxd/yunxi-home/internal/dns/base"
+import "github.com/Yunqingqingxi/yunxi-home/internal/dns/base"
 
 // ── 阿里云 API 请求/响应类型 ──────────────────────────────
 

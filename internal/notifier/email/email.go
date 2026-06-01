@@ -8,7 +8,7 @@ import (
 	"strings"
 	"log/slog"
 
-	"github.com/yxd/yunxi-home/internal/notifier/base"
+	"github.com/Yunqingqingxi/yunxi-home/internal/notifier/base"
 )
 
 // Config 邮件配置

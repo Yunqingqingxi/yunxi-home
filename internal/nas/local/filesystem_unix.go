@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"syscall"
 
-	"github.com/yxd/yunxi-home/internal/nas/base"
+	"github.com/Yunqingqingxi/yunxi-home/internal/nas/base"
 )
 
 func fillOwnerGroupFromSys(info fs.FileInfo, st *base.FileStat) {

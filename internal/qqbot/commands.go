@@ -6,9 +6,9 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/yxd/yunxi-home/internal/database"
-	"github.com/yxd/yunxi-home/internal/models"
-	"github.com/yxd/yunxi-home/internal/scheduler"
+	"github.com/Yunqingqingxi/yunxi-home/internal/database"
+	"github.com/Yunqingqingxi/yunxi-home/internal/models"
+	"github.com/Yunqingqingxi/yunxi-home/internal/scheduler"
 )
 
 func (b *Bot) RegisterCommands(

@@ -15,8 +15,8 @@ $ErrorActionPreference = "Stop"
 Set-Location "$PSScriptRoot\.."
 
 # ── 配置 ────────────────────────────────────────────
-$SSH_HOST      = "yxdthird.top"
-$REMOTE_DIR    = "/opt/yunxi-home"
+$SSH_HOST      = if ($env:YUNXI_SSH_HOST) { $env:YUNXI_SSH_HOST } else { throw "错误: SSH_HOST 为空。请设置 YUNXI_SSH_HOST 环境变量。" }
+$REMOTE_DIR    = if ($env:YUNXI_REMOTE_DIR) { $env:YUNXI_REMOTE_DIR } else { "/opt/yunxi-home" }
 $SERVICE_NAME  = "yunxi-home"
 $BINARY        = if ($TargetOS -eq "windows") { "yunxi-home.exe" } else { "yunxi-home" }
 $KEEP_RELEASES = 3

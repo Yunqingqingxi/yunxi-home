@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/yxd/yunxi-home/internal/models"
+	"github.com/Yunqingqingxi/yunxi-home/internal/models"
 )
 
 // DomainRepo 域名记录仓库

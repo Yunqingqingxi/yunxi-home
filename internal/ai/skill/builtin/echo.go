@@ -5,7 +5,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/yxd/yunxi-home/internal/ai/skill"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai/skill"
 )
 
 // EchoSkill 回显输入的参数（示例技能）

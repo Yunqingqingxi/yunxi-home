@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yxd/yunxi-home/internal/ai/base"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai/base"
 )
 
 // ── API Types ──────────────────────────────────────────────

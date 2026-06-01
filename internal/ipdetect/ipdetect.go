@@ -2,14 +2,14 @@
 //
 // 消费者只需导入此包即可使用 IP 检测功能，无需关心底层实现。
 //
-//	import "github.com/yxd/yunxi-home/internal/ipdetect"
+//	import "github.com/Yunqingqingxi/yunxi-home/internal/ipdetect"
 //	detector := ipdetect.NewDetector(&ipdetect.DetectorConfig{...})
 //	ip, err := detector.GetCurrentIPv6(ctx)
 package ipdetect
 
 import (
-	"github.com/yxd/yunxi-home/internal/ipdetect/base"
-	"github.com/yxd/yunxi-home/internal/ipdetect/multisource"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ipdetect/base"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ipdetect/multisource"
 )
 
 // ── 类型别名（消费者直接使用 ipdetect.Detector, ipdetect.DetectorConfig 等）─────────

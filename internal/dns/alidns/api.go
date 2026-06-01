@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/yxd/yunxi-home/internal/dns/base"
+	"github.com/Yunqingqingxi/yunxi-home/internal/dns/base"
 )
 
 // ── 记录查询 ────────────────────────────────────────────

@@ -12,7 +12,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/yxd/yunxi-home/internal/toolreg"
+	"github.com/Yunqingqingxi/yunxi-home/internal/toolreg"
 )
 
 // ── 技能市场 ────────────────────────────────────────────────────────

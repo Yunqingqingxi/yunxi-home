@@ -10,7 +10,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/yxd/yunxi-home/internal/dns/base"
+	"github.com/Yunqingqingxi/yunxi-home/internal/dns/base"
 )
 
 // Client 阿里云 DNS 客户端，实现 base.Provider 接口。

@@ -12,7 +12,7 @@ import (
 
 	"github.com/spf13/viper"
 
-	"github.com/yxd/yunxi-home/internal/database"
+	"github.com/Yunqingqingxi/yunxi-home/internal/database"
 )
 
 // Load loads bootstrap config from YAML file + env vars.

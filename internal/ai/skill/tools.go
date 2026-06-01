@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/yxd/yunxi-home/internal/ai/base"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai/base"
 )
 
 // ToolDef 返回 run_skill 工具定义（支持 YAML Manifest + 编程式 Skill）

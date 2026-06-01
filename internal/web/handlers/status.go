@@ -15,11 +15,11 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/yxd/yunxi-home/internal/ai"
-	"github.com/yxd/yunxi-home/internal/ai/mcp"
-	"github.com/yxd/yunxi-home/internal/database"
-	"github.com/yxd/yunxi-home/internal/scheduler"
-	"github.com/yxd/yunxi-home/internal/sysctl"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai/mcp"
+	"github.com/Yunqingqingxi/yunxi-home/internal/database"
+	"github.com/Yunqingqingxi/yunxi-home/internal/scheduler"
+	"github.com/Yunqingqingxi/yunxi-home/internal/sysctl"
 )
 
 // StatusHandler 状态和控制 Handler

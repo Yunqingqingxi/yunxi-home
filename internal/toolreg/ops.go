@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/yxd/yunxi-home/internal/ai/base"
-	"github.com/yxd/yunxi-home/internal/ai/register"
-	"github.com/yxd/yunxi-home/internal/config"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai/base"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai/register"
+	"github.com/Yunqingqingxi/yunxi-home/internal/config"
 )
 
 // RegisterOps 注册运维操作工具 (SSH, 备份, 快照)

@@ -7,8 +7,8 @@ import (
 	"database/sql"
 	"time"
 
-	"github.com/yxd/yunxi-home/internal/models"
-	"github.com/yxd/yunxi-home/internal/nas"
+	"github.com/Yunqingqingxi/yunxi-home/internal/models"
+	"github.com/Yunqingqingxi/yunxi-home/internal/nas"
 )
 
 // Executor 是 Repository 所需的最小数据库操作集合。

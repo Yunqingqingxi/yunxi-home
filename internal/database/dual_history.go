@@ -3,7 +3,7 @@ package database
 import (
 	"context"
 
-	"github.com/yxd/yunxi-home/internal/models"
+	"github.com/Yunqingqingxi/yunxi-home/internal/models"
 )
 
 // DualHistoryRepo 双数据库历史仓库

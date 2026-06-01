@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/yxd/yunxi-home/internal/models"
-	"github.com/yxd/yunxi-home/internal/nas"
+	"github.com/Yunqingqingxi/yunxi-home/internal/models"
+	"github.com/Yunqingqingxi/yunxi-home/internal/nas"
 )
 
 // Migrator copies data between two backends.

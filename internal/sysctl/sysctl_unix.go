@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/yxd/yunxi-home/internal/sysctl/base"
+	"github.com/Yunqingqingxi/yunxi-home/internal/sysctl/base"
 )
 
 func listProcesses(limit int) ([]ProcessInfo, error) {

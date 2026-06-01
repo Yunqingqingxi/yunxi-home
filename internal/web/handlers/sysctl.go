@@ -7,7 +7,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/yxd/yunxi-home/internal/sysctl"
+	"github.com/Yunqingqingxi/yunxi-home/internal/sysctl"
 )
 
 // SysctlHandler 系统控制 Handler

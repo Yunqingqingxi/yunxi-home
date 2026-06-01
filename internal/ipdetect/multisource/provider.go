@@ -12,7 +12,7 @@ import (
 	"time"
 	"log/slog"
 
-	"github.com/yxd/yunxi-home/internal/ipdetect/base"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ipdetect/base"
 )
 
 // Source IP 数据源配置

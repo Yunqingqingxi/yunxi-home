@@ -6,7 +6,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/yxd/yunxi-home/internal/util/errcode"
+	"github.com/Yunqingqingxi/yunxi-home/internal/util/errcode"
 )
 
 // APIResponse 统一 API 响应格式

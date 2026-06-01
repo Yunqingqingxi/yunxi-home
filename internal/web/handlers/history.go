@@ -6,7 +6,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/yxd/yunxi-home/internal/database"
+	"github.com/Yunqingqingxi/yunxi-home/internal/database"
 )
 
 // HistoryHandler 历史记录 Handler

@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/yxd/yunxi-home/internal/ai/base"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai/base"
 )
 
 // ── DenyEngine: 硬边界规则引擎 ──────────────────────────────────

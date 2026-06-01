@@ -11,9 +11,9 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/yxd/yunxi-home/internal/database"
-	"github.com/yxd/yunxi-home/internal/nas"
-	echomw "github.com/yxd/yunxi-home/internal/web/middleware"
+	"github.com/Yunqingqingxi/yunxi-home/internal/database"
+	"github.com/Yunqingqingxi/yunxi-home/internal/nas"
+	echomw "github.com/Yunqingqingxi/yunxi-home/internal/web/middleware"
 )
 
 // FilesHandler 文件管理 Handler

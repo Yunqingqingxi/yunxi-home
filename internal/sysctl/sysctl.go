@@ -2,12 +2,12 @@
 //
 // 消费者只需导入此包即可使用系统控制功能。
 //
-//	import "github.com/yxd/yunxi-home/internal/sysctl"
+//	import "github.com/Yunqingqingxi/yunxi-home/internal/sysctl"
 //	ctl := sysctl.New(true, true)
 //	info, _ := ctl.GetSystemInfo()
 package sysctl
 
-import "github.com/yxd/yunxi-home/internal/sysctl/base"
+import "github.com/Yunqingqingxi/yunxi-home/internal/sysctl/base"
 
 // ── 类型别名 ─────────────────────────────────────────────────
 

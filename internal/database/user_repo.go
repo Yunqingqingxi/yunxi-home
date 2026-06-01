@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/yxd/yunxi-home/internal/models"
+	"github.com/Yunqingqingxi/yunxi-home/internal/models"
 	"golang.org/x/crypto/bcrypt"
 )
 

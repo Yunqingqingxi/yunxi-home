@@ -13,7 +13,7 @@ import (
 
 	"github.com/labstack/echo/v4"
 
-	"github.com/yxd/yunxi-home/internal/ai"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai"
 )
 
 const maxSystemLogLines = 10000 // 单次读取最大行数，防止内存爆炸

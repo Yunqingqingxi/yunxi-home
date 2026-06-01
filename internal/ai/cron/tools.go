@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/yxd/yunxi-home/internal/ai/base"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai/base"
 )
 
 // cronSessionKey 用于在 context 中传递 sessionID

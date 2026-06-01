@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/yxd/yunxi-home/internal/notifier"
+	"github.com/Yunqingqingxi/yunxi-home/internal/notifier"
 )
 
 // NewNotifier 创建 QQ Bot 通知器（实现 notifier.Notifier 接口）

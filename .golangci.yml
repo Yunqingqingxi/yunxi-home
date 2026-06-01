@@ -1,0 +1,25 @@
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - misspell
+    - gofmt
+    - goimports
+
+run:
+  timeout: 3m
+  go: "1.24"
+
+issues:
+  exclude-dirs:
+    - web
+    - tools
+    - deploy
+
+output:
+  formats:
+    - format: colored-line-number

@@ -12,13 +12,13 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/yxd/yunxi-home/internal/ai/base"
-	"github.com/yxd/yunxi-home/internal/ai/register"
-	"github.com/yxd/yunxi-home/internal/dns"
-	"github.com/yxd/yunxi-home/internal/config"
-	"github.com/yxd/yunxi-home/internal/database"
-	"github.com/yxd/yunxi-home/internal/models"
-	"github.com/yxd/yunxi-home/internal/scheduler"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai/base"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai/register"
+	"github.com/Yunqingqingxi/yunxi-home/internal/dns"
+	"github.com/Yunqingqingxi/yunxi-home/internal/config"
+	"github.com/Yunqingqingxi/yunxi-home/internal/database"
+	"github.com/Yunqingqingxi/yunxi-home/internal/models"
+	"github.com/Yunqingqingxi/yunxi-home/internal/scheduler"
 )
 
 // RegisterAll 注册所有后端功能为 AI 工具

@@ -3,7 +3,7 @@ package database
 import (
 	"context"
 	"database/sql"
-	"github.com/yxd/yunxi-home/internal/nas"
+	"github.com/Yunqingqingxi/yunxi-home/internal/nas"
 )
 
 // MySQLShareRepo implements ShareRepository for MySQL.

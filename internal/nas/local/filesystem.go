@@ -18,7 +18,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/yxd/yunxi-home/internal/nas/base"
+	"github.com/Yunqingqingxi/yunxi-home/internal/nas/base"
 )
 
 // FileSystem 本地文件系统实现

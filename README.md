@@ -2,15 +2,11 @@
 
 > Self-hosted home server intelligence hub — DNS, AI Chat, Files, Docker, Monitoring, all-in-one
 
-[![Go](https://img.shields.io/badge/Go-1.23+-00ADD8?logo=go)](https://go.dev/)
+[![Go](https://img.shields.io/badge/Go-1.24+-00ADD8?logo=go)](https://go.dev/)
 [![Vue](https://img.shields.io/badge/Vue-3.x-4FC08D?logo=vue.js)](https://vuejs.org/)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 Yunxi Home is a single-binary (~18MB) home server management panel with an AI assistant at its core. It wraps DNS automation, file management, Docker control, system monitoring, and a Web Terminal behind a glassmorphism UI — all controllable through natural language via the built-in AI chat.
-
-<p align="center">
-  <i>Screenshots coming soon</i>
-</p>
 
 ## Features
 
@@ -30,7 +26,7 @@ Yunxi Home is a single-binary (~18MB) home server management panel with an AI as
 
 | Layer | Technology |
 |-------|-----------|
-| Backend | Go 1.23+ · Echo · Viper · SQLite (encrypted) |
+| Backend | Go 1.24+ · Echo · Viper · SQLite (encrypted) |
 | Frontend | Vue 3 · Pinia · Vue Router · Vite · Arco Design · Chart.js · xterm.js |
 | AI | DeepSeek v4 (Flash/Pro) · Qwen (Plus/Max) · OpenAI-compatible providers |
 | Tools | 50+ built-in tools across system, file, DNS, Docker, MCP integration |
@@ -38,7 +34,7 @@ Yunxi Home is a single-binary (~18MB) home server management panel with an AI as
 ## Quick Start
 
 ### Prerequisites
-- Go 1.23+
+- Go 1.24+
 - Node.js 18+ (for frontend builds)
 - Linux server (Ubuntu 22.04+ recommended)
 
@@ -46,7 +42,7 @@ Yunxi Home is a single-binary (~18MB) home server management panel with an AI as
 
 ```bash
 # Clone
-git clone https://github.com/YOUR_USERNAME/yunxi-home.git
+git clone https://github.com/Yunqingqingxi/yunxi-home.git
 cd yunxi-home
 
 # Build frontend + backend (single binary)
@@ -158,4 +154,4 @@ See [docs/API.md](docs/API.md) for the full REST API reference.
 
 ## License
 
-[MIT](LICENSE) © 2025 Yunxi Home Contributors
+[MIT](LICENSE) © 2026 Yunxi Home Contributors

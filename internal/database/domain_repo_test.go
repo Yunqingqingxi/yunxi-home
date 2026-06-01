@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/yxd/yunxi-home/internal/models"
+	"github.com/Yunqingqingxi/yunxi-home/internal/models"
 )
 
 func setupTestDB(t *testing.T) *DB {

@@ -2,14 +2,14 @@
 //
 // 消费者只需导入此包即可使用所有文件操作功能，无需关心底层实现。
 //
-//	import "github.com/yxd/yunxi-home/internal/nas"
+//	import "github.com/Yunqingqingxi/yunxi-home/internal/nas"
 //	fs := nas.New("/mnt/data", []string{"/mnt/data"})
 //	files, _ := fs.ListDir("/")
 package nas
 
 import (
-	"github.com/yxd/yunxi-home/internal/nas/base"
-	"github.com/yxd/yunxi-home/internal/nas/local"
+	"github.com/Yunqingqingxi/yunxi-home/internal/nas/base"
+	"github.com/Yunqingqingxi/yunxi-home/internal/nas/local"
 )
 
 // ── 类型别名（消费者直接使用 nas.FileInfo, nas.FileService 等）─────────

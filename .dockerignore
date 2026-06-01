@@ -27,6 +27,15 @@
 .DS_Store
 Thumbs.db
 
+# docs
+*.md
+/docs/
+
+# scripts and tests
+/scripts/
+/tests/
+/tools/
+
 # env
 .env
 .env.local
