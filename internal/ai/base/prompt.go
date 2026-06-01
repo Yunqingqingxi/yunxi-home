@@ -405,6 +405,18 @@ func DetectIntent(userMessage string, recentToolCalls []string) []string {
 		}
 	}
 
+	// 代码分析场景（覆盖分析/修复/编译/恢复等编程上下文）
+	codeKW := []string{"分析", "优化", "代码", "重构", "项目结构", "模块划分", "建议", "review", "code", "架构",
+		"拆分", "解耦", "依赖", "main.go", "入口", "结构分析",
+		"编译", "报错", "错误", "修复", "bug", "error", "undefined", "go build",
+		"重新开始", "继续", "恢复", "上次", "回滚", "重置", "接着"}
+	for _, kw := range codeKW {
+		if strings.Contains(msg, kw) {
+			intents = append(intents, "code_review")
+			break
+		}
+	}
+
 	// 文件发送场景
 	sendKW := []string{"发送", "分享", "send", "share"}
 	for _, kw := range sendKW {

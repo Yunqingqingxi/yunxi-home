@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -117,11 +118,26 @@ func init() {
 }
 
 func New(cfg Config) *Provider {
+	// v3.1: IPv4-only transport — DeepSeek has no AAAA record, Go's DualStack causes
+	// intermittent "unexpected EOF" / "TLS handshake timeout" when IPv6 is attempted.
+	// DialContext forces tcp4; TLS is handled by the HTTP client on top.
+	transport := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
+			return dialer.DialContext(ctx, "tcp4", addr)
+		},
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          10,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   15 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+
 	return &Provider{
 		apiKey:     cfg.APIKey,
 		baseURL:    "https://api.deepseek.com",
 		model:      "deepseek-v4-flash",
-		client:     &http.Client{Timeout: 10 * time.Minute},
+		client:     &http.Client{Transport: transport, Timeout: 10 * time.Minute},
 		inputPrice: 0.28 / 1_000_000,
 		outputPrice: 1.10 / 1_000_000,
 		cachePrice: 0.07 / 1_000_000,
@@ -210,6 +226,10 @@ func (p *Provider) ChatStream(ctx context.Context, messages []base.Message, tool
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+p.apiKey)
 	req.Header.Set("Accept", "text/event-stream")
+	// v3.1: SHA256 of system prompt for prefix cache identification
+	if len(messages) > 0 && messages[0].Role == "system" {
+		req.Header.Set("X-Prompt-Hash", base.SystemPromptHash(messages[0].Content))
+	}
 
 	resp, err := p.client.Do(req)
 	if err != nil {

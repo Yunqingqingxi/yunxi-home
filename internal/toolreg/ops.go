@@ -44,10 +44,15 @@ func RegisterOps(r *register.Registry, cfg *config.Config) {
 			cmd := exec.CommandContext(ctx, "sh", "-c", command)
 			out, err := cmd.CombinedOutput()
 			if err != nil {
-				if ctx.Err() != nil {
-					return string(out), fmt.Errorf("命令超时 (%v): %w", ctx.Err(), err)
+				// Include stderr in error — use same trimmed string for data AND error to prevent middleware dedup
+				outStr := strings.TrimSpace(string(out))
+				if outStr == "" {
+					outStr = err.Error()
 				}
-				return string(out), fmt.Errorf("命令执行失败: %w", err)
+				if ctx.Err() != nil {
+					return outStr, fmt.Errorf("命令超时: %s", outStr)
+				}
+				return outStr, fmt.Errorf("命令失败: %s", outStr)
 			}
 			result := string(out)
 			if result == "" {
@@ -173,12 +178,12 @@ func sshExecSafe(ctx context.Context, host, command string) (string, error) {
 		execCmd := exec.CommandContext(ctx, "sh", "-c", cmd)
 		out, err := execCmd.CombinedOutput()
 		if err != nil {
-			return string(out), fmt.Errorf("本地执行失败: %w", err)
+			outStr := strings.TrimSpace(string(out))
+			if outStr == "" { outStr = err.Error() }
+			return outStr, fmt.Errorf("本地执行失败: %s", outStr)
 		}
 		result := string(out)
-		if result == "" {
-			result = "(执行成功，无输出)"
-		}
+		if result == "" { result = "(执行成功，无输出)" }
 		return result, nil
 	}
 
@@ -186,7 +191,9 @@ func sshExecSafe(ctx context.Context, host, command string) (string, error) {
 	execCmd := exec.CommandContext(ctx, "ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", host, cmd)
 	out, err := execCmd.CombinedOutput()
 	if err != nil {
-		return string(out), fmt.Errorf("SSH 执行失败 (请确保已配置 SSH 密钥): %w", err)
+		outStr := strings.TrimSpace(string(out))
+		if outStr == "" { outStr = err.Error() }
+		return outStr, fmt.Errorf("SSH 执行失败: %s", outStr)
 	}
 	return string(out), nil
 }

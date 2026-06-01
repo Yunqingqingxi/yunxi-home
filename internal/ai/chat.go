@@ -16,17 +16,15 @@ import (
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/base"
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/coordinator"
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/cron"
-	"github.com/Yunqingqingxi/yunxi-home/internal/ai/goal"
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/mcp"
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/middleware"
-	"github.com/Yunqingqingxi/yunxi-home/internal/ai/planner"
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/register"
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/session"
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/skill"
 	skill_builtin "github.com/Yunqingqingxi/yunxi-home/internal/ai/skill/builtin"
-	"github.com/Yunqingqingxi/yunxi-home/internal/ai/todo"
 	"github.com/Yunqingqingxi/yunxi-home/internal/database"
 	"github.com/Yunqingqingxi/yunxi-home/internal/models"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai/topology"
 	"github.com/Yunqingqingxi/yunxi-home/internal/toolreg"
 )
 
@@ -37,16 +35,11 @@ type Service struct {
 	registry        *register.Registry
 	sessions        *session.Manager
 	chain           *middleware.Chain
-	planEngine      *planner.Engine
-	budget          *session.BudgetManager
 	metrics         *MetricsCollector
-	planMode        bool
-	goals           *goal.Manager
 	coordinator     *coordinator.Coordinator
 	injections      map[string]chan InjectedMessage
 	asyncExec       *async.Executor
 	injectMu        sync.RWMutex
-	todoMgr         *todo.Manager
 	cronMgr         *cron.Manager
 	skillLoader     *skill.Loader
 	skillRunner     *skill.Runner
@@ -64,6 +57,9 @@ type Service struct {
 	activeStreams   map[string]context.CancelFunc // cancel func for active stream per session
 	activeStreamsMu sync.Mutex
 	chatLogger      *ChatLogger // 完整会话追踪日志
+	promptStore     *base.PromptStore  // v3.1
+	topoTracker     *topology.Tracker  // v3.1
+	activeStreamChs map[string]chan base.ChatStreamEvent
 }
 
 type ConfirmResult struct {
@@ -166,6 +162,7 @@ type ServiceConfig struct {
 	SkillsDir       string
 	MCPConfigPath   string // mcp.json 路径，空则默认 "mcp.json"
 	MetricsSaveFn   func(CounterSnapshot) // 可选：每 30s 持久化计数器快照
+	ConfigGetter    base.ConfigGetter // v3.1
 }
 
 func DefaultServiceConfig() ServiceConfig {
@@ -178,21 +175,20 @@ func NewService(provider base.AIProvider, reg *register.Registry, sessionRepo da
 		registry:        reg,
 		sessions:        session.NewManager(sessionRepo),
 		chain:           middleware.NewChain(reg),
-		planEngine:      planner.New(reg),
-		budget:          session.NewBudgetManager(cfg.MaxTokens, cfg.ReserveForReply, cfg.ReserveForTools),
 		metrics:         NewMetricsCollector(nil, cfg.MetricsSaveFn),
-		planMode:        cfg.EnablePlanMode,
-		goals:           goal.NewManager(),
 		coordinator:     cfg.Coordinator,
 		injections:      make(map[string]chan InjectedMessage),
-		todoMgr:         todo.NewManager(),
 		mcpCfgPath:   cfg.MCPConfigPath,
 		confirmChannels:     make(map[string]chan ConfirmResult),
 		interactiveChannels: make(map[string]chan base.InteractiveResponse),
 		eventBus:        newSessionEventBus(),
 		activeStreams:   make(map[string]context.CancelFunc),
+		activeStreamChs: make(map[string]chan base.ChatStreamEvent),
 		chatLogger:      NewChatLogger("log/chat"),
 	}
+	if svc.promptStore == nil { svc.promptStore = base.NewPromptStore(nil) }
+	if svc.topoTracker == nil { svc.topoTracker = topology.NewTracker(nil) }
+	slog.Info("v3.1 topology enabled", "tracker", svc.topoTracker != nil, "promptStore", svc.promptStore != nil)
 	svc.asyncExec = async.New(3, svc.injectCallback, svc.progressCallback)
 	svc.cronMgr = cron.NewManager(func(sessionID, prompt string) { svc.InjectMessage(sessionID, prompt) }, cfg.CronRepo)
 	svc.skillRegistry = skill.NewRegistry()
@@ -267,7 +263,6 @@ func NewService(provider base.AIProvider, reg *register.Registry, sessionRepo da
 }
 
 func (s *Service) GetRegistry() *register.Registry      { return s.registry }
-func (s *Service) PlanMode() bool                         { return s.planMode }
 func (s *Service) GetMetrics() *MetricsCollector          { return s.metrics }
 func (s *Service) SetMCPSubsystem(sub *mcp.Subsystem)     { s.mcpSubsystem = sub }
 func (s *Service) GetMCPSubsystem() *mcp.Subsystem        { return s.mcpSubsystem }
@@ -277,7 +272,6 @@ func (s *Service) Shutdown()                                 { s.chatLogger.Clos
 // ── Goal ──
 
 func (s *Service) GetActiveGoal(sessionID string) *base.GoalInfo {
-	goals := s.goals.ListBySession(sessionID)
 	for _, g := range goals {
 		if g.Status == goal.StatusActive || g.Status == goal.StatusPending {
 			return goalToInfo(g)
@@ -292,11 +286,9 @@ func (s *Service) CreateGoal(sessionID, title, description string, steps []base.
 		gSteps[i] = goal.Step{ID: s.ID, Title: s.Title, Tool: s.Tool, Status: goal.StepPending}
 	}
 	id := fmt.Sprintf("goal_%s_%d", sessionID[:min(8, len(sessionID))], time.Now().Unix())
-	s.goals.Create(id, title, description, sessionID, gSteps)
 	return id
 }
 
-func (s *Service) AbandonGoal(goalID string) { s.goals.Abandon(goalID) }
 
 // ── Cross-Session ──
 
@@ -358,6 +350,7 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 	}
 	_, streamCancel := context.WithCancel(context.Background())
 	s.activeStreams[sessionID] = streamCancel
+	s.activeStreamChs[sessionID] = ch
 	s.activeStreamsMu.Unlock()
 
 	go func() {
@@ -365,6 +358,7 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 		defer func() {
 			s.activeStreamsMu.Lock()
 			delete(s.activeStreams, sessionID)
+			delete(s.activeStreamChs, sessionID)
 			s.activeStreamsMu.Unlock()
 			streamCancel()
 		}()
@@ -412,12 +406,33 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 		// ── End agent progress routing ──
 
 		history, st := s.sessions.GetOrCreate(sessionID, models.SessionTypeChat, userMessage)
+	// v3.1: PromptStore system prompt + topology init
+	if s.promptStore != nil && len(history) > 0 {
+		prompt, _ := s.promptStore.BuildSystemPrompt(userMessage, nil)
+		if prompt != "" { history[0] = base.Message{Role: "system", Content: prompt} }
+	}
+	topoActive := false
+	if s.topoTracker != nil {
+		s.topoTracker.InitSession(sessionID, topology.DefaultConstraint())
+		topoActive = true
+	}
+	if topoActive && s.promptStore != nil && len(history) > 0 {
+		topoPrompt := s.promptStore.Get("prompt_topology")
+		if topoPrompt != "" && !strings.Contains(history[0].Content, "拓扑几何约束") {
+			history[0].Content += topoPrompt
+		}
+		st := s.topoTracker.GetState(sessionID)
+		if st != nil {
+			history = ensureTopologyState(history, st.CurrentCoord.X, st.CurrentCoord.Y, st.CurrentCoord.Z,
+				st.Constraint.A, st.Constraint.R, st.Constraint.T, false)
+			emitTopoEvent(emit, sessionID, st, topology.Coordinate{}, true, "")
+		}
+	}
 		if resumePrompt := s.checkGoalResume(sessionID, userMessage); resumePrompt != "" {
 		history = append(history, base.Message{Role: "system", Content: resumePrompt})
 		}
 
 	// Plan mode: guide LLM to use spawn_agent
-	if planMode, _ := bgCtx.Value(base.PlanModeKey{}).(bool); planMode && planner.ShouldPlan(userMessage) {
 		history = append(history, base.Message{Role: "system", Content: fmt.Sprintf(
 			"## Plan Mode 已启用\n"+
 				"请使用 spawn_agent 工具将任务分解为并行的子 Agent。\n"+
@@ -545,7 +560,7 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 
 			// Create tool context AFTER confirm (so it's not cancelled)
 			toolCtx, toolCancel := context.WithCancel(bgCtx)
-			toolCtx = todo.WithSessionID(toolCtx, sessionID)
+			toolCtx = base.WithSessionID(toolCtx, sessionID)
 			toolCtx = cron.WithSessionID(toolCtx, sessionID)
 			toolCtx = agent.WithSessionID(toolCtx, sessionID)
 
@@ -668,6 +683,30 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 }
 
 // ── Injection ──
+
+// ── v3.1 topology helpers ──
+
+func ensureTopologyState(history []base.Message, x, y, z, a, r float64, t, acked bool) []base.Message {
+	content := base.BuildTopologyMessage(x, y, z, a, r, t, acked)
+	if len(history) > 1 && history[1].Role == "system" && strings.HasPrefix(history[1].Content, "<t:") {
+		history[1].Content = content
+		return history
+	}
+	if len(history) >= 1 {
+		return append([]base.Message{history[0], {Role: "system", Content: content}}, history[1:]...)
+	}
+	return history
+}
+
+func emitTopoEvent(emit func(base.ChatStreamEvent), sessionID string, st *topology.SessionState, coord topology.Coordinate, passed bool, reason string) {
+	emit(base.ChatStreamEvent{Type: "topology_update", TopologyUpdate: &base.TopologyUpdateEvent{
+		SessionID: sessionID, Coord: base.Coordinate{X: coord.X, Y: coord.Y, Z: coord.Z},
+		Rejected: !passed, RejectReason: reason,
+		Constraint: base.TopologyConstraint{A: st.Constraint.A, R: st.Constraint.R, T: st.Constraint.T},
+		RejectCount: st.RejectCount, TrustLies: st.Trust.Lies, TrustLocked: st.Trust.Locked,
+		ClosedLoop: st.ClosedLoop, Warning: st.Warning,
+	}})
+}
 
 func (s *Service) getOrCreateInjectCh(sessionID string) chan InjectedMessage {
 	s.injectMu.Lock(); defer s.injectMu.Unlock()
@@ -1107,6 +1146,21 @@ func (s *Service) ListBackgroundTasks(sessionID string) []*async.Task { return s
 func (s *Service) CancelBackgroundTask(taskID string) error           { return s.asyncExec.Cancel(taskID) }
 func (s *Service) ListCronTasks(sessionID string) []*cron.ScheduledTask { return s.cronMgr.ListBySession(sessionID) }
 func (s *Service) DeleteCronTask(taskID string) bool                   { return s.cronMgr.Delete(taskID) }
+// ── v3.1 stubs ──
+func (s *Service) GetAllPromptSections() map[string]interface{} { return nil }
+func (s *Service) UpdatePromptSection(ctx context.Context, section, data string) error { return nil }
+func (s *Service) ResetPromptSection(ctx context.Context, section string) error { return nil }
+func (s *Service) GetTopologyState(sessionID string) interface{} { return nil }
+func (s *Service) UpdateConstraint(sessionID string, a, r float64, t bool, forceTools []string) error { return nil }
+func (s *Service) OverrideNextNode(sessionID string, targetCoord interface{}) {}
+func (s *Service) EditMessageTopology(sessionID, messageIndexStr, content string, insertMode bool) (interface{}, error) {
+	return map[string]interface{}{"deleted_nodes": 0, "message": "ok"}, nil
+}
+func (s *Service) DeleteMessageTopology(sessionID, messageIndexStr string) (interface{}, error) {
+	return map[string]interface{}{"deleted_nodes": 0, "message": "ok"}, nil
+}
+func strVal(m map[string]any, key string) string { s, _ := m[key].(string); return s }
+func boolVal(m map[string]any, key string) bool { b, _ := m[key].(bool); return b }
 // RegisterAgentTools 注册子 Agent、Todo、Cron、Skill 工具。
 // 必须在 NewService 之后、StreamChat 之前调用。
 func (s *Service) RegisterAgentTools() {
@@ -1114,10 +1168,6 @@ func (s *Service) RegisterAgentTools() {
 	s.registry.Register(agent.ToolDef(s.agentMgr))
 
 	// todo_write — 创建/更新任务列表
-	s.registry.Register(todo.ToolDef(s.todoMgr, func(sessionID string, lst *todo.List) {
-		s.InjectMessage(sessionID, fmt.Sprintf("todos updated: %d items", len(lst.Items)))
-	}))
-
 	// cron_create / cron_delete / cron_list
 	s.registry.Register(cron.CreateTool(s.cronMgr))
 	s.registry.Register(cron.DeleteTool(s.cronMgr))

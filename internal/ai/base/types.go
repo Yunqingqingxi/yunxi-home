@@ -272,6 +272,70 @@ type ChatStreamEvent struct {
 	InteractiveRequest *InteractiveRequest `json:"interactive_request,omitempty"`
 	// Usage is set by providers at stream end with token/cost data.
 	Usage *StreamUsage `json:"usage,omitempty"`
+	// Topology 拓扑约束事件
+	TopologyUpdate *TopologyUpdateEvent `json:"topology_update,omitempty"`
+}
+
+// TopologyUpdateEvent is emitted after each topology validation round.
+type TopologyUpdateEvent struct {
+	SessionID    string     `json:"session_id"`
+	Coord        Coordinate `json:"coord"`
+	Trajectory   []Coordinate `json:"trajectory"`
+	Constraint   TopologyConstraint `json:"constraint"`
+	Rejected     bool       `json:"rejected"`
+	RejectReason string     `json:"reject_reason,omitempty"`
+	RejectCount  int        `json:"reject_count"`
+	TrustLies    int        `json:"trust_lies"`
+	TrustLocked  bool       `json:"trust_locked"`
+	ClosedLoop   bool       `json:"closed_loop"`
+	ClosedDist   float64    `json:"closed_distance,omitempty"`
+	Warning      string     `json:"warning,omitempty"`
+	Oscillation  bool       `json:"oscillation"`
+	Override     bool       `json:"override"`
+}
+
+// Coordinate is a 3D point in topology space (mirror of topology.Coordinate for SSE).
+type Coordinate struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+	Z float64 `json:"z"`
+}
+
+// TopologyConstraint mirrors topology.Constraint for SSE events.
+type TopologyConstraint struct {
+	A          float64  `json:"a"`
+	R          float64  `json:"r"`
+	T          bool     `json:"t"`
+	ForceTools []string `json:"force_tools,omitempty"`
+}
+
+// ── Topology State (for API response) ────────────────────────
+
+// TopologyState is the full topology state returned by the API.
+type TopologyState struct {
+	SessionID   string             `json:"session_id"`
+	CurrentCoord Coordinate        `json:"current_coord"`
+	StartCoord  Coordinate         `json:"start_coord"`
+	Constraint  TopologyConstraint `json:"constraint"`
+	Trajectory  []TopologyNode     `json:"trajectory"`
+	RejectCount int                `json:"reject_count"`
+	TrustLies   int                `json:"trust_lies"`
+	TrustLocked bool               `json:"trust_locked"`
+	ClosedLoop  bool               `json:"closed_loop"`
+	ClosedDist  float64            `json:"closed_distance,omitempty"`
+	Warning     string             `json:"warning,omitempty"`
+	Active      bool               `json:"active"`
+}
+
+// TopologyNode is a trajectory node for API responses.
+type TopologyNode struct {
+	X         float64 `json:"x"`
+	Y         float64 `json:"y"`
+	Z         float64 `json:"z"`
+	Round     int     `json:"round"`
+	ToolCall  string  `json:"tool_call"`
+	Status    string  `json:"status"`
+	Reason    string  `json:"reason,omitempty"`
 }
 
 // StreamUsage carries token and cost data from a completed LLM stream.
@@ -291,11 +355,19 @@ type InteractiveRequest struct {
 	Title       string             `json:"title"`
 	Message     string             `json:"message"`
 	Fields      []InteractiveField `json:"fields,omitempty"`
-	Options     []string           `json:"options,omitempty"`     // select 模式的选项
-	TimeoutSec  int                `json:"timeout_sec"`           // 超时秒数
+	Options     []string           `json:"options,omitempty"`
+	TimeoutSec  int                `json:"timeout_sec"`
 	ConfirmText string             `json:"confirm_text,omitempty"`
 	CancelText  string             `json:"cancel_text,omitempty"`
-	Variant     string             `json:"variant,omitempty"`     // "danger" | "warning" | "info"
+	Variant     string             `json:"variant,omitempty"`
+	Pages       []InteractivePage  `json:"pages,omitempty"` // v3.1 多页向导
+}
+
+// InteractivePage 向导中的一页
+type InteractivePage struct {
+	Title       string             `json:"title"`
+	Description string             `json:"description,omitempty"`
+	Fields      []InteractiveField `json:"fields"`
 }
 
 // InteractiveField 表单字段
@@ -327,7 +399,15 @@ type CrossSessionEvent struct {
 // ModelOverrideKey 用于在 context 中传递模型覆盖参数（避免循环 import）
 type ModelOverrideKey struct{}
 
-// PlanModeKey 用于在 context 中传递 plan 模式开关
+// SessionIDKey is used to pass session ID through context.
+type SessionIDKey struct{}
+
+// WithSessionID stores the session ID in the context (for tool middleware).
+func WithSessionID(ctx context.Context, sessionID string) context.Context {
+	return context.WithValue(ctx, SessionIDKey{}, sessionID)
+}
+
+// PlanModeKey 用于在 context 中传递 plan 模式开关 (deprecated in v3.1, kept for compat)
 type PlanModeKey struct{}
 
 // ReasoningIntensityKey 用于在 context 中传递推理强度

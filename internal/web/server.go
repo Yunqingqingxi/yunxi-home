@@ -257,7 +257,16 @@ func New(cfg *config.Config, configRepo database.ConfigRepository, domainRepo da
 	api.GET("/chat/sessions/:id", chatH.GetSessionDetail)
 	api.DELETE("/chat/sessions/:id", chatH.DeleteSession)
 	api.GET("/chat/tools", chatH.Tools)
-		api.GET("/chat/hints", chatH.Hints)
+	api.GET("/chat/hints", chatH.Hints)
+	// v3.1 拓扑几何约束 + 提示词管理 API
+	api.GET("/config/prompts", chatH.GetPrompts)
+	api.PUT("/config/prompts/:section", chatH.UpdatePrompt)
+	api.POST("/config/prompts/:section/reset", chatH.ResetPrompt)
+	api.GET("/chat/sessions/:id/topology", chatH.GetTopology)
+	api.PUT("/chat/sessions/:id/topology/constraint", chatH.UpdateConstraint)
+	api.POST("/chat/sessions/:id/topology/override", chatH.OverrideNode)
+	api.PUT("/chat/sessions/:id/messages/:messageIndex", chatH.EditMessage)
+	api.DELETE("/chat/sessions/:id/messages/:messageIndex", chatH.DeleteMessage)
 	// 技能与 MCP 市场
 	api.POST("/market/search-skills", chatH.SearchSkills)
 	api.POST("/market/install-skill", chatH.InstallSkill)

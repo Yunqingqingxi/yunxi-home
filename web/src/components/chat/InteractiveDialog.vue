@@ -140,19 +140,30 @@
           </button>
         </div>
 
+        <!-- v3.1 多页向导模式 -->
+        <div v-if="isWizard" class="interact-body wizard-body">
+          <div class="wizard-step-indicator">
+            <span class="wizard-step-label">&lt; {{ currentPage + 1 }}/{{ req.pages.length }} &gt;</span>
+            <div class="wizard-dots">
+              <span v-for="(_, i) in req.pages" :key="i" class="wizard-dot" :class="{ active: i === currentPage, done: i < currentPage }"></span>
+            </div>
+          </div>
+          <div class="wizard-page-title">{{ req.pages[currentPage].title }}</div>
+          <div v-if="req.pages[currentPage].description" class="wizard-page-desc">{{ req.pages[currentPage].description }}</div>
+          <div v-for="f in req.pages[currentPage].fields" :key="f.name" class="interact-field">
+            <label>{{ f.label }} <span v-if="f.required" class="req">*</span></label>
+            <input v-model="values[f.name]" :type="f.type || 'text'" :placeholder="f.placeholder || f.default" class="interact-input" />
+          </div>
+        </div>
+
         <div class="interact-actions">
-          <button
-            class="interact-btn cancel"
-            @click="cancel"
-          >
-            {{ req.cancel_text || '取消' }}
-          </button>
-          <button
-            class="interact-btn confirm"
-            :class="variantClass"
-            :disabled="submitting"
-            @click="submit"
-          >
+          <button class="interact-btn cancel" @click="cancel">{{ req.cancel_text || '取消' }}</button>
+          <template v-if="isWizard">
+            <button v-if="currentPage > 0" class="interact-btn prev" @click="currentPage--">上一步</button>
+            <button v-if="currentPage < req.pages.length - 1" class="interact-btn confirm" :class="variantClass" @click="wizardNext">下一步</button>
+            <button v-else class="interact-btn confirm" :class="variantClass" :disabled="submitting" @click="submit">提交</button>
+          </template>
+          <button v-else class="interact-btn confirm" :class="variantClass" :disabled="submitting" @click="submit">
             {{ submitting ? '提交中...' : (req.confirm_text || getDefaultConfirm()) }}
           </button>
         </div>
@@ -182,7 +193,16 @@ const values = reactive({})
 const selected = ref('')
 const submitting = ref(false)
 const timeoutLeft = ref(120)
+const currentPage = ref(0)
 let timer = null
+
+const isWizard = computed(() => (req.value.pages?.length || 0) > 0)
+function wizardNext() {
+  const page = req.value.pages[currentPage.value]
+  const missing = (page.fields || []).filter((f: any) => f.required && !values[f.name])
+  if (missing.length) return
+  if (currentPage.value < (req.value.pages?.length || 1) - 1) currentPage.value++
+}
 
 const variantClass = computed(() => {
   if (req.value.variant === 'danger') return 'danger'
@@ -278,4 +298,17 @@ onUnmounted(() => clearInterval(timer))
 .modal-leave-active { transition: all 0.15s ease-in; }
 .modal-enter-from, .modal-leave-to { opacity: 0; }
 .modal-enter-from .interact-card, .modal-leave-to .interact-card { transform: scale(0.95) translateY(10px); }
+
+/* ── v3.1 多页向导 ── */
+.wizard-body { display: flex; flex-direction: column; gap: 10px; }
+.wizard-step-indicator { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.wizard-step-label { font-size: 11px; font-weight: 600; color: var(--brand-500); white-space: nowrap; }
+.wizard-dots { display: flex; gap: 4px; }
+.wizard-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border-default); transition: all 0.15s; }
+.wizard-dot.active { background: var(--brand-500); transform: scale(1.3); }
+.wizard-dot.done { background: var(--brand-300); }
+.wizard-page-title { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.wizard-page-desc { font-size: 12px; color: var(--text-muted); line-height: 1.5; }
+.interact-btn.prev { background: transparent; color: var(--text-secondary); border: 1px solid var(--border-default); }
+.interact-btn.prev:hover { background: var(--surface-hover); }
 </style>

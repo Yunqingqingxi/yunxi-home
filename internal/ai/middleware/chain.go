@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/base"
@@ -183,15 +184,21 @@ func wrapLegacyResult(data string, err error) *base.ToolResult {
 				hint = "请检查命令是否正确"
 			}
 		}
+		// Include data in error message only if not already present (prevent duplication)
+		msg := err.Error()
+		trimmed := strings.TrimSpace(data)
+		if trimmed != "" && !strings.Contains(msg, trimmed) {
+			msg = msg + "\n输出: " + trimmed
+		}
 		return &base.ToolResult{
 			Status: base.StatusError,
 			Error: &base.ToolError{
 				Code:      code,
-				Message:   err.Error(),
+				Message:   msg,
 				Retryable: retryable,
 				RetryHint: hint,
 			},
-			Summary: fmt.Sprintf("命令执行失败 (%s): %s", code, err.Error()),
+			Summary: fmt.Sprintf("命令执行失败 (%s): %s", code, msg),
 		}
 	}
 	status := base.StatusSuccess

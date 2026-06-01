@@ -323,6 +323,10 @@ func (b *Bot) handleAIChat(ctx context.Context, userID, message string) (string,
 		case "thinking":
 		case "content":
 			contentBuf.WriteString(ev.Content)
+		case "tool_result":
+			// Reset buffer after each tool result — only keep the FINAL round's content.
+			// Prevents multi-round accumulated intermediate text from being sent as duplicates.
+			contentBuf.Reset()
 		case "tool_call":
 		case "error":
 			return fmt.Sprintf("AI 服务异常: %s", ev.Content), false

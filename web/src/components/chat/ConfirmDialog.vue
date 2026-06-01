@@ -55,7 +55,18 @@
                 </div>
                 <div class="detail-line">
                   <span class="detail-key">操作</span>
-                  <span class="detail-val-msg">{{ request?.message || '确认执行此操作？' }}</span>
+                  <span class="detail-val-msg">{{ parsedMsg.summary }}</span>
+                </div>
+                <!-- File path list -->
+                <div v-if="parsedMsg.files.length" class="file-path-list">
+                  <div v-for="(f, i) in parsedMsg.files" :key="i" class="file-path-item">
+                    <svg class="file-icon" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 1h7l4 4v9a1 1 0 01-1 1H3a1 1 0 01-1-1V2a1 1 0 011-1z"/><path d="M10 1v4h4"/></svg>
+                    <code>{{ f }}</code>
+                  </div>
+                </div>
+                <!-- Command display -->
+                <div v-if="parsedMsg.command" class="command-block">
+                  <code>{{ parsedMsg.command }}</code>
                 </div>
               </div>
 
@@ -120,7 +131,7 @@
 
 <script setup lang="ts">
 // @ts-nocheck
-import { ref, reactive, watch } from 'vue'
+import { ref, reactive, watch, computed } from 'vue'
 
 const props = defineProps({
   request: { type: Object, default: null },
@@ -133,9 +144,44 @@ const visible = ref(false)
 const sending = ref(false)
 const fieldValues = reactive({})
 
+// Parse confirm message to extract file paths, commands, and summary
+const parsedMsg = computed(() => {
+  const msg = props.request?.message || ''
+  const files: string[] = []
+  let command = ''
+  let summary = msg
+
+  // Extract absolute paths like /path/to/file
+  const pathRe = /(?:\/[\w\-\.]+)+\/?/g
+  const matches = msg.match(pathRe)
+  if (matches) {
+    for (const m of matches) {
+      const cleaned = m.replace(/[,，、]$/, '').trim()
+      if (cleaned.length > 1 && !files.includes(cleaned)) {
+        files.push(cleaned)
+      }
+    }
+  }
+
+  // Extract quoted commands
+  const cmdRe = /`([^`]+)`/g
+  let cmdMatch
+  while ((cmdMatch = cmdRe.exec(msg)) !== null) {
+    if (cmdMatch[1].length > 2) command = cmdMatch[1]
+  }
+
+  // Clean summary: remove trailing colon + file list
+  if (files.length > 0) {
+    summary = msg.replace(/:?\s*(?:\/[\w\-\.\/]+[,，、\s]*)+$/, '').replace(/\s*$/, '')
+  }
+
+  return { files, command, summary }
+})
+
 watch(() => props.request, (req) => {
   if (req) {
     visible.value = true
+    sending.value = false  // 重置提交状态，避免上一次残留
     for (const k in fieldValues) delete fieldValues[k]
     if (req.fields) {
       for (const f of req.fields) {
@@ -145,45 +191,31 @@ watch(() => props.request, (req) => {
   }
 }, { deep: true })
 
-async function confirm() {
+async function sendConfirm(approved: boolean, fields: Record<string, string>) {
   sending.value = true
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 8000)
   try {
     await fetch('/api/chat/confirm', {
       method: 'POST',
+      signal: controller.signal,
       headers: {
         'Content-Type': 'application/json',
         'Authorization': 'Bearer ' + (localStorage.getItem('token') || '')
       },
-      body: JSON.stringify({
-        confirm_id: props.request.id,
-        approved: true,
-        fields: { ...fieldValues }
-      })
+      body: JSON.stringify({ confirm_id: props.request.id, approved, fields })
     })
-  } catch (e) { /* ignore */ }
+  } catch (e) {
+    // timeout or network error — still close the dialog
+  }
+  clearTimeout(timeout)
+  sending.value = false
   visible.value = false
   emit('done')
 }
 
-async function cancel() {
-  sending.value = true
-  try {
-    await fetch('/api/chat/confirm', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer ' + (localStorage.getItem('token') || '')
-      },
-      body: JSON.stringify({
-        confirm_id: props.request.id,
-        approved: false,
-        fields: {}
-      })
-    })
-  } catch (e) { /* ignore */ }
-  visible.value = false
-  emit('done')
-}
+async function confirm() { await sendConfirm(true, { ...fieldValues }) }
+async function cancel()  { await sendConfirm(false, {}) }
 </script>
 
 <style scoped>
@@ -279,6 +311,54 @@ async function cancel() {
 .detail-val-msg {
   font-size: 13px; color: var(--text-primary, #1e293b);
   line-height: 1.5; word-break: break-all;
+}
+
+/* ── File path list ── */
+.file-path-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+.file-path-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.15);
+  border-radius: 6px;
+  font-size: 12px;
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  color: #dc2626;
+}
+[data-theme="dark"] .file-path-item {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.2);
+  color: #f87171;
+}
+.file-path-item .file-icon {
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+/* ── Command block ── */
+.command-block {
+  margin-top: 6px;
+  padding: 8px 10px;
+  background: rgba(15, 23, 42, 0.06);
+  border: 1px solid rgba(15, 23, 42, 0.1);
+  border-radius: 6px;
+}
+[data-theme="dark"] .command-block {
+  background: rgba(255,255,255,0.06);
+  border-color: rgba(255,255,255,0.1);
+}
+.command-block code {
+  font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  font-size: 12px;
+  color: var(--text-primary, #1e293b);
+  word-break: break-all;
 }
 
 /* ── Fields ── */

@@ -314,11 +314,7 @@ func (h *ChatHandler) RunCommand(c echo.Context) error {
 		result = "会话已清空"
 
 	case cmdName == "compact":
-		if req.SessionID != "" {
-			result = h.aiService.CompactSession(req.SessionID)
-		} else {
-			result = "压缩完成"
-		}
+		result = "上下文压缩已由 v3.1 拓扑约束系统自动管理，无需手动执行"
 
 	case cmdName == "get-mcp":
 		if cmdArg == "" || cmdArg == "help" {
@@ -380,6 +376,7 @@ func (h *ChatHandler) GetCommands(c echo.Context) error {
 		{Name: "help", Type: "builtin", Description: "显示可用指令", Usage: "/help"},
 		{Name: "clear", Type: "builtin", Description: "清空当前对话", Usage: "/clear"},
 		{Name: "compact", Type: "builtin", Description: "压缩对话上下文", Usage: "/compact"},
+		{Name: "topology", Type: "builtin", Description: "拓扑约束管理 (unlock/status)", Usage: "/topology [unlock|status]"},
 		{Name: "get-mcp", Type: "builtin", Description: "搜索并安装 MCP 工具", Usage: "/get-mcp <关键词>"},
 		{Name: "reload-skills", Type: "builtin", Description: "重新加载技能", Usage: "/reload-skills"},
 		{Name: "reload-mcp", Type: "builtin", Description: "重新加载 MCP 工具", Usage: "/reload-mcp"},
@@ -428,4 +425,154 @@ func itoa(n int) string {
 		n /= 10
 	}
 	return s
+}
+
+// ── Prompt Management API ─────────────────────────────────────
+
+// GetPrompts returns all prompt sections with effective values and source.
+// GET /api/config/prompts
+func (h *ChatHandler) GetPrompts(c echo.Context) error {
+	if h.aiService == nil {
+		return c.JSON(http.StatusOK, successResp(map[string]any{"sections": nil}))
+	}
+	sections := h.aiService.GetAllPromptSections()
+	return c.JSON(http.StatusOK, successResp(map[string]any{"sections": sections}))
+}
+
+// UpdatePrompt updates a single prompt section and triggers hot reload.
+// PUT /api/config/prompts/:section
+func (h *ChatHandler) UpdatePrompt(c echo.Context) error {
+	if h.aiService == nil {
+		return c.JSON(http.StatusNotFound, errorResp("AI 未启用"))
+	}
+	section := c.Param("section")
+	if section == "" {
+		return c.JSON(http.StatusBadRequest, errorResp("缺少 section"))
+	}
+	var req struct {
+		Data string `json:"data"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, errorResp("参数错误"))
+	}
+	if err := h.aiService.UpdatePromptSection(c.Request().Context(), section, req.Data); err != nil {
+		return c.JSON(http.StatusInternalServerError, errorResp("更新失败: "+err.Error()))
+	}
+	return c.JSON(http.StatusOK, successResp(map[string]string{"status": "updated", "section": section}))
+}
+
+// ResetPrompt removes a DB override, falling back to Go default.
+// POST /api/config/prompts/:section/reset
+func (h *ChatHandler) ResetPrompt(c echo.Context) error {
+	if h.aiService == nil {
+		return c.JSON(http.StatusNotFound, errorResp("AI 未启用"))
+	}
+	section := c.Param("section")
+	if section == "" {
+		return c.JSON(http.StatusBadRequest, errorResp("缺少 section"))
+	}
+	if err := h.aiService.ResetPromptSection(c.Request().Context(), section); err != nil {
+		return c.JSON(http.StatusInternalServerError, errorResp("重置失败: "+err.Error()))
+	}
+	return c.JSON(http.StatusOK, successResp(map[string]string{"status": "reset", "section": section}))
+}
+
+// ── Topology API ──────────────────────────────────────────────
+
+// GetTopology returns the current topology state for a session.
+// GET /api/chat/sessions/:id/topology
+func (h *ChatHandler) GetTopology(c echo.Context) error {
+	if h.aiService == nil {
+		return c.JSON(http.StatusNotFound, errorResp("AI 未启用"))
+	}
+	id := c.Param("id")
+	if id == "" {
+		return c.JSON(http.StatusBadRequest, errorResp("缺少 session_id"))
+	}
+	state := h.aiService.GetTopologyState(id)
+	return c.JSON(http.StatusOK, successResp(state))
+}
+
+// UpdateConstraint updates topology constraint parameters for a session.
+// PUT /api/chat/sessions/:id/topology/constraint
+func (h *ChatHandler) UpdateConstraint(c echo.Context) error {
+	if h.aiService == nil {
+		return c.JSON(http.StatusNotFound, errorResp("AI 未启用"))
+	}
+	id := c.Param("id")
+	if id == "" {
+		return c.JSON(http.StatusBadRequest, errorResp("缺少 session_id"))
+	}
+	var req struct {
+		A          float64  `json:"a"`
+		R          float64  `json:"r"`
+		T          bool     `json:"t"`
+		ForceTools []string `json:"force_tools"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, errorResp("参数错误"))
+	}
+	if err := h.aiService.UpdateConstraint(id, req.A, req.R, req.T, req.ForceTools); err != nil {
+		return c.JSON(http.StatusInternalServerError, errorResp("更新约束失败: "+err.Error()))
+	}
+	return c.JSON(http.StatusOK, successResp(map[string]string{"status": "constraint_updated"}))
+}
+
+// OverrideNode forces acceptance of the next topology check.
+// POST /api/chat/sessions/:id/topology/override
+func (h *ChatHandler) OverrideNode(c echo.Context) error {
+	if h.aiService == nil {
+		return c.JSON(http.StatusNotFound, errorResp("AI 未启用"))
+	}
+	id := c.Param("id")
+	if id == "" {
+		return c.JSON(http.StatusBadRequest, errorResp("缺少 session_id"))
+	}
+	var req struct {
+		TargetCoord *base.Coordinate `json:"target_coord"`
+	}
+	c.Bind(&req)
+	h.aiService.OverrideNextNode(id, req.TargetCoord)
+	return c.JSON(http.StatusOK, successResp(map[string]string{"status": "override_accepted"}))
+}
+
+// EditMessage edits or inserts a message at the given index.
+// PUT /api/chat/sessions/:id/messages/:messageIndex
+func (h *ChatHandler) EditMessage(c echo.Context) error {
+	if h.aiService == nil {
+		return c.JSON(http.StatusNotFound, errorResp("AI 未启用"))
+	}
+	id := c.Param("id")
+	if id == "" {
+		return c.JSON(http.StatusBadRequest, errorResp("缺少 session_id"))
+	}
+	var req struct {
+		Content    string `json:"content"`
+		InsertMode bool   `json:"insert_mode"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, errorResp("参数错误"))
+	}
+	result, err := h.aiService.EditMessageTopology(id, c.Param("messageIndex"), req.Content, req.InsertMode)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, errorResp("编辑失败: "+err.Error()))
+	}
+	return c.JSON(http.StatusOK, successResp(result))
+}
+
+// DeleteMessage deletes a message at the given index.
+// DELETE /api/chat/sessions/:id/messages/:messageIndex
+func (h *ChatHandler) DeleteMessage(c echo.Context) error {
+	if h.aiService == nil {
+		return c.JSON(http.StatusNotFound, errorResp("AI 未启用"))
+	}
+	id := c.Param("id")
+	if id == "" {
+		return c.JSON(http.StatusBadRequest, errorResp("缺少 session_id"))
+	}
+	result, err := h.aiService.DeleteMessageTopology(id, c.Param("messageIndex"))
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, errorResp("删除失败: "+err.Error()))
+	}
+	return c.JSON(http.StatusOK, successResp(result))
 }

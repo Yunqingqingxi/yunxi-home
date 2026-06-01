@@ -1,0 +1,8 @@
+		nasAPI.PUT("/files/rename", filesH.RenameItem)
+			nasAPI.GET("/diskinfo", filesH.GetDiskInfo)
+			nasAPI.GET("/search", filesH.SearchFiles)
+			nasAPI.GET("/files/stream", filesH.StreamFile)
+			nasAPI.GET("/files/preview", filesH.PreviewFile)
+			nasAPI.POST("/files/copy", filesH.CopyItem)
+			nasAPI.POST("/files/batch-delete", filesH.BatchDeleteItems)
+		}

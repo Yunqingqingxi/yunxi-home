@@ -25,15 +25,15 @@
     <div
       v-show="open"
       class="thinking-body"
-    >
-      {{ reasoning }}
-    </div>
+      v-html="displayHtml"
+    ></div>
   </div>
 </template>
 
 <script setup lang="ts">
 // @ts-nocheck
-import { ref, watch } from 'vue'
+import { ref, watch, computed } from 'vue'
+import { renderMarkdown } from '../../stores/chat'
 
 const props = defineProps({
   reasoning: { type: String, default: '' },
@@ -41,6 +41,7 @@ const props = defineProps({
 })
 
 const open = ref(false)
+const displayHtml = computed(() => renderMarkdown(props.reasoning || ''))
 
 // Auto-expand during streaming
 watch(() => props.streaming, (s) => { if (s) { open.value = true } }, { immediate: true })
@@ -74,7 +75,19 @@ watch(() => props.streaming, (s) => { if (s) { open.value = true } }, { immediat
 .thinking-body {
   padding: 0 12px 10px; font-size: 11.5px;
   color: var(--thinking-text); line-height: 1.55;
-  white-space: pre-wrap; font-style: italic;
+  font-style: italic;
+}
+/* markdown rendered elements */
+.thinking-body :deep(ul), .thinking-body :deep(ol) { margin: 2px 0; padding-left: 16px; }
+.thinking-body :deep(li) { margin: 1px 0; }
+.thinking-body :deep(p) { margin: 2px 0; }
+.thinking-body :deep(code) {
+  background: var(--code-bg); padding: 1px 4px; border-radius: 3px;
+  font-size: 11px; font-style: normal;
+}
+.thinking-body :deep(pre) {
+  margin: 4px 0; padding: 8px 10px; border-radius: 6px;
+  font-size: 11px; overflow-x: auto; font-style: normal;
 }
 
 

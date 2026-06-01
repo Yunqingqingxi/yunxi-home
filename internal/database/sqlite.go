@@ -182,6 +182,41 @@ func (db *DB) migrate() error {
 		`ALTER TABLE users ADD COLUMN storage_quota INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE users ADD COLUMN storage_used INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE histories ADD COLUMN rr TEXT NOT NULL DEFAULT ''`,
+
+		// ── v3.1 拓扑几何约束系统 ─────────────────────
+		`CREATE TABLE IF NOT EXISTS agent_sessions (
+			id VARCHAR(64) PRIMARY KEY,
+			user_id VARCHAR(64) NOT NULL DEFAULT '',
+			status VARCHAR(20) NOT NULL DEFAULT 'active',
+			start_coord TEXT NOT NULL DEFAULT '{"x":0,"y":0,"z":0}',
+			current_coord TEXT NOT NULL DEFAULT '{"x":0,"y":0,"z":0}',
+			constraint_json TEXT NOT NULL DEFAULT '{"a":0.8,"r":3.0,"t":false}',
+			trust_lies INTEGER DEFAULT 0,
+			trust_locked INTEGER DEFAULT 0,
+			reject_count INTEGER DEFAULT 0,
+			force_tools_triggered INTEGER DEFAULT 0,
+			created_at DATETIME NOT NULL DEFAULT (datetime('now')),
+			updated_at DATETIME NOT NULL DEFAULT (datetime('now')),
+			last_active_at DATETIME,
+			task_description TEXT DEFAULT '',
+			closed_loop INTEGER DEFAULT 0,
+			closed_distance REAL DEFAULT 0
+		)`,
+		`CREATE TABLE IF NOT EXISTS topology_nodes (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			session_id VARCHAR(64) NOT NULL,
+			round INTEGER NOT NULL,
+			x REAL NOT NULL,
+			y REAL NOT NULL,
+			z REAL NOT NULL,
+			tool_call VARCHAR(255) DEFAULT '',
+			status VARCHAR(20) NOT NULL DEFAULT 'committed',
+			reason TEXT DEFAULT '',
+			timestamp DATETIME NOT NULL DEFAULT (datetime('now')),
+			UNIQUE(session_id, round)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_topology_nodes_session ON topology_nodes(session_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_agent_sessions_status ON agent_sessions(status)`,
 	}
 
 	for _, m := range migrations {

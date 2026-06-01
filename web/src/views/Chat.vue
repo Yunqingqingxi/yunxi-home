@@ -39,23 +39,70 @@
           @wheel.passive="onPanelWheel"
           @touchmove.passive="onPanelTouchMove"
         >
+          <TopologyPanel />
           <TodoPanel :items="store.todoList" />
           <AgentPanel :agents="store.agents" />
           <template
             v-for="(msg, i) in store.messages"
             :key="msg.id"
           >
+            <!-- Insert button between messages -->
+            <div
+              v-if="i > 0 && msg.role === 'user'"
+              class="insert-between"
+              @click="startInsert(i)"
+              title="在此插入消息"
+            >
+              <span class="insert-line"></span>
+              <span class="insert-plus">+</span>
+            </div>
             <div
               v-if="i > 0 && timeGap(store.messages[i-1], msg) > 5"
               class="time-divider"
             >
               <span>{{ fmtMsgTime(msg.createdAt) }}</span>
             </div>
-            <ChatMessage
-              :msg="msg"
-              :show-avatar="i === 0 || store.messages[i-1]?.role !== msg.role"
-              :class="{ 'msg-grouped': i > 0 && store.messages[i-1]?.role === msg.role }"
-            />
+            <!-- Message wrapper with edit controls -->
+            <div
+              class="msg-wrapper"
+              :class="{ 'msg-editing': editingIndex === i, 'msg-fading': fadingNodes && fadingNodes > 0 && i >= editRebaseIndex }"
+              @mouseenter="hoveredMsg = i"
+              @mouseleave="hoveredMsg = -1"
+            >
+              <ChatMessage
+                :msg="editingIndex === i ? editDraftMsg : msg"
+                :show-avatar="i === 0 || store.messages[i-1]?.role !== msg.role"
+                :class="{ 'msg-grouped': i > 0 && store.messages[i-1]?.role === msg.role }"
+              />
+              <!-- Edit pencil on user messages -->
+              <button
+                v-if="msg.role === 'user' && hoveredMsg === i && editingIndex !== i"
+                class="edit-pencil"
+                title="编辑消息"
+                @click="startEdit(i, msg)"
+              >
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <path d="M11.5 1.5l3 3L5 14H2v-3L11.5 1.5z"/>
+                </svg>
+              </button>
+            </div>
+            <!-- Edit bar -->
+            <div v-if="editingIndex === i" class="edit-bar">
+              <textarea
+                ref="editTextarea"
+                v-model="editContent"
+                class="edit-textarea"
+                rows="3"
+                @keydown.escape="cancelEdit"
+                @keydown.ctrl.enter="saveEdit(i)"
+              />
+              <div class="edit-actions">
+                <span class="edit-hint">Ctrl+Enter 保存 · Esc 取消</span>
+                <button class="edit-save-btn" @click="saveEdit(i)">保存</button>
+                <button class="edit-cancel-btn" @click="cancelEdit">取消</button>
+                <button class="edit-delete-btn" @click="deleteMessage(i)">删除</button>
+              </div>
+            </div>
           </template>
           <div
             ref="scrollAnchor"
@@ -114,6 +161,7 @@ import InteractiveDialog from '../components/chat/InteractiveDialog.vue'
 import Sidebar from '../components/chat/Sidebar.vue'
 import HomeState from '../components/chat/HomeState.vue'
 import ChatInputBar from '../components/chat/ChatInputBar.vue'
+import TopologyPanel from '../components/chat/TopologyPanel.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -125,6 +173,110 @@ const renderError = ref(false)
 const inputBarRef = ref(null)
 const inputBarHeight = ref(150)
 let _observer = null
+
+// ── v3.1 Message editing ──
+const hoveredMsg = ref(-1)
+const editingIndex = ref(-1)
+const editContent = ref('')
+const editDraftMsg = ref<any>(null)
+const editTextarea = ref<any>(null)
+const fadingNodes = ref(0)
+const editRebaseIndex = ref(-1)
+let _fadeTimer: ReturnType<typeof setTimeout> | null = null
+
+function startEdit(i: number, msg: any) {
+  editingIndex.value = i
+  editContent.value = msg.content || ''
+  editDraftMsg.value = { ...msg, content: msg.content }
+  nextTick(() => {
+    const ta = editTextarea.value
+    if (ta) {
+      if (Array.isArray(ta)) ta[0]?.focus()
+      else ta.focus()
+    }
+  })
+}
+
+function startInsert(i: number) {
+  editingIndex.value = i
+  editContent.value = ''
+  editDraftMsg.value = null
+  nextTick(() => {
+    const ta = editTextarea.value
+    if (ta) {
+      if (Array.isArray(ta)) ta[0]?.focus()
+      else ta.focus()
+    }
+  })
+}
+
+function cancelEdit() {
+  editingIndex.value = -1
+  editContent.value = ''
+  editDraftMsg.value = null
+}
+
+async function saveEdit(i: number) {
+  const sid = store.sessionId
+  const token = localStorage.getItem('token')
+  if (!sid || !token || !editContent.value.trim()) return
+
+  const isInsert = !editDraftMsg.value
+  const msgIndex = i + 1 // +1 for system prompt
+
+  try {
+    const resp = await fetch(`/api/chat/sessions/${sid}/messages/${msgIndex}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify({ content: editContent.value, insert_mode: isInsert }),
+    })
+    const data = await resp.json()
+    const deletedNodes = data?.data?.deleted_nodes || 0
+
+    if (deletedNodes > 0) {
+      editRebaseIndex.value = i
+      fadingNodes.value = deletedNodes
+      if (_fadeTimer) clearTimeout(_fadeTimer)
+      _fadeTimer = setTimeout(() => { fadingNodes.value = 0; editRebaseIndex.value = -1 }, 1500)
+    }
+
+    // Reload the session
+    store.fetchSessionMessages(sid)
+  } catch (e) {
+    console.error('Edit failed:', e)
+  }
+
+  cancelEdit()
+}
+
+async function deleteMessage(i: number) {
+  const sid = store.sessionId
+  const token = localStorage.getItem('token')
+  if (!sid || !token) return
+
+  const msgIndex = i + 1
+  try {
+    const resp = await fetch(`/api/chat/sessions/${sid}/messages/${msgIndex}`, {
+      method: 'DELETE',
+      headers: { Authorization: 'Bearer ' + token },
+    })
+    const data = await resp.json()
+    const deletedNodes = data?.data?.deleted_nodes || 0
+
+    if (deletedNodes > 0) {
+      editRebaseIndex.value = i
+      fadingNodes.value = deletedNodes
+      if (_fadeTimer) clearTimeout(_fadeTimer)
+      _fadeTimer = setTimeout(() => { fadingNodes.value = 0; editRebaseIndex.value = -1 }, 1500)
+    }
+
+    store.fetchSessionMessages(sid)
+  } catch (e) {
+    console.error('Delete failed:', e)
+  }
+
+  cancelEdit()
+}
 
 onErrorCaptured((e, instance, info) => { console.error('[ChatView]', e, info); renderError.value = true; return false })
 function resetRender() { renderError.value = false }
@@ -355,9 +507,172 @@ onUnmounted(() => { _observer?.disconnect(); store.disconnectStream() })
   to   { opacity: 1; transform: translateY(0); }
 }
 
+/* ── v3.1 Message editing ── */
+.msg-wrapper {
+  position: relative;
+}
+
+.edit-pencil {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  background: var(--color-bg-3);
+  color: var(--color-text-3);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s;
+  z-index: 2;
+}
+
+.msg-wrapper:hover .edit-pencil {
+  opacity: 1;
+}
+
+.edit-pencil:hover {
+  background: var(--color-primary-light, #6366f122);
+  color: var(--color-primary, #6366f1);
+}
+
+.insert-between {
+  display: flex;
+  align-items: center;
+  height: 20px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+  margin: -4px 0;
+}
+
+.insert-between:hover {
+  opacity: 1;
+}
+
+.insert-line {
+  flex: 1;
+  height: 1px;
+  background: var(--color-border);
+}
+
+.insert-plus {
+  margin: 0 12px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--color-bg-3);
+  border: 1px solid var(--color-border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  color: var(--color-text-3);
+  transition: all 0.15s;
+}
+
+.insert-between:hover .insert-plus {
+  background: var(--color-primary, #6366f1);
+  color: #fff;
+  border-color: var(--color-primary, #6366f1);
+}
+
+.edit-bar {
+  margin: 4px 0 8px 48px;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--color-bg-2);
+  border: 1px solid var(--color-primary, #6366f1);
+  animation: editBarIn 0.15s ease;
+}
+
+@keyframes editBarIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.edit-textarea {
+  width: 100%;
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-1);
+  color: var(--color-text-1);
+  font-size: 14px;
+  font-family: inherit;
+  resize: vertical;
+  outline: none;
+}
+
+.edit-textarea:focus {
+  border-color: var(--color-primary, #6366f1);
+}
+
+.edit-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.edit-hint {
+  font-size: 11px;
+  color: var(--color-text-3);
+  flex: 1;
+}
+
+.edit-save-btn,
+.edit-cancel-btn,
+.edit-delete-btn {
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: none;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.edit-save-btn {
+  background: var(--color-primary, #6366f1);
+  color: #fff;
+}
+
+.edit-save-btn:hover { filter: brightness(1.1); }
+
+.edit-cancel-btn {
+  background: var(--color-bg-3);
+  color: var(--color-text-2);
+}
+
+.edit-cancel-btn:hover { background: var(--color-bg-4); }
+
+.edit-delete-btn {
+  background: #ef444422;
+  color: #ef4444;
+  margin-left: auto;
+}
+
+.edit-delete-btn:hover { background: #ef444433; }
+
+/* ── v3.1 Topology fade-out animation ── */
+.msg-fading {
+  animation: nodeFadeOut 1.5s ease forwards;
+}
+
+@keyframes nodeFadeOut {
+  0% { opacity: 1; filter: blur(0); }
+  50% { opacity: 0.5; filter: blur(2px); }
+  100% { opacity: 1; filter: blur(0); }
+}
+
 @media (max-width: 767px) {
   .chat-layout { padding-top: 78px; }
   .chat-page { margin: 0; border-radius: 0; }
   .panel-body { padding: 10px 8px 110px; gap: 10px; }
+  .edit-bar { margin-left: 12px; }
 }
 </style>
