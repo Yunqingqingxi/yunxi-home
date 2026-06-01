@@ -1,8 +1,9 @@
 module github.com/Yunqingqingxi/yunxi-home
 
-go 1.24.0
+go 1.25.0
 
 require (
+	github.com/UserExistsError/conpty v0.1.4
 	github.com/creack/pty v1.1.24
 	github.com/go-sql-driver/mysql v1.10.0
 	github.com/golang-jwt/jwt/v5 v5.2.1
@@ -11,16 +12,15 @@ require (
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/viper v1.19.0
 	github.com/tencent-connect/botgo v0.2.1
-	golang.org/x/crypto v0.24.0
+	golang.org/x/crypto v0.52.0
 	golang.org/x/oauth2 v0.23.0
-	golang.org/x/sys v0.22.0
 	golang.org/x/time v0.5.0
+	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.32.0
 )
 
 require (
 	filippo.io/edwards25519 v1.2.0 // indirect
-	github.com/UserExistsError/conpty v0.1.4 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/fsnotify/fsnotify v1.7.0 // indirect
 	github.com/go-resty/resty/v2 v2.6.0 // indirect
@@ -51,11 +51,11 @@ require (
 	go.uber.org/atomic v1.9.0 // indirect
 	go.uber.org/multierr v1.9.0 // indirect
 	golang.org/x/exp v0.0.0-20231108232855-2478ac86f678 // indirect
-	golang.org/x/net v0.24.0 // indirect
-	golang.org/x/sync v0.7.0 // indirect
-	golang.org/x/text v0.16.0 // indirect
+	golang.org/x/net v0.54.0 // indirect
+	golang.org/x/sync v0.20.0 // indirect
+	golang.org/x/sys v0.45.0 // indirect
+	golang.org/x/text v0.37.0 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 	modernc.org/gc/v3 v3.0.0-20240107210532-573471604cb6 // indirect
 	modernc.org/libc v1.55.3 // indirect
 	modernc.org/mathutil v1.6.0 // indirect
