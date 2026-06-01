@@ -1,36 +1,88 @@
 <template>
-  <aside class="chat-sidebar" :class="{ open }">
+  <aside
+    class="chat-sidebar"
+    :class="{ open }"
+  >
     <!-- Always-visible toggle button -->
-    <button class="sidebar-toggle" @click="open = !open" :title="open ? '收起侧栏' : '展开侧栏'">
-      <svg width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-        <path v-if="open" d="M10 4l-5 3.5 5 3.5" />
-        <path v-else d="M5 4l5 3.5-5 3.5" />
+    <button
+      class="sidebar-toggle"
+      :title="open ? '收起侧栏' : '展开侧栏'"
+      @click="open = !open"
+    >
+      <svg
+        width="15"
+        height="15"
+        viewBox="0 0 15 15"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.8"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      >
+        <path
+          v-if="open"
+          d="M10 4l-5 3.5 5 3.5"
+        />
+        <path
+          v-else
+          d="M5 4l5 3.5-5 3.5"
+        />
       </svg>
     </button>
 
     <!-- New chat button -->
-    <button class="sidebar-new-btn" @click="$emit('newChat')" :title="open ? '新建对话' : '新建'">
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-        <line x1="8" y1="2" x2="8" y2="14"/><line x1="2" y1="8" x2="14" y2="8"/>
+    <button
+      class="sidebar-new-btn"
+      :title="open ? '新建对话' : '新建'"
+      @click="$emit('newChat')"
+    >
+      <svg
+        width="16"
+        height="16"
+        viewBox="0 0 16 16"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+      >
+        <line
+          x1="8"
+          y1="2"
+          x2="8"
+          y2="14"
+        /><line
+          x1="2"
+          y1="8"
+          x2="14"
+          y2="8"
+        />
       </svg>
     </button>
 
     <!-- Collapsed: mini dot indicators -->
-    <div v-if="!open" class="sidebar-dots">
+    <div
+      v-if="!open"
+      class="sidebar-dots"
+    >
       <div
         v-for="conv in conversations.slice(0, 8)"
         :key="conv.id"
         :class="['sidebar-dot', { active: conv.id === activeId }]"
-        @click="$emit('select', conv.id)"
         :title="conv.title"
+        @click="$emit('select', conv.id)"
       >
-        <span class="dot-core" />
+        <span class="dot-core"></span>
       </div>
     </div>
 
     <!-- Expanded: full conversation list -->
-    <div v-else class="sidebar-body">
-      <div class="sidebar-head">对话</div>
+    <div
+      v-else
+      class="sidebar-body"
+    >
+      <div class="sidebar-head">
+        对话
+      </div>
 
       <div class="sidebar-list">
         <div
@@ -43,7 +95,10 @@
             <span class="sidebar-item-title">{{ conv.title }}</span>
             <span class="sidebar-item-meta">{{ conv.messageCount }} 条 · {{ fmtTime(conv.updatedAt) }}</span>
           </div>
-          <div v-if="subAgents[conv.id]?.length" class="sidebar-subs">
+          <div
+            v-if="subAgents[conv.id]?.length"
+            class="sidebar-subs"
+          >
             <div
               v-for="sa in subAgents[conv.id]"
               :key="sa.id"
@@ -55,7 +110,12 @@
             </div>
           </div>
         </div>
-        <div v-if="!conversations.length" class="sidebar-empty">暂无对话</div>
+        <div
+          v-if="!conversations.length"
+          class="sidebar-empty"
+        >
+          暂无对话
+        </div>
       </div>
     </div>
   </aside>

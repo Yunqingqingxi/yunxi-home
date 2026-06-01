@@ -9,21 +9,46 @@
     />
     <div class="chat-page">
       <!-- Error boundary -->
-      <div v-if="renderError" class="error-state">
+      <div
+        v-if="renderError"
+        class="error-state"
+      >
         <p>对话组件渲染异常</p>
-        <button @click="resetRender" class="retry-btn">重试</button>
+        <button
+          class="retry-btn"
+          @click="resetRender"
+        >
+          重试
+        </button>
       </div>
 
       <template v-else>
         <!-- HOME STATE -->
-        <HomeState v-if="!store.sessionId" @quickStart="onQuickStart" />
+        <HomeState
+          v-if="!store.sessionId"
+          @quick-start="onQuickStart"
+        />
 
         <!-- MESSAGES AREA -->
-        <div v-else class="panel-body" ref="msgContainer" :style="{ paddingBottom: inputBarHeight + 'px' }" @scroll="onPanelScroll" @wheel.passive="onPanelWheel" @touchmove.passive="onPanelTouchMove">
+        <div
+          v-else
+          ref="msgContainer"
+          class="panel-body"
+          :style="{ paddingBottom: inputBarHeight + 'px' }"
+          @scroll="onPanelScroll"
+          @wheel.passive="onPanelWheel"
+          @touchmove.passive="onPanelTouchMove"
+        >
           <TodoPanel :items="store.todoList" />
           <AgentPanel :agents="store.agents" />
-          <template v-for="(msg, i) in store.messages" :key="msg.id">
-            <div v-if="i > 0 && timeGap(store.messages[i-1], msg) > 5" class="time-divider">
+          <template
+            v-for="(msg, i) in store.messages"
+            :key="msg.id"
+          >
+            <div
+              v-if="i > 0 && timeGap(store.messages[i-1], msg) > 5"
+              class="time-divider"
+            >
               <span>{{ fmtMsgTime(msg.createdAt) }}</span>
             </div>
             <ChatMessage
@@ -32,10 +57,27 @@
               :class="{ 'msg-grouped': i > 0 && store.messages[i-1]?.role === msg.role }"
             />
           </template>
-          <div ref="scrollAnchor" class="spacer-end"></div>
+          <div
+            ref="scrollAnchor"
+            class="spacer-end"
+          ></div>
         </div>
-        <button v-if="showScrollBtn" class="scroll-to-bottom-btn" :style="{ bottom: (inputBarHeight + 8) + 'px' }" @click="scrollToBottom(true)" title="滚动到最新">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6l4 4 4-4"/></svg>
+        <button
+          v-if="showScrollBtn"
+          class="scroll-to-bottom-btn"
+          :style="{ bottom: (inputBarHeight + 8) + 'px' }"
+          title="滚动到最新"
+          @click="scrollToBottom(true)"
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+          ><path d="M4 6l4 4 4-4" /></svg>
         </button>
       </template>
 
@@ -43,10 +85,18 @@
       <ChatInputBar ref="inputBarRef" />
 
       <!-- CONFIRM DIALOG -->
-      <ConfirmDialog :request="store.confirmRequest" :session-id="store.sessionId" @done="store.confirmRequest = null" />
+      <ConfirmDialog
+        :request="store.confirmRequest"
+        :session-id="store.sessionId"
+        @done="store.confirmRequest = null"
+      />
       <!-- INTERACTIVE DIALOG (表单/输入/选择) -->
-      <InteractiveDialog :request="store.interactiveRequest" :visible="!!store.interactiveRequest"
-        @respond="onInteractiveRespond" @close="store.interactiveRequest = null" />
+      <InteractiveDialog
+        :request="store.interactiveRequest"
+        :visible="!!store.interactiveRequest"
+        @respond="onInteractiveRespond"
+        @close="store.interactiveRequest = null"
+      />
     </div>
   </div>
 </template>

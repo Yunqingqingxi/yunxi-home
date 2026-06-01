@@ -1,11 +1,33 @@
 ﻿<template>
-  <div class="thinking-block" :class="{ streaming, collapsed: !open }">
-    <button class="thinking-toggle" @click="open = !open">
-      <span class="thinking-dot" :class="{ pulse: streaming }"></span>
+  <div
+    class="thinking-block"
+    :class="{ streaming, collapsed: !open }"
+  >
+    <button
+      class="thinking-toggle"
+      @click="open = !open"
+    >
+      <span
+        class="thinking-dot"
+        :class="{ pulse: streaming }"
+      ></span>
       <span class="thinking-label">{{ streaming ? '思考中' : '思考过程' }}</span>
-      <svg :class="['chevron', { flipped: open }]" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4.5l2 3 2-3"/></svg>
+      <svg
+        :class="['chevron', { flipped: open }]"
+        width="12"
+        height="12"
+        viewBox="0 0 12 12"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+      ><path d="M4 4.5l2 3 2-3" /></svg>
     </button>
-    <div v-show="open" class="thinking-body">{{ reasoning }}</div>
+    <div
+      v-show="open"
+      class="thinking-body"
+    >
+      {{ reasoning }}
+    </div>
   </div>
 </template>
 

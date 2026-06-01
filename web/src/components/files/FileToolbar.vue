@@ -1,44 +1,183 @@
 <template>
   <div class="files-toolbar">
     <div class="toolbar-left">
-      <button class="tb-btn" :class="{ on: clickMode === 'select' }" @click="$emit('toggle-mode')" :title="clickMode === 'select' ? '选择模式' : '打开模式'">
-        <svg v-if="clickMode === 'select'" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h10M2 7h10M2 11h7"/><circle cx="11" cy="11" r="1" fill="currentColor" stroke="none"/></svg>
-        <svg v-else width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4.5v7a1 1 0 001 1h8a1 1 0 001-1V6a1 1 0 00-1-1H6.5L5.5 3H3a1 1 0 00-1 1v.5"/><path d="M8 8.5l2-2-2-2"/></svg>
+      <button
+        class="tb-btn"
+        :class="{ on: clickMode === 'select' }"
+        :title="clickMode === 'select' ? '选择模式' : '打开模式'"
+        @click="$emit('toggle-mode')"
+      >
+        <svg
+          v-if="clickMode === 'select'"
+          width="14"
+          height="14"
+          viewBox="0 0 14 14"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+        ><path d="M2 3h10M2 7h10M2 11h7" /><circle
+          cx="11"
+          cy="11"
+          r="1"
+          fill="currentColor"
+          stroke="none"
+        /></svg>
+        <svg
+          v-else
+          width="14"
+          height="14"
+          viewBox="0 0 14 14"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+        ><path d="M2 4.5v7a1 1 0 001 1h8a1 1 0 001-1V6a1 1 0 00-1-1H6.5L5.5 3H3a1 1 0 00-1 1v.5" /><path d="M8 8.5l2-2-2-2" /></svg>
         <span class="mode-label">{{ clickMode === 'select' ? '选择' : '打开' }}</span>
       </button>
-      <label class="tb-btn accent" title="上传文件">
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M7 10V2M4 5l3-3 3 3M2 9v3a1 1 0 001 1h8a1 1 0 001-1V9"/></svg>
-        <input type="file" multiple @change="$emit('upload', $event)" hidden />
+      <label
+        class="tb-btn accent"
+        title="上传文件"
+      >
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 14 14"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+          stroke-linecap="round"
+        ><path d="M7 10V2M4 5l3-3 3 3M2 9v3a1 1 0 001 1h8a1 1 0 001-1V9" /></svg>
+        <input
+          type="file"
+          multiple
+          hidden
+          @change="$emit('upload', $event)"
+        />
       </label>
-      <label class="tb-btn accent" title="上传文件夹">
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2 4v8a1 1 0 001 1h8a1 1 0 001-1V5a1 1 0 00-1-1H6.5L5.5 2.5H3a1 1 0 00-1 1v.5"/><path d="M7 7v3M5.5 8.5h3"/></svg>
-        <input type="file" webkitdirectory directory multiple @change="$emit('folder-upload', $event)" hidden />
+      <label
+        class="tb-btn accent"
+        title="上传文件夹"
+      >
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 14 14"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+        ><path d="M2 4v8a1 1 0 001 1h8a1 1 0 001-1V5a1 1 0 00-1-1H6.5L5.5 2.5H3a1 1 0 00-1 1v.5" /><path d="M7 7v3M5.5 8.5h3" /></svg>
+        <input
+          type="file"
+          webkitdirectory
+          directory
+          multiple
+          hidden
+          @change="$emit('folder-upload', $event)"
+        />
       </label>
-      <button class="tb-btn" @click="$emit('mkdir')" title="新建文件夹">
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4v8a1 1 0 001 1h8a1 1 0 001-1V5a1 1 0 00-1-1H6.5L5.5 2.5H3a1 1 0 00-1 1v.5"/><path d="M7 7v3M5.5 8.5h3"/></svg>
+      <button
+        class="tb-btn"
+        title="新建文件夹"
+        @click="$emit('mkdir')"
+      >
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 14 14"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+        ><path d="M2 4v8a1 1 0 001 1h8a1 1 0 001-1V5a1 1 0 00-1-1H6.5L5.5 2.5H3a1 1 0 00-1 1v.5" /><path d="M7 7v3M5.5 8.5h3" /></svg>
       </button>
-      <button class="tb-btn" @click="$emit('refresh')" title="刷新">
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M12 7a5 5 0 11-1.5-3.5M12 2v4h-4"/></svg>
+      <button
+        class="tb-btn"
+        title="刷新"
+        @click="$emit('refresh')"
+      >
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 14 14"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+          stroke-linecap="round"
+        ><path d="M12 7a5 5 0 11-1.5-3.5M12 2v4h-4" /></svg>
       </button>
     </div>
     <div class="toolbar-right">
       <template v-if="selectedCount">
         <span class="sel-count">{{ selectedCount }} 个已选</span>
-        <button class="tb-btn" @click="$emit('cut')">剪切</button>
-        <button class="tb-btn" @click="$emit('copy')">复制</button>
-        <button class="tb-btn danger" @click="$emit('batch-delete')">删除</button>
+        <button
+          class="tb-btn"
+          @click="$emit('cut')"
+        >
+          剪切
+        </button>
+        <button
+          class="tb-btn"
+          @click="$emit('copy')"
+        >
+          复制
+        </button>
+        <button
+          class="tb-btn danger"
+          @click="$emit('batch-delete')"
+        >
+          删除
+        </button>
       </template>
-      <button v-if="clipCount" class="tb-btn accent" @click="$emit('paste')">粘贴({{ clipCount }})</button>
+      <button
+        v-if="clipCount"
+        class="tb-btn accent"
+        @click="$emit('paste')"
+      >
+        粘贴({{ clipCount }})
+      </button>
       <div class="sort-group">
-        <button v-for="opt in sortOptions" :key="opt.key" :class="['sort-pill', { active: sortBy === opt.key }]" @click="$emit('toggle-sort', opt.key)">
+        <button
+          v-for="opt in sortOptions"
+          :key="opt.key"
+          :class="['sort-pill', { active: sortBy === opt.key }]"
+          @click="$emit('toggle-sort', opt.key)"
+        >
           {{ opt.label }}
-          <svg v-if="sortBy === opt.key" :class="['sort-arrow', { flip: sortOrder === -1 }]" width="8" height="8" viewBox="0 0 8 8" fill="currentColor"><path d="M4 1v6M1.5 4.5L4 7l2.5-2.5"/></svg>
+          <svg
+            v-if="sortBy === opt.key"
+            :class="['sort-arrow', { flip: sortOrder === -1 }]"
+            width="8"
+            height="8"
+            viewBox="0 0 8 8"
+            fill="currentColor"
+          ><path d="M4 1v6M1.5 4.5L4 7l2.5-2.5" /></svg>
         </button>
       </div>
       <div class="search-wrap">
-        <svg class="search-icon" width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="5.5" cy="5.5" r="3.5"/><path d="M8.5 8.5L12 12"/></svg>
-        <input :value="searchQuery" @input="$emit('update:searchQuery', $event.target.value)" placeholder="搜索" class="search-inp" />
-        <button v-if="searchQuery" class="search-clr" @click="$emit('update:searchQuery', '')">&times;</button>
+        <svg
+          class="search-icon"
+          width="13"
+          height="13"
+          viewBox="0 0 13 13"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+        ><circle
+          cx="5.5"
+          cy="5.5"
+          r="3.5"
+        /><path d="M8.5 8.5L12 12" /></svg>
+        <input
+          :value="searchQuery"
+          placeholder="搜索"
+          class="search-inp"
+          @input="$emit('update:searchQuery', $event.target.value)"
+        />
+        <button
+          v-if="searchQuery"
+          class="search-clr"
+          @click="$emit('update:searchQuery', '')"
+        >
+          &times;
+        </button>
       </div>
     </div>
   </div>

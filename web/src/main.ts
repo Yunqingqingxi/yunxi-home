@@ -17,12 +17,32 @@ const routes: RouteRecordRaw[] = [
   { path: '/files', name: 'files', component: () => import('./views/Files.vue'), meta: { requiresAuth: true } },
   { path: '/history', name: 'history', component: () => import('./views/History.vue'), meta: { requiresAuth: true } },
   { path: '/system', name: 'system', component: () => import('./views/System.vue'), meta: { requiresAuth: true } },
-  { path: '/terminal', name: 'terminal', component: () => import('./views/Terminal.vue'), meta: { requiresAuth: true } },
-  { path: '/settings', name: 'settings', component: () => import('./views/Settings.vue'), meta: { requiresAuth: true } },
-  { path: '/market', name: 'market', component: () => import('./views/SkillsMarket.vue'), meta: { requiresAuth: true } },
+  {
+    path: '/terminal',
+    name: 'terminal',
+    component: () => import('./views/Terminal.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/settings',
+    name: 'settings',
+    component: () => import('./views/Settings.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/market',
+    name: 'market',
+    component: () => import('./views/SkillsMarket.vue'),
+    meta: { requiresAuth: true },
+  },
   { path: '/logs', name: 'logs', component: () => import('./views/Logs.vue'), meta: { requiresAuth: true } },
   { path: '/chat', name: 'chat', component: () => import('./views/Chat.vue'), meta: { requiresAuth: true } },
-  { path: '/chat/:sessionId', name: 'chat-session', component: () => import('./views/Chat.vue'), meta: { requiresAuth: true } },
+  {
+    path: '/chat/:sessionId',
+    name: 'chat-session',
+    component: () => import('./views/Chat.vue'),
+    meta: { requiresAuth: true },
+  },
   { path: '/login', name: 'login', component: () => import('./views/Login.vue') },
 ]
 
@@ -30,9 +50,13 @@ const router: Router = createRouter({ history: createWebHashHistory(), routes })
 
 router.beforeEach((to, from, next) => {
   const token = localStorage.getItem('token')
-  if (to.meta.requiresAuth && !token) { next('/login') }
-  else if (to.path === '/login' && token) { next('/') }
-  else { next() }
+  if (to.meta.requiresAuth && !token) {
+    next('/login')
+  } else if (to.path === '/login' && token) {
+    next('/')
+  } else {
+    next()
+  }
 })
 
 const app = createApp(App)

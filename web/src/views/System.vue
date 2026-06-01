@@ -3,66 +3,207 @@
     <h3>系统控制</h3>
 
     <div class="tab-bar">
-      <button :class="['tab', { active: tab === 'docker' }]" @click="tab = 'docker'">Docker 容器</button>
-      <button :class="['tab', { active: tab === 'process' }]" @click="tab = 'process'">进程管理</button>
-      <button :class="['tab', { active: tab === 'service' }]" @click="tab = 'service'">系统服务</button>
+      <button
+        :class="['tab', { active: tab === 'docker' }]"
+        @click="tab = 'docker'"
+      >
+        Docker 容器
+      </button>
+      <button
+        :class="['tab', { active: tab === 'process' }]"
+        @click="tab = 'process'"
+      >
+        进程管理
+      </button>
+      <button
+        :class="['tab', { active: tab === 'service' }]"
+        @click="tab = 'service'"
+      >
+        系统服务
+      </button>
     </div>
 
-    <div v-if="tab === 'docker'" class="card-bento" style="padding: 0">
+    <div
+      v-if="tab === 'docker'"
+      class="card-bento"
+      style="padding: 0"
+    >
       <div class="card-head">
         <h4>容器列表</h4>
-        <a-button size="small" @click="loadContainers">刷新</a-button>
+        <a-button
+          size="small"
+          @click="loadContainers"
+        >
+          刷新
+        </a-button>
       </div>
-      <div v-if="containers.length" class="row-table">
-        <div v-for="c in containers" :key="c.id" class="row-item">
+      <div
+        v-if="containers.length"
+        class="row-table"
+      >
+        <div
+          v-for="c in containers"
+          :key="c.id"
+          class="row-item"
+        >
           <span class="col-name">{{ c.name }}</span>
           <span class="col-image">{{ c.image }}</span>
-          <a-tag :color="c.state === 'running' ? 'green' : 'red'" size="small">{{ c.state }}</a-tag>
-          <span class="col-ports" v-if="c.ports">{{ c.ports }}</span>
+          <a-tag
+            :color="c.state === 'running' ? 'green' : 'red'"
+            size="small"
+          >
+            {{ c.state }}
+          </a-tag>
+          <span
+            v-if="c.ports"
+            class="col-ports"
+          >{{ c.ports }}</span>
           <span class="col-actions">
-            <a-button size="mini" @click="containerAction(c.name, 'start')" v-if="c.state !== 'running'">启动</a-button>
-            <a-button size="mini" @click="containerAction(c.name, 'stop')" v-if="c.state === 'running'">停止</a-button>
-            <a-button size="mini" @click="containerAction(c.name, 'restart')">重启</a-button>
-            <a-button size="mini" @click="viewLogs(c)">日志</a-button>
+            <a-button
+              v-if="c.state !== 'running'"
+              size="mini"
+              @click="containerAction(c.name, 'start')"
+            >启动</a-button>
+            <a-button
+              v-if="c.state === 'running'"
+              size="mini"
+              @click="containerAction(c.name, 'stop')"
+            >停止</a-button>
+            <a-button
+              size="mini"
+              @click="containerAction(c.name, 'restart')"
+            >重启</a-button>
+            <a-button
+              size="mini"
+              @click="viewLogs(c)"
+            >日志</a-button>
           </span>
         </div>
       </div>
-      <div v-else class="empty-state">暂无容器</div>
+      <div
+        v-else
+        class="empty-state"
+      >
+        暂无容器
+      </div>
     </div>
 
-    <div v-if="tab === 'process'" class="card-bento" style="padding: 0">
-      <div class="card-head"><h4>进程列表</h4><a-button size="small" @click="loadProcesses">刷新</a-button></div>
-      <div v-if="processes.length" class="row-table">
-        <div v-for="p in processes" :key="p.pid" class="row-item">
+    <div
+      v-if="tab === 'process'"
+      class="card-bento"
+      style="padding: 0"
+    >
+      <div class="card-head">
+        <h4>进程列表</h4><a-button
+          size="small"
+          @click="loadProcesses"
+        >
+          刷新
+        </a-button>
+      </div>
+      <div
+        v-if="processes.length"
+        class="row-table"
+      >
+        <div
+          v-for="p in processes"
+          :key="p.pid"
+          class="row-item"
+        >
           <span class="col-pid">{{ p.pid }}</span><span class="col-name">{{ p.name || p.command }}</span>
-          <span class="col-cpu" v-if="p.cpu !== undefined">{{ p.cpu }}% CPU</span>
-          <span class="col-mem" v-if="p.mem_pct !== undefined">{{ p.mem_pct }}% MEM</span>
-          <span class="col-mem" v-else-if="p.mem_mb">{{ p.mem_mb.toFixed(1) }} MB</span>
-          <span class="col-user" v-if="p.user">{{ p.user }}</span>
+          <span
+            v-if="p.cpu !== undefined"
+            class="col-cpu"
+          >{{ p.cpu }}% CPU</span>
+          <span
+            v-if="p.mem_pct !== undefined"
+            class="col-mem"
+          >{{ p.mem_pct }}% MEM</span>
+          <span
+            v-else-if="p.mem_mb"
+            class="col-mem"
+          >{{ p.mem_mb.toFixed(1) }} MB</span>
+          <span
+            v-if="p.user"
+            class="col-user"
+          >{{ p.user }}</span>
         </div>
       </div>
-      <div v-else class="empty-state">暂无进程数据</div>
+      <div
+        v-else
+        class="empty-state"
+      >
+        暂无进程数据
+      </div>
     </div>
 
-    <div v-if="tab === 'service'" class="card-bento" style="padding: 0">
-      <div class="card-head"><h4>服务列表</h4><a-button size="small" @click="loadServices">刷新</a-button></div>
-      <div v-if="services.length" class="row-table">
-        <div v-for="s in services" :key="s.name" class="row-item">
+    <div
+      v-if="tab === 'service'"
+      class="card-bento"
+      style="padding: 0"
+    >
+      <div class="card-head">
+        <h4>服务列表</h4><a-button
+          size="small"
+          @click="loadServices"
+        >
+          刷新
+        </a-button>
+      </div>
+      <div
+        v-if="services.length"
+        class="row-table"
+      >
+        <div
+          v-for="s in services"
+          :key="s.name"
+          class="row-item"
+        >
           <span class="col-name">{{ s.name }}</span>
-          <a-tag :color="s.status === 'active' ? 'green' : s.status === 'failed' ? 'red' : 'orange'" size="small">{{ s.status }}</a-tag>
+          <a-tag
+            :color="s.status === 'active' ? 'green' : s.status === 'failed' ? 'red' : 'orange'"
+            size="small"
+          >
+            {{ s.status }}
+          </a-tag>
           <span class="col-actions">
-            <a-button size="mini" @click="serviceAction(s.name, 'start')">启动</a-button>
-            <a-button size="mini" @click="serviceAction(s.name, 'stop')">停止</a-button>
-            <a-button size="mini" @click="serviceAction(s.name, 'restart')">重启</a-button>
+            <a-button
+              size="mini"
+              @click="serviceAction(s.name, 'start')"
+            >启动</a-button>
+            <a-button
+              size="mini"
+              @click="serviceAction(s.name, 'stop')"
+            >停止</a-button>
+            <a-button
+              size="mini"
+              @click="serviceAction(s.name, 'restart')"
+            >重启</a-button>
           </span>
         </div>
       </div>
-      <div v-else class="empty-state">暂无服务数据 (仅 Linux systemd)</div>
+      <div
+        v-else
+        class="empty-state"
+      >
+        暂无服务数据 (仅 Linux systemd)
+      </div>
     </div>
 
-    <div v-if="showLogs" class="modal-overlay" @click.self="showLogs = false">
+    <div
+      v-if="showLogs"
+      class="modal-overlay"
+      @click.self="showLogs = false"
+    >
       <div class="modal-card wide">
-        <div class="log-head"><h4>{{ logsContainer }} 日志</h4><a-button size="small" @click="showLogs = false">关闭</a-button></div>
+        <div class="log-head">
+          <h4>{{ logsContainer }} 日志</h4><a-button
+            size="small"
+            @click="showLogs = false"
+          >
+            关闭
+          </a-button>
+        </div>
         <pre class="log-content">{{ logsText || '加载中...' }}</pre>
       </div>
     </div>

@@ -1,5 +1,8 @@
 <template>
-  <div v-if="tasks.length > 0" class="cron-panel">
+  <div
+    v-if="tasks.length > 0"
+    class="cron-panel"
+  >
     <div class="cron-list">
       <div
         v-for="task in tasks"
@@ -7,15 +10,37 @@
         class="cron-tag"
         :title="task.prompt"
       >
-        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5">
-          <circle cx="5" cy="5" r="4"/>
-          <path d="M5 2.5v3L7 6.5"/>
+        <svg
+          width="10"
+          height="10"
+          viewBox="0 0 10 10"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+        >
+          <circle
+            cx="5"
+            cy="5"
+            r="4"
+          />
+          <path d="M5 2.5v3L7 6.5" />
         </svg>
         <span class="cron-desc">{{ describeCron(task.cron_expr) }}</span>
         <span class="cron-prompt-text">{{ truncate(task.prompt, 20) }}</span>
-        <button class="cron-delete" @click.stop="deleteTask(task.id)" title="删除定时任务">
-          <svg width="8" height="8" viewBox="0 0 8 8" fill="none" stroke="currentColor" stroke-width="1.6">
-            <path d="M1.5 1.5l5 5M6.5 1.5l-5 5"/>
+        <button
+          class="cron-delete"
+          title="删除定时任务"
+          @click.stop="deleteTask(task.id)"
+        >
+          <svg
+            width="8"
+            height="8"
+            viewBox="0 0 8 8"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+          >
+            <path d="M1.5 1.5l5 5M6.5 1.5l-5 5" />
           </svg>
         </button>
       </div>

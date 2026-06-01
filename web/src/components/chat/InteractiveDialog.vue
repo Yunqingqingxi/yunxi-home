@@ -1,54 +1,167 @@
 <template>
   <Transition name="modal">
-    <div v-if="visible" class="interact-overlay" @click.self="cancel">
-      <div class="interact-card" :class="'variant-' + (req.variant || 'info')">
+    <div
+      v-if="visible"
+      class="interact-overlay"
+      @click.self="cancel"
+    >
+      <div
+        class="interact-card"
+        :class="'variant-' + (req.variant || 'info')"
+      >
         <div class="interact-head">
           <span class="interact-icon">
-            <svg v-if="req.type === 'confirm' && req.variant === 'danger'" width="20" height="20" viewBox="0 0 20 20" fill="none"><path d="M10 2a8 8 0 100 16 8 8 0 000-16zM10 6v4M10 13v1" stroke="var(--color-danger)" stroke-width="1.5" stroke-linecap="round"/></svg>
-            <svg v-else-if="req.type === 'form' || req.type === 'input'" width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="3" y="3" width="14" height="14" rx="2" stroke="var(--brand-500)" stroke-width="1.5"/><path d="M7 8h6M7 12h4" stroke="var(--brand-500)" stroke-width="1.5" stroke-linecap="round"/></svg>
-            <svg v-else width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="8" stroke="var(--brand-500)" stroke-width="1.5"/><path d="M10 6v5M10 13.5v.5" stroke="var(--brand-500)" stroke-width="1.5" stroke-linecap="round"/></svg>
+            <svg
+              v-if="req.type === 'confirm' && req.variant === 'danger'"
+              width="20"
+              height="20"
+              viewBox="0 0 20 20"
+              fill="none"
+            ><path
+              d="M10 2a8 8 0 100 16 8 8 0 000-16zM10 6v4M10 13v1"
+              stroke="var(--color-danger)"
+              stroke-width="1.5"
+              stroke-linecap="round"
+            /></svg>
+            <svg
+              v-else-if="req.type === 'form' || req.type === 'input'"
+              width="20"
+              height="20"
+              viewBox="0 0 20 20"
+              fill="none"
+            ><rect
+              x="3"
+              y="3"
+              width="14"
+              height="14"
+              rx="2"
+              stroke="var(--brand-500)"
+              stroke-width="1.5"
+            /><path
+              d="M7 8h6M7 12h4"
+              stroke="var(--brand-500)"
+              stroke-width="1.5"
+              stroke-linecap="round"
+            /></svg>
+            <svg
+              v-else
+              width="20"
+              height="20"
+              viewBox="0 0 20 20"
+              fill="none"
+            ><circle
+              cx="10"
+              cy="10"
+              r="8"
+              stroke="var(--brand-500)"
+              stroke-width="1.5"
+            /><path
+              d="M10 6v5M10 13.5v.5"
+              stroke="var(--brand-500)"
+              stroke-width="1.5"
+              stroke-linecap="round"
+            /></svg>
           </span>
           <span class="interact-title">{{ req.title || 'AI 请求' }}</span>
         </div>
 
-        <div v-if="req.message" class="interact-msg">{{ req.message }}</div>
+        <div
+          v-if="req.message"
+          class="interact-msg"
+        >
+          {{ req.message }}
+        </div>
 
         <!-- confirm 模式 -->
-        <div v-if="req.type === 'confirm'" class="interact-body"></div>
+        <div
+          v-if="req.type === 'confirm'"
+          class="interact-body"
+        ></div>
 
         <!-- input 模式 -->
-        <div v-if="req.type === 'input'" class="interact-body">
-          <div v-for="f in (req.fields || [])" :key="f.name" class="interact-field">
-            <label>{{ f.label }} <span v-if="f.required" class="req">*</span></label>
-            <input v-model="values[f.name]" :type="f.type || 'text'" :placeholder="f.placeholder" class="interact-input" />
+        <div
+          v-if="req.type === 'input'"
+          class="interact-body"
+        >
+          <div
+            v-for="f in (req.fields || [])"
+            :key="f.name"
+            class="interact-field"
+          >
+            <label>{{ f.label }} <span
+              v-if="f.required"
+              class="req"
+            >*</span></label>
+            <input
+              v-model="values[f.name]"
+              :type="f.type || 'text'"
+              :placeholder="f.placeholder"
+              class="interact-input"
+            />
           </div>
         </div>
 
         <!-- form 模式 -->
-        <div v-if="req.type === 'form'" class="interact-body">
-          <div v-for="f in (req.fields || [])" :key="f.name" class="interact-field">
-            <label>{{ f.label }} <span v-if="f.required" class="req">*</span></label>
-            <input v-model="values[f.name]" :type="f.type || 'text'" :placeholder="f.placeholder || f.label" class="interact-input" />
+        <div
+          v-if="req.type === 'form'"
+          class="interact-body"
+        >
+          <div
+            v-for="f in (req.fields || [])"
+            :key="f.name"
+            class="interact-field"
+          >
+            <label>{{ f.label }} <span
+              v-if="f.required"
+              class="req"
+            >*</span></label>
+            <input
+              v-model="values[f.name]"
+              :type="f.type || 'text'"
+              :placeholder="f.placeholder || f.label"
+              class="interact-input"
+            />
             <span class="interact-hint">{{ f.default ? '默认: ' + f.default : '' }}</span>
           </div>
         </div>
 
         <!-- select 模式 -->
-        <div v-if="req.type === 'select'" class="interact-body">
-          <button v-for="opt in (req.options || [])" :key="opt"
+        <div
+          v-if="req.type === 'select'"
+          class="interact-body"
+        >
+          <button
+            v-for="opt in (req.options || [])"
+            :key="opt"
             :class="['interact-option', { active: selected === opt }]"
-            @click="selected = opt">{{ opt }}</button>
+            @click="selected = opt"
+          >
+            {{ opt }}
+          </button>
         </div>
 
         <div class="interact-actions">
-          <button class="interact-btn cancel" @click="cancel">
+          <button
+            class="interact-btn cancel"
+            @click="cancel"
+          >
             {{ req.cancel_text || '取消' }}
           </button>
-          <button class="interact-btn confirm" :class="variantClass" @click="submit" :disabled="submitting">
+          <button
+            class="interact-btn confirm"
+            :class="variantClass"
+            :disabled="submitting"
+            @click="submit"
+          >
             {{ submitting ? '提交中...' : (req.confirm_text || getDefaultConfirm()) }}
           </button>
         </div>
-        <div v-if="req.timeout_sec" class="interact-timeout">⏱ {{ timeoutLeft }}s 后自动取消</div>
+        <div
+          v-if="req.timeout_sec"
+          class="interact-timeout"
+        >
+          ⏱ {{ timeoutLeft }}s 后自动取消
+        </div>
       </div>
     </div>
   </Transition>

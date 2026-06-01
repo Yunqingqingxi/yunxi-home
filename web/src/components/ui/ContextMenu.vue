@@ -1,12 +1,32 @@
 ﻿<template>
-  <div v-if="visible" class="ctx-menu-backdrop" @click.self="close" @contextmenu.prevent="close">
-    <div class="ctx-menu" :style="{ left: x + 'px', top: y + 'px' }" ref="menuEl">
-      <div v-for="item in items" :key="item.key" class="ctx-item"
+  <div
+    v-if="visible"
+    class="ctx-menu-backdrop"
+    @click.self="close"
+    @contextmenu.prevent="close"
+  >
+    <div
+      ref="menuEl"
+      class="ctx-menu"
+      :style="{ left: x + 'px', top: y + 'px' }"
+    >
+      <div
+        v-for="item in items"
+        :key="item.key"
+        class="ctx-item"
         :class="{ disabled: item.disabled, danger: item.danger, divider: item.divider }"
-        @click="item.disabled ? null : onClick(item)">
-        <span class="ctx-icon" v-if="item.icon" v-html="item.icon"></span>
+        @click="item.disabled ? null : onClick(item)"
+      >
+        <span
+          v-if="item.icon"
+          class="ctx-icon"
+          v-html="item.icon"
+        ></span>
         <span class="ctx-label">{{ item.label }}</span>
-        <span class="ctx-shortcut" v-if="item.shortcut">{{ item.shortcut }}</span>
+        <span
+          v-if="item.shortcut"
+          class="ctx-shortcut"
+        >{{ item.shortcut }}</span>
       </div>
     </div>
   </div>

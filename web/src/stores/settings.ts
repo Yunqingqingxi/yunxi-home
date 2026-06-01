@@ -2,7 +2,18 @@ import { defineStore } from 'pinia'
 import { ref, computed, reactive } from 'vue'
 import api from '../services/api'
 import type { ApiResponse } from '../types/api'
-import type { AppConfig, AliyunDNSConfig, NotifyConfig, AIConfig, DetectConfig, NASConfig, DatabaseConfig, ServerConfig, LogConfig, QQBotConfig } from '../types/config'
+import type {
+  AppConfig,
+  AliyunDNSConfig,
+  NotifyConfig,
+  AIConfig,
+  DetectConfig,
+  NASConfig,
+  DatabaseConfig,
+  ServerConfig,
+  LogConfig,
+  QQBotConfig,
+} from '../types/config'
 
 interface TestResult {
   ok: boolean
@@ -18,11 +29,11 @@ interface SaveResult {
 export const useSettingsStore = defineStore('settings', () => {
   const config = ref<AppConfig | null>(null)
   const loading = ref(false)
-  const saving = ref(new Set<string>())     // Set of sections currently saving
+  const saving = ref(new Set<string>()) // Set of sections currently saving
   const error = ref('')
-  const dirtySections = reactive(new Set<string>())  // sections with unsaved changes
-  const localValues = reactive<Record<string, Record<string, any>>>({})          // { section: { ...formFields } }
-  const testResults = reactive<Record<string, TestResult>>({})          // { providerKey: { ok, error } }
+  const dirtySections = reactive(new Set<string>()) // sections with unsaved changes
+  const localValues = reactive<Record<string, Record<string, any>>>({}) // { section: { ...formFields } }
+  const testResults = reactive<Record<string, TestResult>>({}) // { providerKey: { ok, error } }
 
   const hasDirty = computed(() => dirtySections.size > 0)
   const dirtyList = computed(() => [...dirtySections])
@@ -74,7 +85,9 @@ export const useSettingsStore = defineStore('settings', () => {
     dirtySections.add(section)
   }
 
-  function isDirty(section: string): boolean { return dirtySections.has(section) }
+  function isDirty(section: string): boolean {
+    return dirtySections.has(section)
+  }
 
   async function saveSection(section: string): Promise<SaveResult> {
     if (!localValues[section]) return { ok: false, error: '无数据' }
@@ -197,9 +210,29 @@ export const useSettingsStore = defineStore('settings', () => {
   }
 
   return {
-    config, loading, saving, error, hasDirty, dirtyList, localValues, testResults,
-    dnsConfig, notifyConfig, aiConfig, detectConfig, nasConfig,
-    databaseConfig, serverConfig, logConfig, qqbotConfig,
-    load, setField, isDirty, saveSection, saveAll, resetSection, testProvider,
+    config,
+    loading,
+    saving,
+    error,
+    hasDirty,
+    dirtyList,
+    localValues,
+    testResults,
+    dnsConfig,
+    notifyConfig,
+    aiConfig,
+    detectConfig,
+    nasConfig,
+    databaseConfig,
+    serverConfig,
+    logConfig,
+    qqbotConfig,
+    load,
+    setField,
+    isDirty,
+    saveSection,
+    saveAll,
+    resetSection,
+    testProvider,
   }
 })

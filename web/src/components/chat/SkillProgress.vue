@@ -1,12 +1,25 @@
 <template>
-  <div v-if="summary" class="skill-progress">
+  <div
+    v-if="summary"
+    class="skill-progress"
+  >
     <div class="skill-header">
-      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
-        <path d="M2 3h3l1 1h4v4H2V3z"/>
+      <svg
+        width="12"
+        height="12"
+        viewBox="0 0 12 12"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+      >
+        <path d="M2 3h3l1 1h4v4H2V3z" />
       </svg>
       <span class="skill-label">Skill 执行中</span>
     </div>
-    <div class="skill-summary" v-html="md(summary)"></div>
+    <div
+      class="skill-summary"
+      v-html="md(summary)"
+    ></div>
   </div>
 </template>
 

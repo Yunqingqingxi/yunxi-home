@@ -1,10 +1,28 @@
 <template>
-  <form class="login-form" @submit.prevent="handleSubmit" novalidate>
+  <form
+    class="login-form"
+    novalidate
+    @submit.prevent="handleSubmit"
+  >
     <!-- Username -->
     <div class="field-group">
       <div class="input-wrap">
         <span class="input-icon">
-          <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="7" r="3.5" stroke="currentColor" stroke-width="1.5"/><path d="M3 18c0-3.9 3.1-7 7-7s7 3.1 7 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          <svg
+            viewBox="0 0 20 20"
+            fill="none"
+          ><circle
+            cx="10"
+            cy="7"
+            r="3.5"
+            stroke="currentColor"
+            stroke-width="1.5"
+          /><path
+            d="M3 18c0-3.9 3.1-7 7-7s7 3.1 7 7"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+          /></svg>
         </span>
         <input
           ref="usernameRef"
@@ -15,7 +33,10 @@
           autocomplete="username"
           @keyup.enter="focusPassword"
         />
-        <label class="floating-label" :class="{ active: username }">用户名</label>
+        <label
+          class="floating-label"
+          :class="{ active: username }"
+        >用户名</label>
       </div>
     </div>
 
@@ -23,7 +44,28 @@
     <div class="field-group">
       <div class="input-wrap">
         <span class="input-icon">
-          <svg viewBox="0 0 20 20" fill="none"><rect x="3.5" y="7.5" width="13" height="10" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M6.5 7.5V6a3.5 3.5 0 117 0v1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="10" cy="12.5" r="1.2" fill="currentColor"/></svg>
+          <svg
+            viewBox="0 0 20 20"
+            fill="none"
+          ><rect
+            x="3.5"
+            y="7.5"
+            width="13"
+            height="10"
+            rx="2"
+            stroke="currentColor"
+            stroke-width="1.5"
+          /><path
+            d="M6.5 7.5V6a3.5 3.5 0 117 0v1.5"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+          /><circle
+            cx="10"
+            cy="12.5"
+            r="1.2"
+            fill="currentColor"
+          /></svg>
         </span>
         <input
           ref="passwordRef"
@@ -33,12 +75,56 @@
           placeholder="密码"
           autocomplete="current-password"
         />
-        <label class="floating-label" :class="{ active: password }">密码</label>
-        <button type="button" class="toggle-pw" @click="showPassword = !showPassword" tabindex="-1">
+        <label
+          class="floating-label"
+          :class="{ active: password }"
+        >密码</label>
+        <button
+          type="button"
+          class="toggle-pw"
+          tabindex="-1"
+          @click="showPassword = !showPassword"
+        >
           <!-- Eye on -->
-          <svg v-if="showPassword" viewBox="0 0 20 20" fill="none"><path d="M10 5C5 5 2 10 2 10s3 5 8 5 8-5 8-5-3-5-8-5z" stroke="currentColor" stroke-width="1.5"/><circle cx="10" cy="10" r="2.5" stroke="currentColor" stroke-width="1.5"/></svg>
+          <svg
+            v-if="showPassword"
+            viewBox="0 0 20 20"
+            fill="none"
+          ><path
+            d="M10 5C5 5 2 10 2 10s3 5 8 5 8-5 8-5-3-5-8-5z"
+            stroke="currentColor"
+            stroke-width="1.5"
+          /><circle
+            cx="10"
+            cy="10"
+            r="2.5"
+            stroke="currentColor"
+            stroke-width="1.5"
+          /></svg>
           <!-- Eye off -->
-          <svg v-else viewBox="0 0 20 20" fill="none"><path d="M10 5C5 5 2 10 2 10s3 5 8 5 8-5 8-5-3-5-8-5z" stroke="currentColor" stroke-width="1.5"/><circle cx="10" cy="10" r="2.5" stroke="currentColor" stroke-width="1.5"/><line x1="3" y1="3" x2="17" y2="17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          <svg
+            v-else
+            viewBox="0 0 20 20"
+            fill="none"
+          ><path
+            d="M10 5C5 5 2 10 2 10s3 5 8 5 8-5 8-5-3-5-8-5z"
+            stroke="currentColor"
+            stroke-width="1.5"
+          /><circle
+            cx="10"
+            cy="10"
+            r="2.5"
+            stroke="currentColor"
+            stroke-width="1.5"
+          /><line
+            x1="3"
+            y1="3"
+            x2="17"
+            y2="17"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+          /></svg>
         </button>
       </div>
     </div>
@@ -46,18 +132,54 @@
     <!-- Remember me -->
     <div class="field-meta">
       <label class="remember-label">
-        <span class="remember-check" :class="{ checked: rememberMe }" @click="rememberMe = !rememberMe">
-          <svg v-if="rememberMe" viewBox="0 0 12 12" fill="none"><path d="M2.5 6L5 8.5L9.5 3.5" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <span
+          class="remember-check"
+          :class="{ checked: rememberMe }"
+          @click="rememberMe = !rememberMe"
+        >
+          <svg
+            v-if="rememberMe"
+            viewBox="0 0 12 12"
+            fill="none"
+          ><path
+            d="M2.5 6L5 8.5L9.5 3.5"
+            stroke="#fff"
+            stroke-width="1.8"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          /></svg>
         </span>
-        <input type="checkbox" v-model="rememberMe" class="sr-only" />
+        <input
+          v-model="rememberMe"
+          type="checkbox"
+          class="sr-only"
+        />
         <span>记住此设备</span>
       </label>
     </div>
 
     <!-- Error -->
     <Transition name="slide-down">
-      <div v-if="error" class="error-alert">
-        <svg viewBox="0 0 16 16" fill="none" class="error-icon"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.2"/><path d="M8 5v3.5M8 11.5v.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+      <div
+        v-if="error"
+        class="error-alert"
+      >
+        <svg
+          viewBox="0 0 16 16"
+          fill="none"
+          class="error-icon"
+        ><circle
+          cx="8"
+          cy="8"
+          r="7"
+          stroke="currentColor"
+          stroke-width="1.2"
+        /><path
+          d="M8 5v3.5M8 11.5v.5"
+          stroke="currentColor"
+          stroke-width="1.3"
+          stroke-linecap="round"
+        /></svg>
         <span>{{ error }}</span>
       </div>
     </Transition>
@@ -69,12 +191,28 @@
       :disabled="!canSubmit || loading"
       type="submit"
     >
-      <span v-if="loading" class="btn-inner">
+      <span
+        v-if="loading"
+        class="btn-inner"
+      >
         <span class="spinner"></span>
         登录中...
       </span>
-      <span v-else-if="success" class="btn-inner">
-        <svg viewBox="0 0 16 16" fill="none" class="check-icon"><path d="M3 8.5L6.5 12L13 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span
+        v-else-if="success"
+        class="btn-inner"
+      >
+        <svg
+          viewBox="0 0 16 16"
+          fill="none"
+          class="check-icon"
+        ><path
+          d="M3 8.5L6.5 12L13 5"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        /></svg>
         登录成功
       </span>
       <span v-else>登 录</span>

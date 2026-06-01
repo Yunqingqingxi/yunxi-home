@@ -1,5 +1,5 @@
 <template>
-  <code class="cell-code"><slot /></code>
+  <code class="cell-code"><slot></slot></code>
 </template>
 
 <script setup lang="ts">

@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "npm run typecheck && vite build",
     "preview": "vite preview",
-    "typecheck": "vue-tsc --noEmit"
+    "typecheck": "vue-tsc --noEmit",
+    "lint": "eslint src/ --ext .ts --fix && eslint src/ --ext .vue",
+    "format": "prettier --write \"src/**/*.ts\""
   },
   "dependencies": {
     "@arco-design/web-vue": "^2.55.0",
@@ -28,8 +30,15 @@
   },
   "devDependencies": {
     "@types/node": "^25.9.1",
+    "@typescript-eslint/eslint-plugin": "^8.60.0",
+    "@typescript-eslint/parser": "^8.60.0",
     "@vitejs/plugin-vue": "^5.0.4",
     "@vue/test-utils": "^2.4.10",
+    "eslint": "^10.4.1",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.6",
+    "eslint-plugin-vue": "^10.9.1",
+    "prettier": "^3.8.3",
     "terser": "^5.48.0",
     "typescript": "^6.0.3",
     "vite": "^5.2.12",

@@ -1,56 +1,299 @@
 <template>
-  <div class="files-page" @dragover.prevent="dragOver = true" @dragleave.prevent="dragOver = false" @drop.prevent="onDrop" @keydown="onKeydown" tabindex="-1" ref="pageEl">
+  <div
+    ref="pageEl"
+    class="files-page"
+    tabindex="-1"
+    @dragover.prevent="dragOver = true"
+    @dragleave.prevent="dragOver = false"
+    @drop.prevent="onDrop"
+    @keydown="onKeydown"
+  >
     <!-- Toast -->
-    <Transition name="toast"><div v-if="toastMsg" :class="['toast', 'toast-' + toastType]">{{ toastMsg }}</div></Transition>
+    <Transition name="toast">
+      <div
+        v-if="toastMsg"
+        :class="['toast', 'toast-' + toastType]"
+      >
+        {{ toastMsg }}
+      </div>
+    </Transition>
     <!-- Drag overlay -->
-    <Transition name="fade"><div v-if="dragOver" class="drop-zone"><div class="drop-zone-inner"><svg width="48" height="48" viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M24 32V10M16 18l8-8 8 8M10 32v8a4 4 0 004 4h20a4 4 0 004-4v-8"/></svg><span>释放文件以上传</span></div></div></Transition>
+    <Transition name="fade">
+      <div
+        v-if="dragOver"
+        class="drop-zone"
+      >
+        <div class="drop-zone-inner">
+          <svg
+            width="48"
+            height="48"
+            viewBox="0 0 48 48"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.4"
+          ><path d="M24 32V10M16 18l8-8 8 8M10 32v8a4 4 0 004 4h20a4 4 0 004-4v-8" /></svg><span>释放文件以上传</span>
+        </div>
+      </div>
+    </Transition>
 
     <!-- Top bar: disk + sandbox -->
     <div class="files-header">
       <div class="header-meta">
-        <div v-if="diskInfo" class="disk-mini" :class="{ warn: diskInfo.used_pct > 80, danger: diskInfo.used_pct > 90 }">
-          <div class="disk-mini-bar"><div class="disk-mini-fill" :style="{ width: diskInfo.used_pct + '%' }"></div></div>
+        <div
+          v-if="diskInfo"
+          class="disk-mini"
+          :class="{ warn: diskInfo.used_pct > 80, danger: diskInfo.used_pct > 90 }"
+        >
+          <div class="disk-mini-bar">
+            <div
+              class="disk-mini-fill"
+              :style="{ width: diskInfo.used_pct + '%' }"
+            ></div>
+          </div>
           <span class="disk-mini-text">{{ fmtBytes(diskInfo.used) }}/{{ fmtBytes(diskInfo.total) }}</span>
         </div>
-        <div v-if="sandboxInfo?.sandbox_root" class="sandbox-tag" :title="sandboxInfo.sandbox_root">{{ sandboxDisplayName }}</div>
+        <div
+          v-if="sandboxInfo?.sandbox_root"
+          class="sandbox-tag"
+          :title="sandboxInfo.sandbox_root"
+        >
+          {{ sandboxDisplayName }}
+        </div>
       </div>
     </div>
 
     <!-- Toolbar -->
     <div class="files-toolbar">
       <div class="toolbar-left">
-        <button class="tb-btn" :class="{ on: clickMode === 'select' }" @click="toggleClickMode">
-          <svg v-if="clickMode === 'select'" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h10M2 7h10M2 11h7"/><circle cx="11" cy="11" r="1" fill="currentColor" stroke="none"/></svg>
-          <svg v-else width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4.5v7a1 1 0 001 1h8a1 1 0 001-1V6a1 1 0 00-1-1H6.5L5.5 3H3a1 1 0 00-1 1v.5"/><path d="M8 8.5l2-2-2-2"/></svg>
+        <button
+          class="tb-btn"
+          :class="{ on: clickMode === 'select' }"
+          @click="toggleClickMode"
+        >
+          <svg
+            v-if="clickMode === 'select'"
+            width="14"
+            height="14"
+            viewBox="0 0 14 14"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+          ><path d="M2 3h10M2 7h10M2 11h7" /><circle
+            cx="11"
+            cy="11"
+            r="1"
+            fill="currentColor"
+            stroke="none"
+          /></svg>
+          <svg
+            v-else
+            width="14"
+            height="14"
+            viewBox="0 0 14 14"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+          ><path d="M2 4.5v7a1 1 0 001 1h8a1 1 0 001-1V6a1 1 0 00-1-1H6.5L5.5 3H3a1 1 0 00-1 1v.5" /><path d="M8 8.5l2-2-2-2" /></svg>
         </button>
-        <label class="tb-btn accent" title="上传文件"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M7 10V2M4 5l3-3 3 3M2 9v3a1 1 0 001 1h8a1 1 0 001-1V9"/></svg><input type="file" multiple @change="doUpload" hidden /></label>
-        <label class="tb-btn accent" title="上传文件夹"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2 4v8a1 1 0 001 1h8a1 1 0 001-1V5a1 1 0 00-1-1H6.5L5.5 2.5H3a1 1 0 00-1 1v.5"/><path d="M7 7v3M5.5 8.5h3"/></svg><input type="file" webkitdirectory directory multiple @change="doFolderUpload" hidden /></label>
-        <button class="tb-btn" @click="showMkdir = true" title="新建文件夹"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 4v8a1 1 0 001 1h8a1 1 0 001-1V5a1 1 0 00-1-1H6.5L5.5 2.5H3a1 1 0 00-1 1v.5"/><path d="M7 7v3M5.5 8.5h3"/></svg></button>
-        <button class="tb-btn" @click="loadFiles" title="刷新"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M12 7a5 5 0 11-1.5-3.5M12 2v4h-4"/></svg></button>
-        <button class="tb-btn" :class="{ on: viewMode === 'grid' }" @click="viewMode = viewMode === 'list' ? 'grid' : 'list'" title="切换视图">
-          <svg v-if="viewMode === 'grid'" width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="1" y="1" width="5" height="5" rx="1"/><rect x="8" y="1" width="5" height="5" rx="1"/><rect x="1" y="8" width="5" height="5" rx="1"/><rect x="8" y="8" width="5" height="5" rx="1"/></svg>
-          <svg v-else width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2 3h10M2 7h10M2 11h7"/></svg>
+        <label
+          class="tb-btn accent"
+          title="上传文件"
+        ><svg
+          width="14"
+          height="14"
+          viewBox="0 0 14 14"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+          stroke-linecap="round"
+        ><path d="M7 10V2M4 5l3-3 3 3M2 9v3a1 1 0 001 1h8a1 1 0 001-1V9" /></svg><input
+          type="file"
+          multiple
+          hidden
+          @change="doUpload"
+        /></label>
+        <label
+          class="tb-btn accent"
+          title="上传文件夹"
+        ><svg
+          width="14"
+          height="14"
+          viewBox="0 0 14 14"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+        ><path d="M2 4v8a1 1 0 001 1h8a1 1 0 001-1V5a1 1 0 00-1-1H6.5L5.5 2.5H3a1 1 0 00-1 1v.5" /><path d="M7 7v3M5.5 8.5h3" /></svg><input
+          type="file"
+          webkitdirectory
+          directory
+          multiple
+          hidden
+          @change="doFolderUpload"
+        /></label>
+        <button
+          class="tb-btn"
+          title="新建文件夹"
+          @click="showMkdir = true"
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 14 14"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+          ><path d="M2 4v8a1 1 0 001 1h8a1 1 0 001-1V5a1 1 0 00-1-1H6.5L5.5 2.5H3a1 1 0 00-1 1v.5" /><path d="M7 7v3M5.5 8.5h3" /></svg>
+        </button>
+        <button
+          class="tb-btn"
+          title="刷新"
+          @click="loadFiles"
+        >
+          <svg
+            width="14"
+            height="14"
+            viewBox="0 0 14 14"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+          ><path d="M12 7a5 5 0 11-1.5-3.5M12 2v4h-4" /></svg>
+        </button>
+        <button
+          class="tb-btn"
+          :class="{ on: viewMode === 'grid' }"
+          title="切换视图"
+          @click="viewMode = viewMode === 'list' ? 'grid' : 'list'"
+        >
+          <svg
+            v-if="viewMode === 'grid'"
+            width="14"
+            height="14"
+            viewBox="0 0 14 14"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.4"
+          ><rect
+            x="1"
+            y="1"
+            width="5"
+            height="5"
+            rx="1"
+          /><rect
+            x="8"
+            y="1"
+            width="5"
+            height="5"
+            rx="1"
+          /><rect
+            x="1"
+            y="8"
+            width="5"
+            height="5"
+            rx="1"
+          /><rect
+            x="8"
+            y="8"
+            width="5"
+            height="5"
+            rx="1"
+          /></svg>
+          <svg
+            v-else
+            width="14"
+            height="14"
+            viewBox="0 0 14 14"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+          ><path d="M2 3h10M2 7h10M2 11h7" /></svg>
         </button>
       </div>
       <div class="toolbar-right">
         <template v-if="selectedFiles.length">
           <span class="sel-count">{{ selectedFiles.length }} 个已选</span>
-          <button class="tb-btn" @click="cutSelected">剪切</button>
-          <button class="tb-btn" @click="copySelected">复制</button>
-          <button class="tb-btn danger" @click="batchDelete">删除</button>
+          <button
+            class="tb-btn"
+            @click="cutSelected"
+          >
+            剪切
+          </button>
+          <button
+            class="tb-btn"
+            @click="copySelected"
+          >
+            复制
+          </button>
+          <button
+            class="tb-btn danger"
+            @click="batchDelete"
+          >
+            删除
+          </button>
         </template>
-        <button v-if="clipboard.files.length" class="tb-btn accent" @click="doPaste">粘贴({{ clipboard.files.length }})</button>
+        <button
+          v-if="clipboard.files.length"
+          class="tb-btn accent"
+          @click="doPaste"
+        >
+          粘贴({{ clipboard.files.length }})
+        </button>
         <!-- type filter -->
         <div class="type-filter">
-          <button v-for="ft in fileTypeFilters" :key="ft.key" :class="['type-pill', { active: fileTypeFilter === ft.key }]" @click="fileTypeFilter = ft.key">{{ ft.label }}</button>
+          <button
+            v-for="ft in fileTypeFilters"
+            :key="ft.key"
+            :class="['type-pill', { active: fileTypeFilter === ft.key }]"
+            @click="fileTypeFilter = ft.key"
+          >
+            {{ ft.label }}
+          </button>
         </div>
         <div class="search-wrap">
-          <svg class="search-icon" width="13" height="13" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="5.5" cy="5.5" r="3.5"/><path d="M8.5 8.5L12 12"/></svg>
-          <input v-model="searchQuery" placeholder="搜索" class="search-inp" @input="doSearch" @keyup.escape="clearSearch" />
-          <button v-if="searchQuery" class="search-clr" @click="clearSearch">&times;</button>
+          <svg
+            class="search-icon"
+            width="13"
+            height="13"
+            viewBox="0 0 13 13"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+          ><circle
+            cx="5.5"
+            cy="5.5"
+            r="3.5"
+          /><path d="M8.5 8.5L12 12" /></svg>
+          <input
+            v-model="searchQuery"
+            placeholder="搜索"
+            class="search-inp"
+            @input="doSearch"
+            @keyup.escape="clearSearch"
+          />
+          <button
+            v-if="searchQuery"
+            class="search-clr"
+            @click="clearSearch"
+          >
+            &times;
+          </button>
         </div>
         <div class="sort-group">
-          <button v-for="opt in sortOptions" :key="opt.key" :class="['sort-pill', { active: sortBy === opt.key }]" @click="toggleSort(opt.key)">{{ opt.label }}<svg v-if="sortBy === opt.key" :class="['sort-arrow', { flip: sortOrder === -1 }]" width="8" height="8" viewBox="0 0 8 8" fill="currentColor"><path d="M4 1v6M1.5 4.5L4 7l2.5-2.5"/></svg></button>
+          <button
+            v-for="opt in sortOptions"
+            :key="opt.key"
+            :class="['sort-pill', { active: sortBy === opt.key }]"
+            @click="toggleSort(opt.key)"
+          >
+            {{ opt.label }}<svg
+              v-if="sortBy === opt.key"
+              :class="['sort-arrow', { flip: sortOrder === -1 }]"
+              width="8"
+              height="8"
+              viewBox="0 0 8 8"
+              fill="currentColor"
+            ><path d="M4 1v6M1.5 4.5L4 7l2.5-2.5" /></svg>
+          </button>
         </div>
       </div>
     </div>
@@ -59,101 +302,353 @@
     <div class="files-body">
       <!-- Left: Directory Tree -->
       <div class="file-tree-panel">
-        <div class="tree-head">目录</div>
+        <div class="tree-head">
+          目录
+        </div>
         <div class="tree-list">
-          <div :class="['tree-item', 'tree-root', { active: currentPath === '/' }]" @click="navigateTo('/')">
-            <span class="tree-arrow" :class="{ expanded: expandedDirs.has('/') }" @click.stop="toggleExpand('/')">▾</span>
+          <div
+            :class="['tree-item', 'tree-root', { active: currentPath === '/' }]"
+            @click="navigateTo('/')"
+          >
+            <span
+              class="tree-arrow"
+              :class="{ expanded: expandedDirs.has('/') }"
+              @click.stop="toggleExpand('/')"
+            >▾</span>
             <span class="tree-icon">📁</span><span class="tree-name">/</span>
           </div>
-          <template v-for="(node, i) in visibleNodes" :key="node.path">
-            <div :class="['tree-item', { active: currentPath === node.path }]" @click="navigateTo(node.path)" @contextmenu.prevent="onTreeContext($event, node)">
+          <template
+            v-for="(node, i) in visibleNodes"
+            :key="node.path"
+          >
+            <div
+              :class="['tree-item', { active: currentPath === node.path }]"
+              @click="navigateTo(node.path)"
+              @contextmenu.prevent="onTreeContext($event, node)"
+            >
               <span class="tree-indent">
-                <span v-for="d in node.depth - 1" :key="d" class="tree-line" :class="{ 'line-through': hasSiblingAfter(visibleNodes, i, d) }"></span>
-                <span class="tree-line" :class="node._last ? 'line-end' : 'line-branch'"></span>
+                <span
+                  v-for="d in node.depth - 1"
+                  :key="d"
+                  class="tree-line"
+                  :class="{ 'line-through': hasSiblingAfter(visibleNodes, i, d) }"
+                ></span>
+                <span
+                  class="tree-line"
+                  :class="node._last ? 'line-end' : 'line-branch'"
+                ></span>
               </span>
-              <span v-if="node.children > 0" class="tree-arrow" :class="{ expanded: expandedDirs.has(node.path) }" @click.stop="toggleExpand(node.path)">▸</span>
-              <span v-else class="tree-arrow-spacer"></span>
+              <span
+                v-if="node.children > 0"
+                class="tree-arrow"
+                :class="{ expanded: expandedDirs.has(node.path) }"
+                @click.stop="toggleExpand(node.path)"
+              >▸</span>
+              <span
+                v-else
+                class="tree-arrow-spacer"
+              ></span>
               <span class="tree-icon">{{ expandedDirs.has(node.path) ? '📂' : '📁' }}</span>
               <span class="tree-name">{{ node.name }}</span>
             </div>
           </template>
-          <div v-if="treeLoading" class="tree-loading">...</div>
+          <div
+            v-if="treeLoading"
+            class="tree-loading"
+          >
+            ...
+          </div>
         </div>
       </div>
 
       <!-- Center: File list -->
       <div class="files-center">
-        <div class="file-list-wrap" ref="fileTableEl"
-          @mousedown="onFileAreaMouseDown" @mousemove="onFileAreaMouseMove" @mouseup="onFileAreaMouseUp" @mouseleave="onFileAreaMouseUp">
-          <div v-if="dragSelecting && dragRect" class="drag-select-box" :style="{ left: dragRect.left + 'px', top: dragRect.top + 'px', width: dragRect.width + 'px', height: dragRect.height + 'px' }"></div>
+        <div
+          ref="fileTableEl"
+          class="file-list-wrap"
+          @mousedown="onFileAreaMouseDown"
+          @mousemove="onFileAreaMouseMove"
+          @mouseup="onFileAreaMouseUp"
+          @mouseleave="onFileAreaMouseUp"
+        >
+          <div
+            v-if="dragSelecting && dragRect"
+            class="drag-select-box"
+            :style="{ left: dragRect.left + 'px', top: dragRect.top + 'px', width: dragRect.width + 'px', height: dragRect.height + 'px' }"
+          ></div>
 
           <!-- Grid view -->
-          <div v-if="viewMode === 'grid' && displayFiles.length" class="file-grid">
-            <div v-for="f in sortedFiles" :key="f.path" :class="['grid-item', { dir: f.is_dir, selected: isSelected(f) }]" @click="onFileClick(f)" @dblclick="clickMode === 'select' ? onFileOpen(f) : null" @contextmenu.prevent="onContextMenu($event, f)">
+          <div
+            v-if="viewMode === 'grid' && displayFiles.length"
+            class="file-grid"
+          >
+            <div
+              v-for="f in sortedFiles"
+              :key="f.path"
+              :class="['grid-item', { dir: f.is_dir, selected: isSelected(f) }]"
+              @click="onFileClick(f)"
+              @dblclick="clickMode === 'select' ? onFileOpen(f) : null"
+              @contextmenu.prevent="onContextMenu($event, f)"
+            >
               <div class="grid-icon">
-                <img v-if="f.isUploading" src="data:image/svg+xml,..." style="display:none" />
-                <svg v-if="f.is_dir" width="36" height="36" viewBox="0 0 22 22" fill="var(--brand-500)" stroke="var(--brand-600)" stroke-width="0.7"><path d="M2.5 6.5v9.5a1.5 1.5 0 001.5 1.5h14a1.5 1.5 0 001.5-1.5V8a1 1 0 00-1-1h-7L9.5 5H4a1.5 1.5 0 00-1.5 1.5z"/></svg>
-                <svg v-else width="32" height="32" viewBox="0 0 20 20" fill="none" stroke="var(--text-muted)" stroke-width="1.2"><path d="M5.5 2h6l3 3v10.5a1.5 1.5 0 01-1.5 1.5H5.5a1.5 1.5 0 01-1.5-1.5V3.5A1.5 1.5 0 015.5 2z"/><path d="M11.5 2v3h3"/></svg>
+                <img
+                  v-if="f.isUploading"
+                  src="data:image/svg+xml,..."
+                  style="display:none"
+                />
+                <svg
+                  v-if="f.is_dir"
+                  width="36"
+                  height="36"
+                  viewBox="0 0 22 22"
+                  fill="var(--brand-500)"
+                  stroke="var(--brand-600)"
+                  stroke-width="0.7"
+                ><path d="M2.5 6.5v9.5a1.5 1.5 0 001.5 1.5h14a1.5 1.5 0 001.5-1.5V8a1 1 0 00-1-1h-7L9.5 5H4a1.5 1.5 0 00-1.5 1.5z" /></svg>
+                <svg
+                  v-else
+                  width="32"
+                  height="32"
+                  viewBox="0 0 20 20"
+                  fill="none"
+                  stroke="var(--text-muted)"
+                  stroke-width="1.2"
+                ><path d="M5.5 2h6l3 3v10.5a1.5 1.5 0 01-1.5 1.5H5.5a1.5 1.5 0 01-1.5-1.5V3.5A1.5 1.5 0 015.5 2z" /><path d="M11.5 2v3h3" /></svg>
               </div>
-              <div class="grid-name">{{ f.name }}</div>
-              <div v-if="f.isUploading" class="mini-progress"><div :style="{ width: f.progress + '%' }"></div></div>
+              <div class="grid-name">
+                {{ f.name }}
+              </div>
+              <div
+                v-if="f.isUploading"
+                class="mini-progress"
+              >
+                <div :style="{ width: f.progress + '%' }"></div>
+              </div>
             </div>
           </div>
 
           <!-- List view -->
-          <div v-else-if="displayFiles.length" class="file-list">
-            <div v-for="f in sortedFiles" :key="f.path"
-              class="file-row" :class="{ dir: f.is_dir, selected: isSelected(f), uploading: f.isUploading, 'cut-mark': clipboard.mode === 'cut' && clipboard.files.some(c => c.path === f.path) }"
-              :data-path="f.path" :draggable="true"
-              @dragstart.self="onDragStart($event, f)" @dragover.prevent="f.is_dir ? (dragOverDir = f.path, true) : false" @dragleave="dragOverDir = null"
-              @drop.prevent="f.is_dir ? onDropToDir($event, f) : null" @click="onFileClick(f)" @dblclick="clickMode === 'select' ? onFileOpen(f) : null" @contextmenu.prevent="onContextMenu($event, f)">
-              <span class="file-check" @click.stop="toggleSelect(f)">
-                <svg v-if="isSelected(f)" width="15" height="15" viewBox="0 0 15 15" fill="var(--brand-500)" stroke="var(--brand-500)" stroke-width="1.2"><rect x="1.5" y="1.5" width="12" height="12" rx="3.5"/><path d="M4.5 7.5l2 2 4-4" stroke="#fff" stroke-width="1.6" fill="none"/></svg>
-                <svg v-else width="15" height="15" viewBox="0 0 15 15" fill="none" stroke="var(--text-muted)" stroke-width="1.2"><rect x="1.5" y="1.5" width="12" height="12" rx="3.5"/></svg>
+          <div
+            v-else-if="displayFiles.length"
+            class="file-list"
+          >
+            <div
+              v-for="f in sortedFiles"
+              :key="f.path"
+              class="file-row"
+              :class="{ dir: f.is_dir, selected: isSelected(f), uploading: f.isUploading, 'cut-mark': clipboard.mode === 'cut' && clipboard.files.some(c => c.path === f.path) }"
+              :data-path="f.path"
+              :draggable="true"
+              @dragstart.self="onDragStart($event, f)"
+              @dragover.prevent="f.is_dir ? (dragOverDir = f.path, true) : false"
+              @dragleave="dragOverDir = null"
+              @drop.prevent="f.is_dir ? onDropToDir($event, f) : null"
+              @click="onFileClick(f)"
+              @dblclick="clickMode === 'select' ? onFileOpen(f) : null"
+              @contextmenu.prevent="onContextMenu($event, f)"
+            >
+              <span
+                class="file-check"
+                @click.stop="toggleSelect(f)"
+              >
+                <svg
+                  v-if="isSelected(f)"
+                  width="15"
+                  height="15"
+                  viewBox="0 0 15 15"
+                  fill="var(--brand-500)"
+                  stroke="var(--brand-500)"
+                  stroke-width="1.2"
+                ><rect
+                  x="1.5"
+                  y="1.5"
+                  width="12"
+                  height="12"
+                  rx="3.5"
+                /><path
+                  d="M4.5 7.5l2 2 4-4"
+                  stroke="#fff"
+                  stroke-width="1.6"
+                  fill="none"
+                /></svg>
+                <svg
+                  v-else
+                  width="15"
+                  height="15"
+                  viewBox="0 0 15 15"
+                  fill="none"
+                  stroke="var(--text-muted)"
+                  stroke-width="1.2"
+                ><rect
+                  x="1.5"
+                  y="1.5"
+                  width="12"
+                  height="12"
+                  rx="3.5"
+                /></svg>
               </span>
               <span class="file-icon">
-                <svg v-if="f.is_dir" width="22" height="22" viewBox="0 0 22 22" fill="var(--brand-500)" stroke="var(--brand-600)" stroke-width="0.7"><path d="M2.5 6.5v9.5a1.5 1.5 0 001.5 1.5h14a1.5 1.5 0 001.5-1.5V8a1 1 0 00-1-1h-7L9.5 5H4a1.5 1.5 0 00-1.5 1.5z"/></svg>
-                <svg v-else-if="f.isUploading" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="var(--brand-400)" stroke-width="1.2"><path d="M5.5 2h6l3 3v10.5a1.5 1.5 0 01-1.5 1.5H5.5a1.5 1.5 0 01-1.5-1.5V3.5A1.5 1.5 0 015.5 2z"/><path d="M11.5 2v3h3"/></svg>
-                <svg v-else width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="var(--text-muted)" stroke-width="1.2"><path d="M5.5 2h6l3 3v10.5a1.5 1.5 0 01-1.5 1.5H5.5a1.5 1.5 0 01-1.5-1.5V3.5A1.5 1.5 0 015.5 2z"/><path d="M11.5 2v3h3"/></svg>
+                <svg
+                  v-if="f.is_dir"
+                  width="22"
+                  height="22"
+                  viewBox="0 0 22 22"
+                  fill="var(--brand-500)"
+                  stroke="var(--brand-600)"
+                  stroke-width="0.7"
+                ><path d="M2.5 6.5v9.5a1.5 1.5 0 001.5 1.5h14a1.5 1.5 0 001.5-1.5V8a1 1 0 00-1-1h-7L9.5 5H4a1.5 1.5 0 00-1.5 1.5z" /></svg>
+                <svg
+                  v-else-if="f.isUploading"
+                  width="20"
+                  height="20"
+                  viewBox="0 0 20 20"
+                  fill="none"
+                  stroke="var(--brand-400)"
+                  stroke-width="1.2"
+                ><path d="M5.5 2h6l3 3v10.5a1.5 1.5 0 01-1.5 1.5H5.5a1.5 1.5 0 01-1.5-1.5V3.5A1.5 1.5 0 015.5 2z" /><path d="M11.5 2v3h3" /></svg>
+                <svg
+                  v-else
+                  width="20"
+                  height="20"
+                  viewBox="0 0 20 20"
+                  fill="none"
+                  stroke="var(--text-muted)"
+                  stroke-width="1.2"
+                ><path d="M5.5 2h6l3 3v10.5a1.5 1.5 0 01-1.5 1.5H5.5a1.5 1.5 0 01-1.5-1.5V3.5A1.5 1.5 0 015.5 2z" /><path d="M11.5 2v3h3" /></svg>
               </span>
               <span class="file-name">{{ f.name }}</span>
               <span class="file-meta">
-                <span v-if="f.isUploading" class="file-progress">{{ f.progress }}%</span>
-                <span v-else class="file-size">{{ fmtBytes(f.size) }}</span>
+                <span
+                  v-if="f.isUploading"
+                  class="file-progress"
+                >{{ f.progress }}%</span>
+                <span
+                  v-else
+                  class="file-size"
+                >{{ fmtBytes(f.size) }}</span>
                 <span class="file-time">{{ fmtTime(f.mod_time) }}</span>
               </span>
-              <span class="file-actions" @click.stop>
-                <button v-if="!f.is_dir && !f.isUploading && isTextExt(f)" class="act-btn" @click="startEdit(f)" title="编辑">✎</button>
-                <button v-if="!f.is_dir && !f.isUploading" class="act-btn" @click="downloadFile(f)" title="下载">↓</button>
-                <button v-if="!f.isUploading" class="act-btn" @click="startRename(f)" title="重命名">✐</button>
-                <button v-if="!f.isUploading" class="act-btn" @click="startShare(f)" title="分享">↗</button>
-                <button v-if="!f.isUploading" class="act-btn del" @click="deleteFile(f)" title="删除">✕</button>
+              <span
+                class="file-actions"
+                @click.stop
+              >
+                <button
+                  v-if="!f.is_dir && !f.isUploading && isTextExt(f)"
+                  class="act-btn"
+                  title="编辑"
+                  @click="startEdit(f)"
+                >✎</button>
+                <button
+                  v-if="!f.is_dir && !f.isUploading"
+                  class="act-btn"
+                  title="下载"
+                  @click="downloadFile(f)"
+                >↓</button>
+                <button
+                  v-if="!f.isUploading"
+                  class="act-btn"
+                  title="重命名"
+                  @click="startRename(f)"
+                >✐</button>
+                <button
+                  v-if="!f.isUploading"
+                  class="act-btn"
+                  title="分享"
+                  @click="startShare(f)"
+                >↗</button>
+                <button
+                  v-if="!f.isUploading"
+                  class="act-btn del"
+                  title="删除"
+                  @click="deleteFile(f)"
+                >✕</button>
               </span>
             </div>
           </div>
 
-          <div v-else-if="!loading" class="empty-list">
-            <svg width="40" height="40" viewBox="0 0 40 40" fill="none" stroke="var(--text-muted)" stroke-width="1"><path d="M5 8h12l3 3h15a3 3 0 013 3v16a3 3 0 01-3 3H5a3 3 0 01-3-3V11a3 3 0 013-3z"/></svg>
+          <div
+            v-else-if="!loading"
+            class="empty-list"
+          >
+            <svg
+              width="40"
+              height="40"
+              viewBox="0 0 40 40"
+              fill="none"
+              stroke="var(--text-muted)"
+              stroke-width="1"
+            ><path d="M5 8h12l3 3h15a3 3 0 013 3v16a3 3 0 01-3 3H5a3 3 0 01-3-3V11a3 3 0 013-3z" /></svg>
             <p>此目录为空</p>
-            <label class="empty-upload-btn"><svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M7 10V2M4 5l3-3 3 3M2 9v3a1 1 0 001 1h8a1 1 0 001-1V9"/></svg>上传文件<input type="file" multiple @change="doUpload" hidden /></label>
+            <label class="empty-upload-btn"><svg
+              width="14"
+              height="14"
+              viewBox="0 0 14 14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+            ><path d="M7 10V2M4 5l3-3 3 3M2 9v3a1 1 0 001 1h8a1 1 0 001-1V9" /></svg>上传文件<input
+              type="file"
+              multiple
+              hidden
+              @change="doUpload"
+            /></label>
           </div>
-          <div v-else class="loading-state">加载中...</div>
+          <div
+            v-else
+            class="loading-state"
+          >
+            加载中...
+          </div>
         </div>
       </div>
 
       <!-- Right: Upload panel -->
-      <div v-if="uploadStore.tasks.length" class="upload-panel" :class="{ collapsed: upCollapsed }">
-        <div class="up-head" @click="upCollapsed = !upCollapsed">
+      <div
+        v-if="uploadStore.tasks.length"
+        class="upload-panel"
+        :class="{ collapsed: upCollapsed }"
+      >
+        <div
+          class="up-head"
+          @click="upCollapsed = !upCollapsed"
+        >
           <span>{{ uploadStore.hasActive ? '上传中' : '已完成' }} ({{ uploadStore.tasks.length }})</span>
-          <button v-if="!uploadStore.hasActive" class="up-dismiss" @click.stop="uploadStore.clearDone()">✕</button>
+          <button
+            v-if="!uploadStore.hasActive"
+            class="up-dismiss"
+            @click.stop="uploadStore.clearDone()"
+          >
+            ✕
+          </button>
         </div>
-        <div v-if="!upCollapsed" class="up-body">
-          <div v-for="t in uploadStore.tasks" :key="t.id" class="up-item">
-            <div class="up-name">{{ t.name }}</div>
-            <div class="up-track"><div class="up-fill" :class="t.status" :style="{ width: t.progress + '%' }"></div></div>
+        <div
+          v-if="!upCollapsed"
+          class="up-body"
+        >
+          <div
+            v-for="t in uploadStore.tasks"
+            :key="t.id"
+            class="up-item"
+          >
+            <div class="up-name">
+              {{ t.name }}
+            </div>
+            <div class="up-track">
+              <div
+                class="up-fill"
+                :class="t.status"
+                :style="{ width: t.progress + '%' }"
+              ></div>
+            </div>
             <div class="up-meta">
               <span :class="['up-status', t.status]">{{ t.status === 'uploading' ? t.progress + '%' : t.status === 'done' ? '✓' : '✗' }}</span>
-              <button v-if="t.status === 'uploading'" class="up-cancel" @click="uploadStore.cancelTask(t.id)">✕</button>
+              <button
+                v-if="t.status === 'uploading'"
+                class="up-cancel"
+                @click="uploadStore.cancelTask(t.id)"
+              >
+                ✕
+              </button>
             </div>
           </div>
         </div>
@@ -161,34 +656,262 @@
     </div>
 
     <!-- Modals -->
-    <div v-if="showMkdir" class="modal-overlay" @click.self="showMkdir = false"><div class="modal-card"><h4>新建文件夹</h4><input v-model="newDirName" placeholder="文件夹名称" class="modal-input" @keyup.enter="doMkdir" /><div class="modal-actions"><button class="btn-cancel" @click="showMkdir = false">取消</button><button class="btn-ok" @click="doMkdir">创建</button></div></div></div>
-    <div v-if="showRename" class="modal-overlay" @click.self="showRename = false"><div class="modal-card"><h4>重命名</h4><input v-model="renameName" placeholder="新名称" class="modal-input" @keyup.enter="doRename" /><div class="modal-actions"><button class="btn-cancel" @click="showRename = false">取消</button><button class="btn-ok" @click="doRename">确定</button></div></div></div>
-    <div v-if="showEdit" class="modal-overlay" @click.self="showEdit = false"><div class="modal-card wide"><h4>编辑: {{ editFile?.name }}</h4><textarea v-model="editContent" class="modal-textarea" rows="14" spellcheck="false"></textarea><div class="modal-actions"><button class="btn-cancel" @click="showEdit = false">取消</button><button class="btn-ok" @click="doEdit" :disabled="editSaving">保存</button></div></div></div>
-    <div v-if="previewFile" class="modal-overlay preview-overlay" @click.self="previewFile = null"><div class="preview-modal">
-      <div class="preview-head"><span class="preview-title">{{ previewFile.name }}</span><span class="preview-size">{{ fmtBytes(previewFile.size) }}</span><button v-if="!previewFile.is_dir" class="btn-ok" @click="downloadFile(previewFile)">下载</button><button class="preview-close" @click="previewFile = null">&times;</button></div>
-      <div class="preview-body">
-        <div v-if="isVideo(previewFile)" class="video-wrap"><video ref="videoPlayer" controls autoplay :src="streamUrl(previewFile)"></video></div>
-        <div v-else-if="isImage(previewFile)" class="img-wrap"><img :src="streamUrl(previewFile)" :alt="previewFile.name" /></div>
-        <div v-else-if="isTextExt(previewFile)" class="text-wrap">
-          <div v-if="(previewFile.ext || '').toLowerCase() === '.md' && previewContent !== null" class="md-preview-content" v-html="renderMarkdown(previewContent)"></div>
-          <pre v-else-if="previewContent !== null" class="preview-text">{{ previewContent }}</pre>
-          <div v-else class="preview-loading">加载中...</div>
+    <div
+      v-if="showMkdir"
+      class="modal-overlay"
+      @click.self="showMkdir = false"
+    >
+      <div class="modal-card">
+        <h4>新建文件夹</h4><input
+          v-model="newDirName"
+          placeholder="文件夹名称"
+          class="modal-input"
+          @keyup.enter="doMkdir"
+        /><div class="modal-actions">
+          <button
+            class="btn-cancel"
+            @click="showMkdir = false"
+          >
+            取消
+          </button><button
+            class="btn-ok"
+            @click="doMkdir"
+          >
+            创建
+          </button>
         </div>
-        <div v-else class="preview-unsupported"><p>不支持预览此类型</p><button class="btn-ok" @click="downloadFile(previewFile)">下载</button></div>
       </div>
-    </div></div>
-    <div v-if="showShare" class="modal-overlay" @click.self="showShare = false"><div class="modal-card"><h4>分享</h4>
-      <div class="modal-field"><label>文件</label><span class="mono">{{ sharePath }}</span></div><div class="modal-field"><label>过期天数</label><input v-model.number="shareDays" type="number" min="0" class="modal-input" /></div><div class="modal-field"><label>密码 (可选)</label><input v-model="sharePass" placeholder="留空无密码" class="modal-input" /></div>
-      <div v-if="shareResult" class="share-link"><code>{{ shareResult }}</code><button class="btn-ok" @click="copyShareUrl">复制</button></div>
-      <div class="modal-actions"><button class="btn-cancel" @click="showShare = false">关闭</button><button class="btn-ok" @click="doShare" :disabled="sharing">{{ sharing ? '创建中...' : '创建' }}</button></div>
-    </div></div>
-    <div v-if="showStatFile" class="modal-overlay" @click.self="showStatFile = null"><div class="modal-card" v-if="statInfo"><h4>{{ showStatFile.name }}</h4>
-      <div class="stat-list"><div class="stat-line"><span class="sl">路径</span><span class="sv">{{ statInfo.path }}</span></div><div class="stat-line"><span class="sl">类型</span><span class="sv">{{ statInfo.is_dir ? '文件夹' : '文件' }}</span></div><div class="stat-line"><span class="sl">大小</span><span class="sv">{{ statInfo.size ? fmtBytes(statInfo.size) : '--' }}</span></div><div class="stat-line"><span class="sl">权限</span><span class="sv">{{ statInfo.mode }} ({{ statInfo.permissions }})</span></div><div class="stat-line"><span class="sl">修改时间</span><span class="sv">{{ statInfo.mod_time }}</span></div></div>
-      <div class="modal-actions"><button class="btn-cancel" @click="showStatFile = null">关闭</button></div>
-    </div></div>
+    </div>
+    <div
+      v-if="showRename"
+      class="modal-overlay"
+      @click.self="showRename = false"
+    >
+      <div class="modal-card">
+        <h4>重命名</h4><input
+          v-model="renameName"
+          placeholder="新名称"
+          class="modal-input"
+          @keyup.enter="doRename"
+        /><div class="modal-actions">
+          <button
+            class="btn-cancel"
+            @click="showRename = false"
+          >
+            取消
+          </button><button
+            class="btn-ok"
+            @click="doRename"
+          >
+            确定
+          </button>
+        </div>
+      </div>
+    </div>
+    <div
+      v-if="showEdit"
+      class="modal-overlay"
+      @click.self="showEdit = false"
+    >
+      <div class="modal-card wide">
+        <h4>编辑: {{ editFile?.name }}</h4><textarea
+          v-model="editContent"
+          class="modal-textarea"
+          rows="14"
+          spellcheck="false"
+        ></textarea><div class="modal-actions">
+          <button
+            class="btn-cancel"
+            @click="showEdit = false"
+          >
+            取消
+          </button><button
+            class="btn-ok"
+            :disabled="editSaving"
+            @click="doEdit"
+          >
+            保存
+          </button>
+        </div>
+      </div>
+    </div>
+    <div
+      v-if="previewFile"
+      class="modal-overlay preview-overlay"
+      @click.self="previewFile = null"
+    >
+      <div class="preview-modal">
+        <div class="preview-head">
+          <span class="preview-title">{{ previewFile.name }}</span><span class="preview-size">{{ fmtBytes(previewFile.size) }}</span><button
+            v-if="!previewFile.is_dir"
+            class="btn-ok"
+            @click="downloadFile(previewFile)"
+          >
+            下载
+          </button><button
+            class="preview-close"
+            @click="previewFile = null"
+          >
+            &times;
+          </button>
+        </div>
+        <div class="preview-body">
+          <div
+            v-if="isVideo(previewFile)"
+            class="video-wrap"
+          >
+            <video
+              ref="videoPlayer"
+              controls
+              autoplay
+              :src="streamUrl(previewFile)"
+            ></video>
+          </div>
+          <div
+            v-else-if="isImage(previewFile)"
+            class="img-wrap"
+          >
+            <img
+              :src="streamUrl(previewFile)"
+              :alt="previewFile.name"
+            />
+          </div>
+          <div
+            v-else-if="isTextExt(previewFile)"
+            class="text-wrap"
+          >
+            <div
+              v-if="(previewFile.ext || '').toLowerCase() === '.md' && previewContent !== null"
+              class="md-preview-content"
+              v-html="renderMarkdown(previewContent)"
+            ></div>
+            <pre
+              v-else-if="previewContent !== null"
+              class="preview-text"
+            >{{ previewContent }}</pre>
+            <div
+              v-else
+              class="preview-loading"
+            >
+              加载中...
+            </div>
+          </div>
+          <div
+            v-else
+            class="preview-unsupported"
+          >
+            <p>不支持预览此类型</p><button
+              class="btn-ok"
+              @click="downloadFile(previewFile)"
+            >
+              下载
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div
+      v-if="showShare"
+      class="modal-overlay"
+      @click.self="showShare = false"
+    >
+      <div class="modal-card">
+        <h4>分享</h4>
+        <div class="modal-field">
+          <label>文件</label><span class="mono">{{ sharePath }}</span>
+        </div><div class="modal-field">
+          <label>过期天数</label><input
+            v-model.number="shareDays"
+            type="number"
+            min="0"
+            class="modal-input"
+          />
+        </div><div class="modal-field">
+          <label>密码 (可选)</label><input
+            v-model="sharePass"
+            placeholder="留空无密码"
+            class="modal-input"
+          />
+        </div>
+        <div
+          v-if="shareResult"
+          class="share-link"
+        >
+          <code>{{ shareResult }}</code><button
+            class="btn-ok"
+            @click="copyShareUrl"
+          >
+            复制
+          </button>
+        </div>
+        <div class="modal-actions">
+          <button
+            class="btn-cancel"
+            @click="showShare = false"
+          >
+            关闭
+          </button><button
+            class="btn-ok"
+            :disabled="sharing"
+            @click="doShare"
+          >
+            {{ sharing ? '创建中...' : '创建' }}
+          </button>
+        </div>
+      </div>
+    </div>
+    <div
+      v-if="showStatFile"
+      class="modal-overlay"
+      @click.self="showStatFile = null"
+    >
+      <div
+        v-if="statInfo"
+        class="modal-card"
+      >
+        <h4>{{ showStatFile.name }}</h4>
+        <div class="stat-list">
+          <div class="stat-line">
+            <span class="sl">路径</span><span class="sv">{{ statInfo.path }}</span>
+          </div><div class="stat-line">
+            <span class="sl">类型</span><span class="sv">{{ statInfo.is_dir ? '文件夹' : '文件' }}</span>
+          </div><div class="stat-line">
+            <span class="sl">大小</span><span class="sv">{{ statInfo.size ? fmtBytes(statInfo.size) : '--' }}</span>
+          </div><div class="stat-line">
+            <span class="sl">权限</span><span class="sv">{{ statInfo.mode }} ({{ statInfo.permissions }})</span>
+          </div><div class="stat-line">
+            <span class="sl">修改时间</span><span class="sv">{{ statInfo.mod_time }}</span>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button
+            class="btn-cancel"
+            @click="showStatFile = null"
+          >
+            关闭
+          </button>
+        </div>
+      </div>
+    </div>
 
-    <ContextMenu :visible="ctxMenu.visible" :x="ctxMenu.x" :y="ctxMenu.y" :items="ctxItems" @close="ctxMenu.visible = false" @action="onCtxAction" />
-    <ConfirmDialog :visible="confirmDialog.visible" :title="confirmDialog.title" :message="confirmDialog.message" :confirm-text="confirmDialog.confirmText" :variant="confirmDialog.variant" icon="warn" @confirm="confirmDialog.visible = false; confirmDialog.resolve(true)" @cancel="confirmDialog.visible = false; confirmDialog.resolve(false)" />
+    <ContextMenu
+      :visible="ctxMenu.visible"
+      :x="ctxMenu.x"
+      :y="ctxMenu.y"
+      :items="ctxItems"
+      @close="ctxMenu.visible = false"
+      @action="onCtxAction"
+    />
+    <ConfirmDialog
+      :visible="confirmDialog.visible"
+      :title="confirmDialog.title"
+      :message="confirmDialog.message"
+      :confirm-text="confirmDialog.confirmText"
+      :variant="confirmDialog.variant"
+      icon="warn"
+      @confirm="confirmDialog.visible = false; confirmDialog.resolve(true)"
+      @cancel="confirmDialog.visible = false; confirmDialog.resolve(false)"
+    />
   </div>
 </template>
 
@@ -436,7 +1159,7 @@ const ctxItems = computed(() => { const target = ctxMenu.value.target; if (!targ
 function onTreeContext(e, node) { ctxMenu.value = { visible: true, x: e.clientX, y: e.clientY, target: node, isTree: true } }
 function onContextMenu(e, f) { if (!isSelected(f)) selectedFiles.value = [f]; ctxMenu.value = { visible: true, x: e.clientX, y: e.clientY, target: f } }
 function onCtxAction(key) { const target = ctxMenu.value.target; const isTree = ctxMenu.value.isTree; ctxMenu.value.visible = false
-  if (isTree) { switch (key) { case 'open': navigateTo(target.path); break; case 'mkdir': currentPath.value = target.path; showMkdir = true; break; case 'delete': deleteTreeDir(target); break } return }
+  if (isTree) { switch (key) { case 'open': navigateTo(target.path); break; case 'mkdir': currentPath.value = target.path; showMkdir.value = true; break; case 'delete': deleteTreeDir(target); break } return }
   const f = target
   switch (key) { case 'preview': openPreview(f); break; case 'edit': startEdit(f); break; case 'rename': startRename(f); break; case 'copy': clipboard.value = { files: [f], mode: 'copy' }; saveClipboard(); showToast('已复制'); break; case 'cut': clipboard.value = { files: [f], mode: 'cut' }; saveClipboard(); showToast('已剪切'); break; case 'download': downloadFile(f); break; case 'share': startShare(f); break; case 'stat': showStat(f); break; case 'delete': deleteFile(f); break } }
 async function deleteTreeDir(node) { const ok = await showConfirm('删除目录', '确认删除 ' + node.path + ' 及其所有内容？'); if (!ok) return; try { await api.delete('/api/nas/files', { data: { path: node.path } }); loadFiles(); showToast('已删除') } catch (e) { showToast('删除失败', 'error') } }

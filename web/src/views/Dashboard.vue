@@ -1,100 +1,220 @@
 <template>
   <div class="dashboard">
     <!-- Stats strip -->
-    <div class="stat-strip" v-if="status">
-      <div class="stat-block"><span class="stat-val">{{ status.scheduler?.total ?? 0 }}</span><span class="stat-key">域名记录</span></div>
+    <div
+      v-if="status"
+      class="stat-strip"
+    >
+      <div class="stat-block">
+        <span class="stat-val">{{ status.scheduler?.total ?? 0 }}</span><span class="stat-key">域名记录</span>
+      </div>
       <div class="stat-block">
         <span class="stat-val">{{ notifyCount }}</span><span class="stat-key">通知渠道</span>
         <span class="notify-dots">
-          <span :class="['nd', { on: notifyStatus.email_enabled }]" title="邮件">✉</span>
-          <span :class="['nd', { on: notifyStatus.webhook_enabled }]" title="Webhook">⤓</span>
-          <span :class="['nd', { on: notifyStatus.dingtalk_enabled }]" title="钉钉">⚡</span>
+          <span
+            :class="['nd', { on: notifyStatus.email_enabled }]"
+            title="邮件"
+          >✉</span>
+          <span
+            :class="['nd', { on: notifyStatus.webhook_enabled }]"
+            title="Webhook"
+          >⤓</span>
+          <span
+            :class="['nd', { on: notifyStatus.dingtalk_enabled }]"
+            title="钉钉"
+          >⚡</span>
         </span>
       </div>
-      <div class="stat-block"><span class="stat-val mono">{{ status.uptime || '-' }}</span><span class="stat-key">运行时间</span></div>
-      <div class="stat-block"><span class="stat-val mono">{{ status.version || '-' }}</span><span class="stat-key">版本</span></div>
-      <div class="stat-block"><span class="stat-dot" :class="{ running: status.scheduler?.running }" /><span class="stat-key">{{ status.scheduler?.running ? '调度器运行中' : '已停止' }}</span></div>
+      <div class="stat-block">
+        <span class="stat-val mono">{{ status.uptime || '-' }}</span><span class="stat-key">运行时间</span>
+      </div>
+      <div class="stat-block">
+        <span class="stat-val mono">{{ status.version || '-' }}</span><span class="stat-key">版本</span>
+      </div>
+      <div class="stat-block">
+        <span
+          class="stat-dot"
+          :class="{ running: status.scheduler?.running }"
+        ></span><span class="stat-key">{{ status.scheduler?.running ? '调度器运行中' : '已停止' }}</span>
+      </div>
     </div>
 
     <!-- AI Usage -->
-    <div class="ai-strip" v-if="aiStats">
-      <div class="ai-block"><span class="ai-val">{{ fmtNum(aiStats.requests) }}</span><span class="ai-key">AI 请求</span></div>
-      <div class="ai-block"><span class="ai-val">{{ fmtNum(aiStats.input_tokens + aiStats.output_tokens) }}</span><span class="ai-key">Token 用量</span></div>
-      <div class="ai-block"><span class="ai-val">¥{{ (aiStats.cost_usd || 0).toFixed(6) }}</span><span class="ai-key">成本</span></div>
-      <div class="ai-block"><span class="ai-val">{{ aiStats.requests > 0 ? Math.round((1 - aiStats.errors / aiStats.requests) * 100) + '%' : '--' }}</span><span class="ai-key">成功率</span></div>
-      <div class="ai-block" v-if="aiStats.models?.length">
+    <div
+      v-if="aiStats"
+      class="ai-strip"
+    >
+      <div class="ai-block">
+        <span class="ai-val">{{ fmtNum(aiStats.requests) }}</span><span class="ai-key">AI 请求</span>
+      </div>
+      <div class="ai-block">
+        <span class="ai-val">{{ fmtNum(aiStats.input_tokens + aiStats.output_tokens) }}</span><span class="ai-key">Token 用量</span>
+      </div>
+      <div class="ai-block">
+        <span class="ai-val">¥{{ (aiStats.cost_usd || 0).toFixed(6) }}</span><span class="ai-key">成本</span>
+      </div>
+      <div class="ai-block">
+        <span class="ai-val">{{ aiStats.requests > 0 ? Math.round((1 - aiStats.errors / aiStats.requests) * 100) + '%' : '--' }}</span><span class="ai-key">成功率</span>
+      </div>
+      <div
+        v-if="aiStats.models?.length"
+        class="ai-block"
+      >
         <span class="ai-key">可用模型</span>
         <span class="ai-models">{{ aiStats.models.join(', ') }}</span>
       </div>
-      <div v-if="aiStats?.started_at" class="ai-since">自 {{ fmtSince(aiStats.started_at) }} 起统计</div>
+      <div
+        v-if="aiStats?.started_at"
+        class="ai-since"
+      >
+        自 {{ fmtSince(aiStats.started_at) }} 起统计
+      </div>
     </div>
 
     <!-- Gauges -->
-    <div class="gauges-row" v-if="status?.system">
+    <div
+      v-if="status?.system"
+      class="gauges-row"
+    >
       <div class="gauge-card">
-        <div class="gauge-ring"><Doughnut :data="cpuChartData" :options="doughnutOpts" /><span class="gauge-val">{{ Math.round(status.system.cpu_usage) }}%</span></div>
+        <div class="gauge-ring">
+          <Doughnut
+            :data="cpuChartData"
+            :options="doughnutOpts"
+          /><span class="gauge-val">{{ Math.round(status.system.cpu_usage) }}%</span>
+        </div>
         <span class="gauge-label">CPU · {{ status.system.cpu_cores ?? 0 }}核</span>
       </div>
       <div class="gauge-card">
-        <div class="gauge-ring"><Doughnut :data="memChartData" :options="doughnutOpts" /><span class="gauge-val">{{ Math.round(status.system.mem_usage) }}%</span></div>
-        <span class="gauge-label">内存<button class="mem-btn" :disabled="clearingMem" @click="clearMemory">{{ clearingMem ? '释放中' : '释放' }}</button></span>
+        <div class="gauge-ring">
+          <Doughnut
+            :data="memChartData"
+            :options="doughnutOpts"
+          /><span class="gauge-val">{{ Math.round(status.system.mem_usage) }}%</span>
+        </div>
+        <span class="gauge-label">内存<button
+          class="mem-btn"
+          :disabled="clearingMem"
+          @click="clearMemory"
+        >{{ clearingMem ? '释放中' : '释放' }}</button></span>
       </div>
-      <div class="gauge-card" v-if="diskInfo">
-        <div class="gauge-ring"><Doughnut :data="diskChartData" :options="doughnutOpts" /><span class="gauge-val">{{ Math.round(diskInfo.used_pct) }}%</span></div>
+      <div
+        v-if="diskInfo"
+        class="gauge-card"
+      >
+        <div class="gauge-ring">
+          <Doughnut
+            :data="diskChartData"
+            :options="doughnutOpts"
+          /><span class="gauge-val">{{ Math.round(diskInfo.used_pct) }}%</span>
+        </div>
         <span class="gauge-label">磁盘 · {{ fmtBytes(diskInfo.used) }}/{{ fmtBytes(diskInfo.total) }}</span>
       </div>
       <div class="gauge-card net-gauge">
         <div class="net-rates">
-          <div class="net-rate down"><span class="net-arrow">↓</span><span class="net-val">{{ fmtRate(netRate.rx) }}</span></div>
-          <div class="net-rate up"><span class="net-arrow">↑</span><span class="net-val">{{ fmtRate(netRate.tx) }}</span></div>
+          <div class="net-rate down">
+            <span class="net-arrow">↓</span><span class="net-val">{{ fmtRate(netRate.rx) }}</span>
+          </div>
+          <div class="net-rate up">
+            <span class="net-arrow">↑</span><span class="net-val">{{ fmtRate(netRate.tx) }}</span>
+          </div>
         </div>
         <span class="gauge-label">网络 · 实时速率</span>
       </div>
     </div>
 
     <!-- MCP + Go Runtime + Process row -->
-    <div class="info-row" v-if="status">
+    <div
+      v-if="status"
+      class="info-row"
+    >
       <div class="info-card">
         <h4>MCP 服务器</h4>
         <div class="info-body">
-          <div class="mcp-summary"><span class="mcp-big">{{ mcpStats?.connected || 0 }}/{{ mcpStats?.total || 0 }}</span> 已连接 · {{ mcpStats?.tools || 0 }} 工具</div>
-          <div class="mcp-list" v-if="mcpStats?.servers?.length">
-            <div v-for="s in mcpStats.servers" :key="s.name" class="mcp-item">
+          <div class="mcp-summary">
+            <span class="mcp-big">{{ mcpStats?.connected || 0 }}/{{ mcpStats?.total || 0 }}</span> 已连接 · {{ mcpStats?.tools || 0 }} 工具
+          </div>
+          <div
+            v-if="mcpStats?.servers?.length"
+            class="mcp-list"
+          >
+            <div
+              v-for="s in mcpStats.servers"
+              :key="s.name"
+              class="mcp-item"
+            >
               <span :class="['mcp-dot', { on: s.connected }]"></span>
               <span class="mcp-name">{{ s.name }}</span>
               <span class="mcp-tools">{{ s.tools }} tools</span>
             </div>
           </div>
-          <div v-else class="info-empty">暂无 MCP 服务器</div>
+          <div
+            v-else
+            class="info-empty"
+          >
+            暂无 MCP 服务器
+          </div>
         </div>
       </div>
 
       <div class="info-card">
         <h4>Go Runtime</h4>
-        <div class="info-body" v-if="goRuntime">
-          <div class="info-line"><span>协程</span><b>{{ goRuntime.goroutines }}</b></div>
-          <div class="info-line"><span>堆内存</span><b>{{ goRuntime.heap_alloc_mb }} MB</b></div>
-          <div class="info-line"><span>GC 次数</span><b>{{ goRuntime.num_gc }}</b></div>
-          <div class="info-line"><span>最近 GC 暂停</span><b>{{ goRuntime.gc_pause_us }} µs</b></div>
-          <div class="info-line"><span>Go 版本</span><b class="mono">{{ goRuntime.go_version }}</b></div>
+        <div
+          v-if="goRuntime"
+          class="info-body"
+        >
+          <div class="info-line">
+            <span>协程</span><b>{{ goRuntime.goroutines }}</b>
+          </div>
+          <div class="info-line">
+            <span>堆内存</span><b>{{ goRuntime.heap_alloc_mb }} MB</b>
+          </div>
+          <div class="info-line">
+            <span>GC 次数</span><b>{{ goRuntime.num_gc }}</b>
+          </div>
+          <div class="info-line">
+            <span>最近 GC 暂停</span><b>{{ goRuntime.gc_pause_us }} µs</b>
+          </div>
+          <div class="info-line">
+            <span>Go 版本</span><b class="mono">{{ goRuntime.go_version }}</b>
+          </div>
         </div>
       </div>
 
       <div class="info-card">
         <h4>进程</h4>
-        <div class="info-body" v-if="processStats">
-          <div class="info-line"><span>RSS</span><b>{{ processStats.rss_kb ? Math.round(processStats.rss_kb / 1024) : '-' }} MB</b></div>
-          <div class="info-line"><span>线程</span><b>{{ processStats.threads || '-' }}</b></div>
+        <div
+          v-if="processStats"
+          class="info-body"
+        >
+          <div class="info-line">
+            <span>RSS</span><b>{{ processStats.rss_kb ? Math.round(processStats.rss_kb / 1024) : '-' }} MB</b>
+          </div>
+          <div class="info-line">
+            <span>线程</span><b>{{ processStats.threads || '-' }}</b>
+          </div>
         </div>
       </div>
 
       <div class="info-card">
         <h4>系统负载</h4>
-        <div class="info-body" v-if="status?.system?.load_avg">
+        <div
+          v-if="status?.system?.load_avg"
+          class="info-body"
+        >
           <div class="load-bars">
-            <div class="load-bar-wrap" v-for="(v, key) in parseLoad(status.system.load_avg)" :key="key">
+            <div
+              v-for="(v, key) in parseLoad(status.system.load_avg)"
+              :key="key"
+              class="load-bar-wrap"
+            >
               <span class="load-bar-label">{{ key }}</span>
-              <div class="load-bar-track"><div class="load-bar-fill" :style="{ width: Math.min(v / cpuCount * 100, 100) + '%' }"></div></div>
+              <div class="load-bar-track">
+                <div
+                  class="load-bar-fill"
+                  :style="{ width: Math.min(v / cpuCount * 100, 100) + '%' }"
+                ></div>
+              </div>
               <span class="load-bar-val">{{ v.toFixed(2) }}</span>
             </div>
           </div>
@@ -103,21 +223,43 @@
     </div>
 
     <!-- Top 5 Tools -->
-    <div class="chart-card" v-if="aiStats?.top_tools?.length">
+    <div
+      v-if="aiStats?.top_tools?.length"
+      class="chart-card"
+    >
       <h4>Top 工具调用</h4>
       <div class="top-tools">
-        <div v-for="t in aiStats.top_tools" :key="t.name" class="top-tool-item">
-          <span class="tt-name" :title="t.name">{{ t.name }}</span>
+        <div
+          v-for="t in aiStats.top_tools"
+          :key="t.name"
+          class="top-tool-item"
+        >
+          <span
+            class="tt-name"
+            :title="t.name"
+          >{{ t.name }}</span>
           <span class="tt-count">{{ t.count }}次</span>
           <span class="tt-lat">{{ t.avg_ms?.toFixed(0) || 0 }}ms</span>
-          <div class="tt-bar"><div class="tt-bar-fill" :style="{ width: (t.count / aiStats.top_tools[0].count * 100) + '%' }"></div></div>
+          <div class="tt-bar">
+            <div
+              class="tt-bar-fill"
+              :style="{ width: (t.count / aiStats.top_tools[0].count * 100) + '%' }"
+            ></div>
+          </div>
         </div>
       </div>
     </div>
 
     <!-- Interfaces -->
-    <div class="iface-row" v-if="ifaceGroups.length">
-      <div class="iface-card" v-for="g in ifaceGroups" :key="g.name">
+    <div
+      v-if="ifaceGroups.length"
+      class="iface-row"
+    >
+      <div
+        v-for="g in ifaceGroups"
+        :key="g.name"
+        class="iface-card"
+      >
         <span class="iface-name">{{ g.name }}</span>
         <span class="iface-addrs">{{ g.addrs.join(', ') }}</span>
         <span class="iface-rx">↓{{ fmtBytes(g.rx) }}</span>

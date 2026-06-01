@@ -1,107 +1,328 @@
 ﻿<template>
-  <div v-if="isLoginPage" class="login-layout">
+  <div
+    v-if="isLoginPage"
+    class="login-layout"
+  >
     <router-view v-slot="{ Component }">
-      <transition name="page" mode="out-in">
+      <transition
+        name="page"
+        mode="out-in"
+      >
         <component :is="Component" />
       </transition>
     </router-view>
   </div>
 
-  <div v-else class="app-glass-shell" :data-section="sectionName">
+  <div
+    v-else
+    class="app-glass-shell"
+    :data-section="sectionName"
+  >
     <!-- Floating top navigation -->
-    <nav class="floating-nav" :class="{ compact: !isDesktop }">
-      <div class="nav-brand" @click="navigate('/')" title="回到首页">
-        <img src="/logo.svg" alt="云兮之家" class="nav-logo" />
+    <nav
+      class="floating-nav"
+      :class="{ compact: !isDesktop }"
+    >
+      <div
+        class="nav-brand"
+        title="回到首页"
+        @click="navigate('/')"
+      >
+        <img
+          src="/logo.svg"
+          alt="云兮之家"
+          class="nav-logo"
+        />
       </div>
       <div class="nav-pills">
-        <button v-for="item in navItems" :key="item.path"
+        <button
+          v-for="item in navItems"
+          :key="item.path"
           :class="['nav-pill', { active: ready && currentRoute === item.path }]"
+          :title="!isDesktop ? item.label : ''"
           @click="navigate(item.path)"
-          :title="!isDesktop ? item.label : ''">
-          <span class="pill-icon" v-html="item.icon"></span>
-          <span v-if="isDesktop" class="pill-label">{{ item.label }}</span>
+        >
+          <span
+            class="pill-icon"
+            v-html="item.icon"
+          ></span>
+          <span
+            v-if="isDesktop"
+            class="pill-label"
+          >{{ item.label }}</span>
         </button>
       </div>
       <div class="nav-actions">
-        <button class="nav-action-btn" :title="theme.theme === 'dark' ? '切换到亮色模式' : '切换到暗色模式'" @click="theme.toggle()">
+        <button
+          class="nav-action-btn"
+          :title="theme.theme === 'dark' ? '切换到亮色模式' : '切换到暗色模式'"
+          @click="theme.toggle()"
+        >
           <!-- 显示当前主题的图标 -->
-          <svg v-if="theme.theme === 'dark'" width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
-            <path d="M8 2a6 6 0 1 0 6 5.4A4.5 4.5 0 0 1 8 2Z"/>
+          <svg
+            v-if="theme.theme === 'dark'"
+            width="15"
+            height="15"
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+          >
+            <path d="M8 2a6 6 0 1 0 6 5.4A4.5 4.5 0 0 1 8 2Z" />
           </svg>
-          <svg v-else width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
-            <circle cx="8" cy="8" r="4"/><path d="M8 2v1M8 13v1M2 8h1M13 8h1M3.8 3.8l.7.7M11.5 11.5l.7.7M3.8 12.2l.7-.7M11.5 4.5l.7-.7"/>
+          <svg
+            v-else
+            width="15"
+            height="15"
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+          >
+            <circle
+              cx="8"
+              cy="8"
+              r="4"
+            />
+            <path d="M8 2v1M8 13v1M2 8h1M13 8h1M3.8 3.8l.7.7M11.5 11.5l.7.7M3.8 12.2l.7-.7M11.5 4.5l.7-.7" />
           </svg>
         </button>
-        <button class="nav-action-btn" @click="doLogout" title="退出登录">
-          <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6 3H3a1 1 0 00-1 1v8a1 1 0 001 1h3M10 11l3-3-3-3M13 8H6"/></svg>
+        <button
+          class="nav-action-btn"
+          title="退出登录"
+          @click="doLogout"
+        >
+          <svg
+            width="15"
+            height="15"
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+          >
+            <path d="M6 3H3a1 1 0 00-1 1v8a1 1 0 001 1h3M10 11l3-3-3-3M13 8H6" />
+          </svg>
         </button>
       </div>
     </nav>
 
     <!-- Mobile bottom dock -->
-    <nav v-if="false" class="mobile-dock">
-      <button v-for="item in navItems" :key="item.path"
+    <nav
+      v-if="false"
+      class="mobile-dock"
+    >
+      <button
+        v-for="item in navItems"
+        :key="item.path"
         :class="['dock-item', { active: ready && currentRoute === item.path }]"
-        @click="navigate(item.path)">
-        <span class="dock-icon" v-html="item.icon"></span>
+        @click="navigate(item.path)"
+      >
+        <span
+          class="dock-icon"
+          v-html="item.icon"
+        ></span>
       </button>
-      <button class="dock-item" @click="doLogout" title="退出">
+      <button
+        class="dock-item"
+        title="退出"
+        @click="doLogout"
+      >
         <span class="dock-icon">
-          <svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M6 3H3a1 1 0 00-1 1v8a1 1 0 001 1h3M10 11l3-3-3-3M13 8H6"/></svg>
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+          >
+            <path d="M6 3H3a1 1 0 00-1 1v8a1 1 0 001 1h3M10 11l3-3-3-3M13 8H6" />
+          </svg>
         </span>
       </button>
     </nav>
 
     <!-- Main content area -->
-    <main class="floating-main" :class="{ 'has-dock': !isDesktop }">
+    <main
+      class="floating-main"
+      :class="{ 'has-dock': !isDesktop }"
+    >
       <router-view v-slot="{ Component, route }">
-        <transition name="page" mode="out-in">
-          <component :is="Component" :key="route.path" />
+        <transition
+          name="page"
+          mode="out-in"
+        >
+          <component
+            :is="Component"
+            :key="route.path"
+          />
         </transition>
       </router-view>
     </main>
 
     <!-- Floating AI chat widget (hidden on /chat, Sidebar handles nav) -->
-    <div v-if="currentRoute !== '/chat' && !currentRoute.startsWith('/chat/')" class="floating-chat-widget" :class="{ expanded: chatWidgetOpen }"
-      :style="(widgetPos.x || widgetPos.y) ? { left: widgetPos.x + 'px', top: widgetPos.y + 'px', right: 'auto', bottom: 'auto' } : {}">
-      <button class="chat-widget-toggle" @click="toggleChatWidget" :title="chatWidgetOpen ? '收起' : 'AI 对话'"
-        @touchstart="onWidgetDragStart" @touchmove="onWidgetDragMove" @touchend="onWidgetDragEnd">
-        <svg v-if="!chatWidgetOpen" width="22" height="22" viewBox="0 0 22 22" fill="none">
+    <div
+      v-if="currentRoute !== '/chat' && !currentRoute.startsWith('/chat/')"
+      class="floating-chat-widget"
+      :class="{ expanded: chatWidgetOpen }"
+      :style="
+        widgetPos.x || widgetPos.y
+          ? { left: widgetPos.x + 'px', top: widgetPos.y + 'px', right: 'auto', bottom: 'auto' }
+          : {}
+      "
+    >
+      <button
+        class="chat-widget-toggle"
+        :title="chatWidgetOpen ? '收起' : 'AI 对话'"
+        @click="toggleChatWidget"
+        @touchstart="onWidgetDragStart"
+        @touchmove="onWidgetDragMove"
+        @touchend="onWidgetDragEnd"
+      >
+        <svg
+          v-if="!chatWidgetOpen"
+          width="22"
+          height="22"
+          viewBox="0 0 22 22"
+          fill="none"
+        >
           <!-- Chat bubble with dots -->
-          <path d="M16 1H6C3.8 1 2 2.8 2 5v8c0 2.2 1.8 4 4 4h2l3.5 3L15 17h1c2.2 0 4-1.8 4-4V5c0-2.2-1.8-4-4-4z" stroke="var(--brand-400)" stroke-width="1.3" fill="none"/>
-          <circle cx="7" cy="9" r="1.2" fill="var(--brand-500)" opacity="0.7">
-            <animate attributeName="opacity" values="0.3;0.9;0.3" dur="2s" repeatCount="indefinite" begin="0s"/>
+          <path
+            d="M16 1H6C3.8 1 2 2.8 2 5v8c0 2.2 1.8 4 4 4h2l3.5 3L15 17h1c2.2 0 4-1.8 4-4V5c0-2.2-1.8-4-4-4z"
+            stroke="var(--brand-400)"
+            stroke-width="1.3"
+            fill="none"
+          />
+          <circle
+            cx="7"
+            cy="9"
+            r="1.2"
+            fill="var(--brand-500)"
+            opacity="0.7"
+          >
+            <animate
+              attributeName="opacity"
+              values="0.3;0.9;0.3"
+              dur="2s"
+              repeatCount="indefinite"
+              begin="0s"
+            />
           </circle>
-          <circle cx="11" cy="9" r="1.2" fill="var(--brand-500)" opacity="0.4">
-            <animate attributeName="opacity" values="0.3;0.9;0.3" dur="2s" repeatCount="indefinite" begin="0.4s"/>
+          <circle
+            cx="11"
+            cy="9"
+            r="1.2"
+            fill="var(--brand-500)"
+            opacity="0.4"
+          >
+            <animate
+              attributeName="opacity"
+              values="0.3;0.9;0.3"
+              dur="2s"
+              repeatCount="indefinite"
+              begin="0.4s"
+            />
           </circle>
-          <circle cx="15" cy="9" r="1.2" fill="var(--brand-500)" opacity="0.4">
-            <animate attributeName="opacity" values="0.3;0.9;0.3" dur="2s" repeatCount="indefinite" begin="0.8s"/>
+          <circle
+            cx="15"
+            cy="9"
+            r="1.2"
+            fill="var(--brand-500)"
+            opacity="0.4"
+          >
+            <animate
+              attributeName="opacity"
+              values="0.3;0.9;0.3"
+              dur="2s"
+              repeatCount="indefinite"
+              begin="0.8s"
+            />
           </circle>
         </svg>
-        <svg v-else width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 3l12 12M15 3l-12 12"/></svg>
+        <svg
+          v-else
+          width="18"
+          height="18"
+          viewBox="0 0 18 18"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+          stroke-linecap="round"
+        >
+          <path d="M3 3l12 12M15 3l-12 12" />
+        </svg>
       </button>
-      <div v-if="chatWidgetOpen" class="chat-widget-body">
+      <div
+        v-if="chatWidgetOpen"
+        class="chat-widget-body"
+      >
         <div class="chat-widget-header">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 11c0 1.1-.9 2-2 2h-2l-3 3.5V13H5c-1.1 0-2-.9-2-2V5c0-1.1.9-2 2-2h8c1.1 0 2 .9 2 2v6z"/></svg>
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+          >
+            <path d="M14 11c0 1.1-.9 2-2 2h-2l-3 3.5V13H5c-1.1 0-2-.9-2-2V5c0-1.1.9-2 2-2h8c1.1 0 2 .9 2 2v6z" />
+          </svg>
           <span>AI 对话</span>
           <span class="chat-widget-badge">{{ chatSessions.length }}</span>
         </div>
         <div class="chat-widget-sessions">
-          <div v-if="chatSessions.length === 0" class="chat-widget-empty">暂无对话记录</div>
-          <button v-for="s in chatSessions" :key="s.id"
+          <div
+            v-if="chatSessions.length === 0"
+            class="chat-widget-empty"
+          >
+            暂无对话记录
+          </div>
+          <button
+            v-for="s in chatSessions"
+            :key="s.id"
             :class="['chat-widget-session', { active: activeSessionId === s.id }]"
-            @click="navigateChat(s.id)">
+            @click="navigateChat(s.id)"
+          >
             <span class="cws-name">{{ s.title || '新对话' }}</span>
             <span class="cws-time">{{ sessionTime(s.updated_at) }}</span>
-            <button class="cws-del" @click.stop="deleteSession(s.id)" title="Delete">
-              <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2 2l6 6M8 2l-6 6"/></svg>
+            <button
+              class="cws-del"
+              title="Delete"
+              @click.stop="deleteSession(s.id)"
+            >
+              <svg
+                width="10"
+                height="10"
+                viewBox="0 0 10 10"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.6"
+              >
+                <path d="M2 2l6 6M8 2l-6 6" />
+              </svg>
             </button>
           </button>
         </div>
         <div class="chat-widget-footer">
-          <button class="chat-widget-new-btn" @click="navigate('/chat')">
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M7 2v10M2 7h10"/></svg>
+          <button
+            class="chat-widget-new-btn"
+            @click="navigate('/chat')"
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 14 14"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.8"
+              stroke-linecap="round"
+            >
+              <path d="M7 2v10M2 7h10" />
+            </svg>
             新对话
           </button>
         </div>
@@ -109,22 +330,78 @@
     </div>
 
     <!-- Global Upload Bar -->
-    <div v-if="uploadStore.tasks.length" class="floating-upload-bar" :class="{ collapsed: gupCollapsed }">
-      <div class="gup-header" @click="gupCollapsed = !gupCollapsed">
-        <svg :class="['gup-chevron', { open: !gupCollapsed }]" width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 2l3 3-3 3"/></svg>
+    <div
+      v-if="uploadStore.tasks.length"
+      class="floating-upload-bar"
+      :class="{ collapsed: gupCollapsed }"
+    >
+      <div
+        class="gup-header"
+        @click="gupCollapsed = !gupCollapsed"
+      >
+        <svg
+          :class="['gup-chevron', { open: !gupCollapsed }]"
+          width="10"
+          height="10"
+          viewBox="0 0 10 10"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+        >
+          <path d="M3 2l3 3-3 3" />
+        </svg>
         <span class="gup-label">{{ uploadStore.hasActive ? '上传中' : '上传完成' }}</span>
-        <span class="gup-count">{{ uploadStore.hasActive ? uploadStore.tasks.filter(t => t.status === 'uploading').length : uploadStore.tasks.length }} files</span>
-        <button v-if="!uploadStore.hasActive" class="gup-dismiss" @click.stop="uploadStore.clearDone()">
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 2l8 8M10 2l-8 8"/></svg>
+        <span class="gup-count">{{
+          uploadStore.hasActive
+            ? uploadStore.tasks.filter((t) => t.status === 'uploading').length
+            : uploadStore.tasks.length
+        }}
+          files</span>
+        <button
+          v-if="!uploadStore.hasActive"
+          class="gup-dismiss"
+          @click.stop="uploadStore.clearDone()"
+        >
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 12 12"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path d="M2 2l8 8M10 2l-8 8" />
+          </svg>
         </button>
       </div>
-      <div v-if="!gupCollapsed" class="gup-body">
-        <div class="gup-track"><div class="gup-fill" :style="{ width: uploadStore.totalProgress + '%' }"></div></div>
+      <div
+        v-if="!gupCollapsed"
+        class="gup-body"
+      >
+        <div class="gup-track">
+          <div
+            class="gup-fill"
+            :style="{ width: uploadStore.totalProgress + '%' }"
+          ></div>
+        </div>
         <div class="gup-list">
-          <div v-for="t in uploadStore.tasks" :key="t.id" class="gup-item">
+          <div
+            v-for="t in uploadStore.tasks"
+            :key="t.id"
+            class="gup-item"
+          >
             <span class="gup-name">{{ t.name }}</span>
-            <span :class="['gup-status', t.status]">{{ t.status === 'uploading' ? t.progress + '%' : t.status === 'done' ? '\✓' : '\✗' }}</span>
-            <button v-if="t.status === 'uploading'" class="gup-cancel" @click="uploadStore.cancelTask(t.id)" title="取消">✕</button>
+            <span :class="['gup-status', t.status]">{{
+              t.status === 'uploading' ? t.progress + '%' : t.status === 'done' ? '\✓' : '\✗'
+            }}</span>
+            <button
+              v-if="t.status === 'uploading'"
+              class="gup-cancel"
+              title="取消"
+              @click="uploadStore.cancelTask(t.id)"
+            >
+              ✕
+            </button>
           </div>
         </div>
       </div>
@@ -161,7 +438,8 @@ function onWidgetDragStart(e) {
 }
 function onWidgetDragMove(e) {
   const t = e.touches[0]
-  const dx = t.clientX - _dragStart.x, dy = t.clientY - _dragStart.y
+  const dx = t.clientX - _dragStart.x,
+    dy = t.clientY - _dragStart.y
   if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
     _dragged = true
     widgetPos.value = { x: _dragStart.elX + dx, y: _dragStart.elY + dy }
@@ -172,19 +450,33 @@ function onWidgetDragEnd() {
 }
 
 let _autoDismiss = null
-watch(() => uploadStore.hasActive, (active) => {
-  if (active) { clearTimeout(_autoDismiss); _autoDismiss = null; return }
-  _autoDismiss = setTimeout(() => { uploadStore.clearDone(); _autoDismiss = null }, 4000)
-})
+watch(
+  () => uploadStore.hasActive,
+  (active) => {
+    if (active) {
+      clearTimeout(_autoDismiss)
+      _autoDismiss = null
+      return
+    }
+    _autoDismiss = setTimeout(() => {
+      uploadStore.clearDone()
+      _autoDismiss = null
+    }, 4000)
+  },
+)
 
 const currentRoute = computed(() => router.currentRoute.value.path)
 const isLoginPage = computed(() => route.path === '/login')
 
 const sectionName = computed(() => {
   const name = {
-    '/': 'dashboard', '/files': 'files', '/domains': 'domains',
-    '/market': 'market', '/system': 'system', '/terminal': 'terminal',
-    '/settings': 'settings'
+    '/': 'dashboard',
+    '/files': 'files',
+    '/domains': 'domains',
+    '/market': 'market',
+    '/system': 'system',
+    '/terminal': 'terminal',
+    '/settings': 'settings',
   }[route.path]
   return name || ''
 })
@@ -199,18 +491,44 @@ function onResize() {
 const isAdmin = computed(() => authStore_.user?.role === 'admin')
 
 const allNavItems = [
-  { path: '/', label: '仪表盘', icon: '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="1" y="1" width="6" height="7" rx="1.5"/><rect x="11" y="1" width="6" height="4" rx="1.5"/><rect x="1" y="12" width="6" height="5" rx="1.5"/><rect x="11" y="9" width="6" height="8" rx="1.5"/></svg>' },
-  { path: '/files', label: '文件管理', icon: '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 3.5h4l1.5 1.5H15a1 1 0 011 1v8a1 1 0 01-1 1H3a1 1 0 01-1-1v-10a1 1 0 011-1z"/></svg>' },
-  { path: '/domains', label: 'DNS 管理', icon: '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="9" cy="9" r="7.5"/><ellipse cx="9" cy="9" rx="3.5" ry="7.5"/><path d="M1.5 9h15M9 1.5v15"/></svg>' },
-  { path: '/market', label: '技能市场', icon: '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M9 1.5L11.5 6l5 .5-3.7 3.3 1 5L9 12.2 4.2 14.8l1-5L1.5 6.5l5-.5z"/></svg>' },
-  { path: '/logs', label: '日志', icon: '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 4h12M3 8h8M3 12h10M3 16h6"/></svg>' },
-  { path: '/system', label: '系统控制', icon: '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="2" y="3" width="14" height="10" rx="2"/><path d="M6 16h6M9 13v3"/></svg>' },
-  { path: '/settings', label: '设置', icon: '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="9" cy="9" r="2.5"/><path d="M9 1.5v2M9 14.5v2M1.5 9h2M14.5 9h2M3.5 3.5l1.5 1.5M13 13l1.5 1.5M3.5 14.5l1.5-1.5M13 5l1.5-1.5"/></svg>' },
+  {
+    path: '/',
+    label: '仪表盘',
+    icon: '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="1" y="1" width="6" height="7" rx="1.5"/><rect x="11" y="1" width="6" height="4" rx="1.5"/><rect x="1" y="12" width="6" height="5" rx="1.5"/><rect x="11" y="9" width="6" height="8" rx="1.5"/></svg>',
+  },
+  {
+    path: '/files',
+    label: '文件管理',
+    icon: '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 3.5h4l1.5 1.5H15a1 1 0 011 1v8a1 1 0 01-1 1H3a1 1 0 01-1-1v-10a1 1 0 011-1z"/></svg>',
+  },
+  {
+    path: '/domains',
+    label: 'DNS 管理',
+    icon: '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="9" cy="9" r="7.5"/><ellipse cx="9" cy="9" rx="3.5" ry="7.5"/><path d="M1.5 9h15M9 1.5v15"/></svg>',
+  },
+  {
+    path: '/market',
+    label: '技能市场',
+    icon: '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M9 1.5L11.5 6l5 .5-3.7 3.3 1 5L9 12.2 4.2 14.8l1-5L1.5 6.5l5-.5z"/></svg>',
+  },
+  {
+    path: '/logs',
+    label: '日志',
+    icon: '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 4h12M3 8h8M3 12h10M3 16h6"/></svg>',
+  },
+  {
+    path: '/system',
+    label: '系统控制',
+    icon: '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="2" y="3" width="14" height="10" rx="2"/><path d="M6 16h6M9 13v3"/></svg>',
+  },
+  {
+    path: '/settings',
+    label: '设置',
+    icon: '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="9" cy="9" r="2.5"/><path d="M9 1.5v2M9 14.5v2M1.5 9h2M14.5 9h2M3.5 3.5l1.5 1.5M13 13l1.5 1.5M3.5 14.5l1.5-1.5M13 5l1.5-1.5"/></svg>',
+  },
 ]
 
-const navItems = computed(() =>
-  allNavItems.filter(item => item.path !== '/system' && item.path !== '/terminal')
-)
+const navItems = computed(() => allNavItems.filter((item) => item.path !== '/system' && item.path !== '/terminal'))
 
 // Chat sessions for floating widget
 const chatSessions = ref([])
@@ -220,7 +538,7 @@ async function loadChatSessions() {
   try {
     const token = localStorage.getItem('token')
     if (!token) return
-    const res = await fetch('/api/chat/sessions', { headers: { 'Authorization': 'Bearer ' + token } })
+    const res = await fetch('/api/chat/sessions', { headers: { Authorization: 'Bearer ' + token } })
     if (res.status === 401) return
     const data = await res.json()
     if (data.code === 200) {
@@ -232,7 +550,7 @@ async function loadChatSessions() {
 function navigateChat(sessionId) {
   chatWidgetOpen.value = false
   activeSessionId.value = sessionId
-  router.push({ path: "/chat/" + sessionId })
+  router.push({ path: '/chat/' + sessionId })
 }
 
 function toggleChatWidget() {
@@ -252,9 +570,12 @@ function sessionTime(t) {
 
 async function deleteSession(id) {
   try {
-    const token = localStorage.getItem("token")
-    await fetch("/api/chat/sessions/" + id, { method: "DELETE", headers: { "Authorization": "Bearer " + token } })
-    if (activeSessionId.value === id) { activeSessionId.value = ""; router.push({ path: "/chat" }) }
+    const token = localStorage.getItem('token')
+    await fetch('/api/chat/sessions/' + id, { method: 'DELETE', headers: { Authorization: 'Bearer ' + token } })
+    if (activeSessionId.value === id) {
+      activeSessionId.value = ''
+      router.push({ path: '/chat' })
+    }
     loadChatSessions()
   } catch (e) {}
 }
@@ -263,7 +584,9 @@ onMounted(() => {
   loadChatSessions()
   uploadStore.resumeFromStorage()
   window.addEventListener('resize', onResize)
-  nextTick(() => { ready.value = true })
+  nextTick(() => {
+    ready.value = true
+  })
 })
 
 onUnmounted(() => {
@@ -274,14 +597,20 @@ function navigate(path) {
   router.push(path)
 }
 
-function doLogout() { authStore_.logout(); router.push('/login') }
+function doLogout() {
+  authStore_.logout()
+  router.push('/login')
+}
 
 // Auto-collapse chat widget when leaving chat page
-watch(() => route.path, (newPath) => {
-  if (newPath === '/chat') {
-    chatWidgetOpen.value = false
-  }
-})
+watch(
+  () => route.path,
+  (newPath) => {
+    if (newPath === '/chat') {
+      chatWidgetOpen.value = false
+    }
+  },
+)
 </script>
 
 <style>
@@ -335,7 +664,9 @@ watch(() => route.path, (newPath) => {
   cursor: pointer;
 }
 
-.nav-logo { height: 20px; }
+.nav-logo {
+  height: 20px;
+}
 
 .nav-pills {
   display: flex;
@@ -346,7 +677,9 @@ watch(() => route.path, (newPath) => {
   overflow-x: auto;
   scrollbar-width: none;
 }
-.nav-pills::-webkit-scrollbar { display: none; }
+.nav-pills::-webkit-scrollbar {
+  display: none;
+}
 
 .nav-pill {
   display: flex;
@@ -368,14 +701,14 @@ watch(() => route.path, (newPath) => {
 }
 
 .nav-pill:hover {
-  background: rgba(255,255,255,0.35);
+  background: rgba(255, 255, 255, 0.35);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
   color: var(--text-primary);
 }
 
 .nav-pill.active {
-  background: rgba(14,165,233,0.12);
+  background: rgba(14, 165, 233, 0.12);
   color: var(--brand-600);
   font-weight: var(--weight-semibold);
 }
@@ -406,11 +739,13 @@ watch(() => route.path, (newPath) => {
   font-size: var(--text-sm);
 }
 
-[data-theme="dark"] .nav-pill.active {
-  background: rgba(14,165,233,0.15);
+[data-theme='dark'] .nav-pill.active {
+  background: rgba(14, 165, 233, 0.15);
   color: #38bdf8;
 }
-[data-theme="dark"] .nav-pill.active::after { background: #38bdf8; }
+[data-theme='dark'] .nav-pill.active::after {
+  background: #38bdf8;
+}
 
 .nav-actions {
   display: flex;
@@ -435,7 +770,7 @@ watch(() => route.path, (newPath) => {
 }
 
 .nav-action-btn:hover {
-  background: rgba(255,255,255,0.35);
+  background: rgba(255, 255, 255, 0.35);
   color: var(--text-primary);
 }
 
@@ -445,9 +780,16 @@ watch(() => route.path, (newPath) => {
   max-width: calc(100% - 16px);
   border-radius: 14px;
 }
-.floating-nav.compact .nav-brand { padding-right: 6px; }
-.floating-nav.compact .nav-pill { padding: 7px 9px; gap: 0; }
-.floating-nav.compact .nav-actions { padding-left: 4px; }
+.floating-nav.compact .nav-brand {
+  padding-right: 6px;
+}
+.floating-nav.compact .nav-pill {
+  padding: 7px 9px;
+  gap: 0;
+}
+.floating-nav.compact .nav-actions {
+  padding-left: 4px;
+}
 
 /* ============================================
    Mobile Bottom Dock
@@ -486,7 +828,7 @@ watch(() => route.path, (newPath) => {
 
 .dock-item:hover,
 .dock-item.active {
-  background: rgba(255,255,255,0.35);
+  background: rgba(255, 255, 255, 0.35);
   color: var(--brand-600);
 }
 
@@ -509,7 +851,9 @@ watch(() => route.path, (newPath) => {
   position: relative;
 }
 
-[data-theme="dark"] .dock-item.active { color: #38bdf8; }
+[data-theme='dark'] .dock-item.active {
+  color: #38bdf8;
+}
 
 /* ============================================
    Main Content
@@ -581,8 +925,14 @@ watch(() => route.path, (newPath) => {
 }
 
 @keyframes widgetSlideIn {
-  from { opacity: 0; transform: translateY(10px) scale(0.96); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .chat-widget-header {
@@ -601,14 +951,17 @@ watch(() => route.path, (newPath) => {
   margin-left: auto;
   font-size: 10px;
   font-weight: var(--weight-semibold);
-  background: rgba(14,165,233,0.12);
+  background: rgba(14, 165, 233, 0.12);
   color: var(--brand-600);
   padding: 1px 7px;
   border-radius: 8px;
   min-width: 18px;
   text-align: center;
 }
-[data-theme="dark"] .chat-widget-badge { background: rgba(14,165,233,0.15); color: #38bdf8; }
+[data-theme='dark'] .chat-widget-badge {
+  background: rgba(14, 165, 233, 0.15);
+  color: #38bdf8;
+}
 
 .chat-widget-sessions {
   flex: 1;
@@ -643,11 +996,11 @@ watch(() => route.path, (newPath) => {
 }
 
 .chat-widget-session:hover {
-  background: rgba(255,255,255,0.35);
+  background: rgba(255, 255, 255, 0.35);
 }
 
 .chat-widget-session.active {
-  background: rgba(14,165,233,0.10);
+  background: rgba(14, 165, 233, 0.1);
 }
 
 .cws-name {
@@ -681,8 +1034,14 @@ watch(() => route.path, (newPath) => {
   flex-shrink: 0;
 }
 
-.chat-widget-session:hover .cws-del { opacity: 0.7; }
-.cws-del:hover { background: rgba(220,38,38,0.10); color: var(--color-danger); opacity: 1; }
+.chat-widget-session:hover .cws-del {
+  opacity: 0.7;
+}
+.cws-del:hover {
+  background: rgba(220, 38, 38, 0.1);
+  color: var(--color-danger);
+  opacity: 1;
+}
 
 .chat-widget-footer {
   padding: 8px 12px;
@@ -699,7 +1058,7 @@ watch(() => route.path, (newPath) => {
   padding: 8px;
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-sm);
-  background: rgba(255,255,255,0.30);
+  background: rgba(255, 255, 255, 0.3);
   color: var(--brand-600);
   font-family: var(--font-sans);
   font-size: var(--text-sm);
@@ -709,8 +1068,8 @@ watch(() => route.path, (newPath) => {
 }
 
 .chat-widget-new-btn:hover {
-  background: rgba(14,165,233,0.10);
-  border-color: rgba(14,165,233,0.2);
+  background: rgba(14, 165, 233, 0.1);
+  border-color: rgba(14, 165, 233, 0.2);
 }
 
 /* ============================================
@@ -734,7 +1093,9 @@ watch(() => route.path, (newPath) => {
   transition: all 0.2s var(--ease-out-expo);
 }
 
-.floating-upload-bar.collapsed { width: auto; }
+.floating-upload-bar.collapsed {
+  width: auto;
+}
 
 .gup-header {
   display: flex;
@@ -746,37 +1107,121 @@ watch(() => route.path, (newPath) => {
   -webkit-user-select: none;
   transition: background 0.1s;
 }
-.gup-header:hover { background: rgba(0,0,0,0.02); }
-.gup-chevron { flex-shrink: 0; transition: transform 0.2s var(--ease-out-expo); color: var(--text-muted); }
-.gup-chevron.open { transform: rotate(90deg); }
-.gup-label { font-size: var(--text-sm); font-weight: var(--weight-semibold); color: var(--text-primary); }
-.gup-count { font-size: var(--text-xs); color: var(--text-muted); margin-left: auto; }
+.gup-header:hover {
+  background: rgba(0, 0, 0, 0.02);
+}
+.gup-chevron {
+  flex-shrink: 0;
+  transition: transform 0.2s var(--ease-out-expo);
+  color: var(--text-muted);
+}
+.gup-chevron.open {
+  transform: rotate(90deg);
+}
+.gup-label {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--text-primary);
+}
+.gup-count {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  margin-left: auto;
+}
 .gup-dismiss {
-  display: flex; align-items: center; justify-content: center;
-  width: 22px; height: 22px; border: none; border-radius: var(--radius-xs);
-  background: transparent; color: var(--text-muted); cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
   transition: all 0.1s;
 }
-.gup-dismiss:hover { background: rgba(220,38,38,0.08); color: var(--color-danger); }
+.gup-dismiss:hover {
+  background: rgba(220, 38, 38, 0.08);
+  color: var(--color-danger);
+}
 
-.gup-body { padding: 0 12px 10px; }
-.gup-track { height: 3px; border-radius: 2px; background: var(--bg-progress-track); overflow: hidden; margin-bottom: 6px; }
-.gup-fill { height: 100%; background: var(--brand-500); border-radius: 2px; transition: width 0.3s var(--ease-out-expo); }
-.gup-list { display: flex; flex-direction: column; gap: 3px; max-height: 140px; overflow-y: auto; }
-.gup-item { display: flex; align-items: center; gap: 6px; font-size: var(--text-xs); }
-.gup-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-secondary); }
-.gup-status { font-size: 10px; font-weight: var(--weight-semibold); min-width: 28px; text-align: right; }
-.gup-status.uploading { color: var(--brand-500); }
-.gup-status.done { color: var(--color-success); }
-.gup-status.error { color: var(--color-danger); }
-.gup-cancel { width: 20px; height: 20px; border: none; background: rgba(220,38,38,0.08); color: var(--color-danger); border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 10px; padding: 0; }
-.gup-cancel:hover { background: rgba(220,38,38,0.18); }
+.gup-body {
+  padding: 0 12px 10px;
+}
+.gup-track {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--bg-progress-track);
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+.gup-fill {
+  height: 100%;
+  background: var(--brand-500);
+  border-radius: 2px;
+  transition: width 0.3s var(--ease-out-expo);
+}
+.gup-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 140px;
+  overflow-y: auto;
+}
+.gup-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-xs);
+}
+.gup-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-secondary);
+}
+.gup-status {
+  font-size: 10px;
+  font-weight: var(--weight-semibold);
+  min-width: 28px;
+  text-align: right;
+}
+.gup-status.uploading {
+  color: var(--brand-500);
+}
+.gup-status.done {
+  color: var(--color-success);
+}
+.gup-status.error {
+  color: var(--color-danger);
+}
+.gup-cancel {
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: rgba(220, 38, 38, 0.08);
+  color: var(--color-danger);
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  padding: 0;
+}
+.gup-cancel:hover {
+  background: rgba(220, 38, 38, 0.18);
+}
 
 /* ============================================
    Responsive
    ============================================ */
 @media (min-width: 768px) {
-  .floating-main { padding: 80px 28px 28px; }
+  .floating-main {
+    padding: 80px 28px 28px;
+  }
 }
 
 @media (max-width: 767px) {
@@ -785,7 +1230,9 @@ watch(() => route.path, (newPath) => {
     padding: 4px 6px;
     border-radius: 14px;
   }
-  .floating-nav.compact .nav-pill { padding: 6px 8px; }
+  .floating-nav.compact .nav-pill {
+    padding: 6px 8px;
+  }
 
   .floating-main {
     padding: 78px 10px 10px;
@@ -796,8 +1243,10 @@ watch(() => route.path, (newPath) => {
   }
 
   .floating-chat-widget {
-    bottom: 16px; right: 8px;
-    z-index: 50; opacity: 0.85;
+    bottom: 16px;
+    right: 8px;
+    z-index: 50;
+    opacity: 0.85;
   }
   .chat-widget-body {
     width: calc(100vw - 32px);
@@ -819,6 +1268,8 @@ watch(() => route.path, (newPath) => {
 <style>
 /* 全局修复：移动端 Arco Switch 不变形 */
 @media (max-width: 767px) {
-  .arco-switch { flex-shrink: 0 !important; }
+  .arco-switch {
+    flex-shrink: 0 !important;
+  }
 }
 </style>

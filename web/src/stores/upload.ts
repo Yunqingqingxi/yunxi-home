@@ -41,10 +41,10 @@ interface SavedTask {
 
 // ── Adaptive chunk sizing ─────────────────
 function chunkSizeFor(fileSize: number): number {
-  if (fileSize < 5 * 1024 * 1024)   return fileSize   // <5MB: no split
-  if (fileSize < 50 * 1024 * 1024)  return 5 * 1024 * 1024
+  if (fileSize < 5 * 1024 * 1024) return fileSize // <5MB: no split
+  if (fileSize < 50 * 1024 * 1024) return 5 * 1024 * 1024
   if (fileSize < 500 * 1024 * 1024) return 10 * 1024 * 1024
-  return 20 * 1024 * 1024                              // >500MB
+  return 20 * 1024 * 1024 // >500MB
 }
 
 const CHUNK_THRESHOLD = 10 * 1024 * 1024 // files above this use chunked upload
@@ -52,11 +52,16 @@ const CHUNK_THRESHOLD = 10 * 1024 * 1024 // files above this use chunked upload
 // ── sessionStorage helpers ────────────────
 function saveState(tasks: UploadTask[]): void {
   try {
-    const slim = tasks.map(t => ({
-      id: t.id, name: t.name, dir: t.dir,
-      uploadId: t._uploadId, fileSize: t.fileSize,
-      chunkSize: t._chunkSize, totalChunks: t._totalChunks,
-      progress: t.progress, status: t.status,
+    const slim = tasks.map((t) => ({
+      id: t.id,
+      name: t.name,
+      dir: t.dir,
+      uploadId: t._uploadId,
+      fileSize: t.fileSize,
+      chunkSize: t._chunkSize,
+      totalChunks: t._totalChunks,
+      progress: t.progress,
+      status: t.status,
     }))
     sessionStorage.setItem('upload_state', JSON.stringify(slim))
   } catch (_) {}
@@ -66,10 +71,14 @@ function loadState(): SavedTask[] {
   try {
     const raw = sessionStorage.getItem('upload_state')
     return raw ? JSON.parse(raw) : []
-  } catch (_) { return [] }
+  } catch (_) {
+    return []
+  }
 }
 
-function clearState(): void { sessionStorage.removeItem('upload_state') }
+function clearState(): void {
+  sessionStorage.removeItem('upload_state')
+}
 
 // ── Concurrency control ───────────────────
 class ConcurrencyPool {
@@ -77,12 +86,16 @@ class ConcurrencyPool {
   private running: number = 0
   private queue: Array<() => void> = []
 
-  constructor(max: number) { this.max = max }
+  constructor(max: number) {
+    this.max = max
+  }
 
   acquire(): Promise<void> {
-    return new Promise(resolve => {
-      if (this.running < this.max) { this.running++; resolve() }
-      else this.queue.push(resolve)
+    return new Promise((resolve) => {
+      if (this.running < this.max) {
+        this.running++
+        resolve()
+      } else this.queue.push(resolve)
     })
   }
 
@@ -98,7 +111,7 @@ export const useUploadStore = defineStore('upload', () => {
   const tasks = ref<UploadTask[]>([])
   const initialized = ref(false)
 
-  const hasActive = computed(() => tasks.value.some(t => t.status === 'uploading'))
+  const hasActive = computed(() => tasks.value.some((t) => t.status === 'uploading'))
   const totalProgress = computed(() => {
     if (!tasks.value.length) return 0
     const sum = tasks.value.reduce((s, t) => s + t.progress, 0)
@@ -106,7 +119,9 @@ export const useUploadStore = defineStore('upload', () => {
   })
 
   let _completeListener: (() => void) | null = null
-  function onAllComplete(fn: () => void): void { _completeListener = fn }
+  function onAllComplete(fn: () => void): void {
+    _completeListener = fn
+  }
   function _checkAllDone(): void {
     if (!hasActive.value && _completeListener) _completeListener()
   }
@@ -114,10 +129,16 @@ export const useUploadStore = defineStore('upload', () => {
   function _addTask(name: string, fileSize: number, dir: string, abortCtrl: AbortController): string {
     const id = Date.now() + '_' + Math.random().toString(36).slice(2, 6)
     const task: UploadTask = {
-      id, name, dir, fileSize,
-      progress: 0, status: 'uploading',
+      id,
+      name,
+      dir,
+      fileSize,
+      progress: 0,
+      status: 'uploading',
       _abort: abortCtrl,
-      _uploadId: null, _chunkSize: 0, _totalChunks: 0,
+      _uploadId: null,
+      _chunkSize: 0,
+      _totalChunks: 0,
     }
     tasks.value.push(task)
     saveState(tasks.value)
@@ -125,39 +146,49 @@ export const useUploadStore = defineStore('upload', () => {
   }
 
   function _updateProgress(id: string, pct: number): void {
-    const t = tasks.value.find(t => t.id === id)
-    if (t) { t.progress = Math.min(pct, 100); saveState(tasks.value) }
+    const t = tasks.value.find((t) => t.id === id)
+    if (t) {
+      t.progress = Math.min(pct, 100)
+      saveState(tasks.value)
+    }
   }
 
   function _markDone(id: string): void {
-    const t = tasks.value.find(t => t.id === id)
-    if (t) { t.progress = 100; t.status = 'done' }
+    const t = tasks.value.find((t) => t.id === id)
+    if (t) {
+      t.progress = 100
+      t.status = 'done'
+    }
     saveState(tasks.value)
     _checkAllDone()
   }
 
   function _markError(id: string): void {
-    const t = tasks.value.find(t => t.id === id)
+    const t = tasks.value.find((t) => t.id === id)
     if (t) t.status = 'error'
     saveState(tasks.value)
     _checkAllDone()
   }
 
   function cancelTask(id: string): void {
-    const t = tasks.value.find(t => t.id === id)
-    if (t && t._abort) { t._abort.abort(); t.status = 'error'; t.progress = 0 }
+    const t = tasks.value.find((t) => t.id === id)
+    if (t && t._abort) {
+      t._abort.abort()
+      t.status = 'error'
+      t.progress = 0
+    }
     saveState(tasks.value)
     _checkAllDone()
   }
 
   function removeTask(id: string): void {
-    tasks.value = tasks.value.filter(t => t.id !== id)
+    tasks.value = tasks.value.filter((t) => t.id !== id)
     saveState(tasks.value)
     _checkAllDone()
   }
 
   function clearDone(): void {
-    tasks.value = tasks.value.filter(t => t.status === 'uploading')
+    tasks.value = tasks.value.filter((t) => t.status === 'uploading')
     if (!tasks.value.length) clearState()
     else saveState(tasks.value)
   }
@@ -171,16 +202,24 @@ export const useUploadStore = defineStore('upload', () => {
     }
 
     const taskId = _addTask(file.name, file.size, dir, abortCtrl)
-    const t = tasks.value.find(t => t.id === taskId)
-    if (t) { t._isSmall = true; saveState(tasks.value) }
+    const t = tasks.value.find((t) => t.id === taskId)
+    if (t) {
+      t._isSmall = true
+      saveState(tasks.value)
+    }
     const form = new FormData()
     form.append('file', file)
     form.append('dir', dir)
-    api.post('/api/nas/files/upload', form, { timeout: 0, signal: abortCtrl.signal,
-      onUploadProgress: (evt: any) => {
-        if (evt.total > 0) _updateProgress(taskId, Math.round((evt.loaded / evt.total) * 100))
-      }
-    }).then(() => _markDone(taskId)).catch(() => _markError(taskId))
+    api
+      .post('/api/nas/files/upload', form, {
+        timeout: 0,
+        signal: abortCtrl.signal,
+        onUploadProgress: (evt: any) => {
+          if (evt.total > 0) _updateProgress(taskId, Math.round((evt.loaded / evt.total) * 100))
+        },
+      })
+      .then(() => _markDone(taskId))
+      .catch(() => _markError(taskId))
     return taskId
   }
 
@@ -189,13 +228,19 @@ export const useUploadStore = defineStore('upload', () => {
     const chunkSize = chunkSizeFor(file.size)
     const totalChunks = Math.ceil(file.size / chunkSize)
     const taskId = _addTask(file.name, file.size, dir, abortCtrl)
-    const t = tasks.value.find(t => t.id === taskId)
-    if (t) { t._chunkSize = chunkSize; t._totalChunks = totalChunks }
+    const t = tasks.value.find((t) => t.id === taskId)
+    if (t) {
+      t._chunkSize = chunkSize
+      t._totalChunks = totalChunks
+    }
     saveState(tasks.value)
 
     try {
       const initRes = await api.post<ApiResponse<{ upload_id: string }>>('/api/nas/files/upload/init', {
-        filename: file.name, dir, total_size: file.size, chunk_size: chunkSize,
+        filename: file.name,
+        dir,
+        total_size: file.size,
+        chunk_size: chunkSize,
       })
       const uploadId = initRes.data?.data?.upload_id
       if (!uploadId) throw new Error('Init failed')
@@ -229,7 +274,7 @@ export const useUploadStore = defineStore('upload', () => {
           } catch (e: any) {
             if (e.name === 'AbortError' || e.code === 'ERR_CANCELED') throw e
             if (attempt === retries) throw e
-            await new Promise(r => setTimeout(r, 1000 * (attempt + 1)))
+            await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)))
           }
         }
       }
@@ -238,10 +283,16 @@ export const useUploadStore = defineStore('upload', () => {
       const pool = new ConcurrencyPool(_concurrency)
       const promises: Promise<void>[] = []
       for (let i = 0; i < totalChunks; i++) {
-        promises.push((async (idx: number) => {
-          await pool.acquire()
-          try { await uploadChunk(idx) } finally { pool.release() }
-        })(i))
+        promises.push(
+          (async (idx: number) => {
+            await pool.acquire()
+            try {
+              await uploadChunk(idx)
+            } finally {
+              pool.release()
+            }
+          })(i),
+        )
       }
       await Promise.all(promises)
 
@@ -261,12 +312,15 @@ export const useUploadStore = defineStore('upload', () => {
   // ── Adaptive concurrency ────────────────
   let _concurrency = 4
   function _adjustConcurrency(chunkDurationMs: number): void {
-    if (chunkDurationMs < 500)       _concurrency = Math.min(8, _concurrency + 1)
+    if (chunkDurationMs < 500) _concurrency = Math.min(8, _concurrency + 1)
     else if (chunkDurationMs > 3000) _concurrency = Math.max(2, _concurrency - 1)
   }
 
   // ── Batch upload ────────────────────────
-  function startBatchUpload(items: BatchItem[], onProgress?: (done: number, total: number, name: string, failed?: any[]) => void): string | undefined {
+  function startBatchUpload(
+    items: BatchItem[],
+    onProgress?: (done: number, total: number, name: string, failed?: any[]) => void,
+  ): string | undefined {
     if (!items || !items.length) return
     const abortCtrl = new AbortController()
     const total = items.length
@@ -300,10 +354,10 @@ export const useUploadStore = defineStore('upload', () => {
     const concurrency = Math.min(MAX_SMALL_CONCURRENT, total)
     Promise.all(Array.from({ length: concurrency }, () => worker()))
       .then(() => {
-        const t = tasks.value.find(t => t.id === taskId)
+        const t = tasks.value.find((t) => t.id === taskId)
         if (t) {
           if (results.failed.length) {
-            t.status = results.success.length ? 'partial' as const : 'error' as const
+            t.status = results.success.length ? ('partial' as const) : ('error' as const)
             t._results = results
           }
           if (t.progress >= 100) _markDone(taskId)
@@ -331,7 +385,10 @@ export const useUploadStore = defineStore('upload', () => {
     const totalChunks = Math.ceil(file.size / chunkSize)
 
     const initRes = await api.post<ApiResponse<{ upload_id: string }>>('/api/nas/files/upload/init', {
-      filename: file.name, dir, total_size: file.size, chunk_size: chunkSize,
+      filename: file.name,
+      dir,
+      total_size: file.size,
+      chunk_size: chunkSize,
     })
     const uploadId = initRes.data?.data?.upload_id
     if (!uploadId) throw new Error('Init failed')
@@ -339,28 +396,32 @@ export const useUploadStore = defineStore('upload', () => {
     const pool = new ConcurrencyPool(_concurrency)
     const promises: Promise<void>[] = []
     for (let i = 0; i < totalChunks; i++) {
-      promises.push((async (idx: number) => {
-        await pool.acquire()
-        try {
-          const start = idx * chunkSize
-          const end = Math.min(start + chunkSize, file.size)
-          const blob = file.slice(start, end)
-          const form = new FormData()
-          form.append('file', blob, file.name + '.part' + idx)
-          form.append('upload_id', uploadId)
-          form.append('chunk_index', String(idx))
-          for (let attempt = 0; attempt <= 3; attempt++) {
-            try {
-              await api.post('/api/nas/files/upload/chunk', form, { timeout: 120000, signal: abortCtrl?.signal })
-              return
-            } catch (e: any) {
-              if (e.name === 'AbortError' || e.code === 'ERR_CANCELED') throw e
-              if (attempt === 3) throw e
-              await new Promise(r => setTimeout(r, 1000 * (attempt + 1)))
+      promises.push(
+        (async (idx: number) => {
+          await pool.acquire()
+          try {
+            const start = idx * chunkSize
+            const end = Math.min(start + chunkSize, file.size)
+            const blob = file.slice(start, end)
+            const form = new FormData()
+            form.append('file', blob, file.name + '.part' + idx)
+            form.append('upload_id', uploadId)
+            form.append('chunk_index', String(idx))
+            for (let attempt = 0; attempt <= 3; attempt++) {
+              try {
+                await api.post('/api/nas/files/upload/chunk', form, { timeout: 120000, signal: abortCtrl?.signal })
+                return
+              } catch (e: any) {
+                if (e.name === 'AbortError' || e.code === 'ERR_CANCELED') throw e
+                if (attempt === 3) throw e
+                await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)))
+              }
             }
+          } finally {
+            pool.release()
           }
-        } finally { pool.release() }
-      })(i))
+        })(i),
+      )
     }
     await Promise.all(promises)
     await api.post('/api/nas/files/upload/complete', { upload_id: uploadId })
@@ -368,16 +429,22 @@ export const useUploadStore = defineStore('upload', () => {
 
   // ── Ensure directories before folder upload ─
   async function ensureDirectories(items: BatchItem[]): Promise<void> {
-    const dirs = new Set(items.map(i => i.dir))
+    const dirs = new Set(items.map((i) => i.dir))
     const sorted = [...dirs].sort((a, b) => a.split('/').length - b.split('/').length)
     for (const dir of sorted) {
       if (dir === '/' || dir === '') continue
-      try { await api.post('/api/nas/files/mkdir', { path: dir }) }
-      catch (e) { console.warn('Mkdir failed for', dir, e) }
+      try {
+        await api.post('/api/nas/files/mkdir', { path: dir })
+      } catch (e) {
+        console.warn('Mkdir failed for', dir, e)
+      }
     }
   }
 
-  async function startFolderUpload(items: BatchItem[], onProgress?: (done: number, total: number, name: string, failed?: any[]) => void): Promise<string | undefined> {
+  async function startFolderUpload(
+    items: BatchItem[],
+    onProgress?: (done: number, total: number, name: string, failed?: any[]) => void,
+  ): Promise<string | undefined> {
     await ensureDirectories(items)
     return startBatchUpload(items, onProgress)
   }
@@ -391,13 +458,19 @@ export const useUploadStore = defineStore('upload', () => {
     if (!saved.length) return
 
     for (const savedTask of saved) {
-      if (savedTask._isSmall) { savedTask.status = 'error'; continue }
+      if (savedTask._isSmall) {
+        savedTask.status = 'error'
+        continue
+      }
       if (savedTask.status !== 'uploading' || !savedTask._uploadId) continue
       // Check server-side status
       try {
-        const res = await api.get<ApiResponse<{ chunks_done: boolean[]; total_chunks: number }>>('/api/nas/files/upload/status', {
-          params: { upload_id: savedTask._uploadId }
-        })
+        const res = await api.get<ApiResponse<{ chunks_done: boolean[]; total_chunks: number }>>(
+          '/api/nas/files/upload/status',
+          {
+            params: { upload_id: savedTask._uploadId },
+          },
+        )
         const meta = res.data?.data
         if (!meta) continue
 
@@ -415,12 +488,12 @@ export const useUploadStore = defineStore('upload', () => {
       }
     }
 
-    const displayTasks = saved.filter(t => t.status !== 'uploading')
+    const displayTasks = saved.filter((t) => t.status !== 'uploading')
     if (displayTasks.length) {
-      tasks.value = displayTasks.map(t => ({
+      tasks.value = displayTasks.map((t) => ({
         ...t,
         _abort: new AbortController(),
-        id: t.id || (Date.now() + '_' + Math.random().toString(36).slice(2, 6)),
+        id: t.id || Date.now() + '_' + Math.random().toString(36).slice(2, 6),
         _uploadId: t.uploadId || t._uploadId,
         fileSize: t.fileSize,
         status: t.status as UploadTask['status'],
@@ -430,10 +503,17 @@ export const useUploadStore = defineStore('upload', () => {
   }
 
   return {
-    tasks, hasActive, totalProgress,
-    startUpload, startBatchUpload, startFolderUpload,
-    cancelTask, removeTask, clearDone,
-    onAllComplete, resumeFromStorage,
+    tasks,
+    hasActive,
+    totalProgress,
+    startUpload,
+    startBatchUpload,
+    startFolderUpload,
+    cancelTask,
+    removeTask,
+    clearDone,
+    onAllComplete,
+    resumeFromStorage,
     ensureDirectories,
   }
 })

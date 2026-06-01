@@ -1,8 +1,11 @@
 <template>
   <div class="page-header">
     <h3>{{ title }}</h3>
-    <div v-if="$slots.actions" class="ph-actions">
-      <slot name="actions" />
+    <div
+      v-if="$slots.actions"
+      class="ph-actions"
+    >
+      <slot name="actions"></slot>
     </div>
   </div>
 </template>

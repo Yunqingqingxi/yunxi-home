@@ -8,12 +8,18 @@
     <!-- Right: Form / Setup -->
     <div class="login-right">
       <div class="login-form-card glass-elevated">
-        <Transition name="slide-fade" mode="out-in">
+        <Transition
+          name="slide-fade"
+          mode="out-in"
+        >
           <LoginSetup
             v-if="step === 1 || step === 2"
             key="setup"
           />
-          <LoginForm v-else key="login" />
+          <LoginForm
+            v-else
+            key="login"
+          />
         </Transition>
       </div>
     </div>

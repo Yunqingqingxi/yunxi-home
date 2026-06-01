@@ -3,32 +3,116 @@
     <div class="brand-content">
       <div class="brand-logo">
         <!-- Cloud + House SVG -->
-        <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <svg
+          viewBox="0 0 48 48"
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
+        >
           <defs>
-            <linearGradient id="blg" x1="4" y1="4" x2="44" y2="44" gradientUnits="userSpaceOnUse">
-              <stop offset="0%" stop-color="#fff" stop-opacity="0.95"/>
-              <stop offset="100%" stop-color="#e0f2fe" stop-opacity="0.7"/>
+            <linearGradient
+              id="blg"
+              x1="4"
+              y1="4"
+              x2="44"
+              y2="44"
+              gradientUnits="userSpaceOnUse"
+            >
+              <stop
+                offset="0%"
+                stop-color="#fff"
+                stop-opacity="0.95"
+              />
+              <stop
+                offset="100%"
+                stop-color="#e0f2fe"
+                stop-opacity="0.7"
+              />
             </linearGradient>
           </defs>
           <!-- Cloud -->
-          <path d="M8 28 C4 26 3 20 7 17 C4 11 10 6 18 8 C16 2 28 2 30 8 C35 4 40 9 39 15 C43 14 44 22 39 26 L39 27 C40 29 39 32 35 32 L11 32 C6 32 5 30 8 28Z" fill="url(#blg)" opacity="0.9"/>
+          <path
+            d="M8 28 C4 26 3 20 7 17 C4 11 10 6 18 8 C16 2 28 2 30 8 C35 4 40 9 39 15 C43 14 44 22 39 26 L39 27 C40 29 39 32 35 32 L11 32 C6 32 5 30 8 28Z"
+            fill="url(#blg)"
+            opacity="0.9"
+          />
           <!-- House -->
-          <polygon points="16,24 24,16 32,24" fill="#fff" opacity="0.85"/>
-          <rect x="19" y="24" width="10" height="8" rx="0.5" fill="#fff" opacity="0.85"/>
-          <rect x="22" y="27" width="4" height="5" rx="1.5" fill="url(#blg)"/>
+          <polygon
+            points="16,24 24,16 32,24"
+            fill="#fff"
+            opacity="0.85"
+          />
+          <rect
+            x="19"
+            y="24"
+            width="10"
+            height="8"
+            rx="0.5"
+            fill="#fff"
+            opacity="0.85"
+          />
+          <rect
+            x="22"
+            y="27"
+            width="4"
+            height="5"
+            rx="1.5"
+            fill="url(#blg)"
+          />
           <!-- Ring -->
-          <circle cx="24" cy="24" r="22" stroke="url(#blg)" stroke-width="1" opacity="0.2"/>
+          <circle
+            cx="24"
+            cy="24"
+            r="22"
+            stroke="url(#blg)"
+            stroke-width="1"
+            opacity="0.2"
+          />
         </svg>
       </div>
-      <h1 class="brand-title">云兮之家</h1>
-      <p class="brand-subtitle">Yunxi Home</p>
-      <p v-if="version" class="brand-version">v{{ version }}</p>
+      <h1 class="brand-title">
+        云兮之家
+      </h1>
+      <p class="brand-subtitle">
+        Yunxi Home
+      </p>
+      <p
+        v-if="version"
+        class="brand-version"
+      >
+        v{{ version }}
+      </p>
     </div>
-    <button class="theme-toggle" @click="toggleTheme" :title="isDark ? '切换亮色主题' : '切换暗色主题'">
+    <button
+      class="theme-toggle"
+      :title="isDark ? '切换亮色主题' : '切换暗色主题'"
+      @click="toggleTheme"
+    >
       <!-- Sun icon -->
-      <svg v-if="!isDark" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="4" stroke="currentColor" stroke-width="1.5"/><path d="M10 1v1.5M10 17.5V19M1 10h1.5M17.5 10H19M3.6 3.6l1.1 1.1M15.3 15.3l1.1 1.1M3.6 16.4l1.1-1.1M15.3 4.7l1.1-1.1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+      <svg
+        v-if="!isDark"
+        viewBox="0 0 20 20"
+        fill="none"
+      ><circle
+        cx="10"
+        cy="10"
+        r="4"
+        stroke="currentColor"
+        stroke-width="1.5"
+      /><path
+        d="M10 1v1.5M10 17.5V19M1 10h1.5M17.5 10H19M3.6 3.6l1.1 1.1M15.3 15.3l1.1 1.1M3.6 16.4l1.1-1.1M15.3 4.7l1.1-1.1"
+        stroke="currentColor"
+        stroke-width="1.5"
+        stroke-linecap="round"
+      /></svg>
       <!-- Moon icon -->
-      <svg v-else viewBox="0 0 20 20" fill="none"><path d="M16 12.5A6.5 6.5 0 017.5 4c.5-.1.8-.2 1-.1-3 .6-5 3.5-5 6.6a6.5 6.5 0 0011 5c-.3-.3.4-1.6.1-1.3.3-.2.6-.4 1.2-.5.4-.1.2-.2 0-.2z" fill="currentColor"/></svg>
+      <svg
+        v-else
+        viewBox="0 0 20 20"
+        fill="none"
+      ><path
+        d="M16 12.5A6.5 6.5 0 017.5 4c.5-.1.8-.2 1-.1-3 .6-5 3.5-5 6.6a6.5 6.5 0 0011 5c-.3-.3.4-1.6.1-1.3.3-.2.6-.4 1.2-.5.4-.1.2-.2 0-.2z"
+        fill="currentColor"
+      /></svg>
     </button>
   </div>
 </template>

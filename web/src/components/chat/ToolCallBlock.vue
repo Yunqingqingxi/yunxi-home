@@ -1,19 +1,54 @@
 ﻿<template>
-  <div class="tool-block" :class="{ pending: !result && status !== 'running', running: status === 'running', expanded: showFull }">
-    <div class="tool-header" @click="result ? showFull = !showFull : null">
+  <div
+    class="tool-block"
+    :class="{ pending: !result && status !== 'running', running: status === 'running', expanded: showFull }"
+  >
+    <div
+      class="tool-header"
+      @click="result ? showFull = !showFull : null"
+    >
       <span class="tool-icon">{{ result ? '✓' : status === 'running' ? '▶' : '⟳' }}</span>
       <code class="tool-name">{{ name }}</code>
-      <code v-if="formattedArgs" class="tool-args" :title="args">{{ formattedArgs }}</code>
-      <span v-if="status === 'running' && progress" class="tool-progress">{{ progress }}</span>
-      <span v-if="result" class="tool-result-preview">{{ resultPreview }}</span>
-      <svg v-if="result" :class="['chevron', { flipped: showFull }]" width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 3.5l2 3 2-3"/></svg>
+      <code
+        v-if="formattedArgs"
+        class="tool-args"
+        :title="args"
+      >{{ formattedArgs }}</code>
+      <span
+        v-if="status === 'running' && progress"
+        class="tool-progress"
+      >{{ progress }}</span>
+      <span
+        v-if="result"
+        class="tool-result-preview"
+      >{{ resultPreview }}</span>
+      <svg
+        v-if="result"
+        :class="['chevron', { flipped: showFull }]"
+        width="10"
+        height="10"
+        viewBox="0 0 10 10"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+      ><path d="M3 3.5l2 3 2-3" /></svg>
     </div>
-    <div v-if="showFull && args" class="tool-body">
-      <div class="tool-section-label">参数</div>
+    <div
+      v-if="showFull && args"
+      class="tool-body"
+    >
+      <div class="tool-section-label">
+        参数
+      </div>
       <code class="tool-json">{{ formattedArgs }}</code>
     </div>
-    <div v-if="showFull && result" class="tool-body">
-      <div class="tool-section-label">结果</div>
+    <div
+      v-if="showFull && result"
+      class="tool-body"
+    >
+      <div class="tool-section-label">
+        结果
+      </div>
       <code class="tool-result">{{ result }}</code>
     </div>
   </div>

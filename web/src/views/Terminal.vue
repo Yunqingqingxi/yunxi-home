@@ -6,14 +6,62 @@
         <span class="term-dot red"></span><span class="term-dot yellow"></span><span class="term-dot green"></span>
         <span class="term-title">Terminal</span>
         <div class="term-controls">
-          <button class="term-btn" @click="zoomOut" title="Zoom out">A-</button>
-          <button class="term-btn" @click="zoomIn" title="Zoom in">A+</button>
-          <button class="term-btn" @click="toggleSearch" title="Search"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="5" cy="5" r="3.5"/><path d="M8 8l3 3"/></svg></button>
-          <button class="term-btn" @click="clearTerminal" title="Clear"><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M2 2l8 8M10 2l-8 8"/></svg></button>
+          <button
+            class="term-btn"
+            title="Zoom out"
+            @click="zoomOut"
+          >
+            A-
+          </button>
+          <button
+            class="term-btn"
+            title="Zoom in"
+            @click="zoomIn"
+          >
+            A+
+          </button>
+          <button
+            class="term-btn"
+            title="Search"
+            @click="toggleSearch"
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 12 12"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+            ><circle
+              cx="5"
+              cy="5"
+              r="3.5"
+            /><path d="M8 8l3 3" /></svg>
+          </button>
+          <button
+            class="term-btn"
+            title="Clear"
+            @click="clearTerminal"
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 12 12"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+            ><path d="M2 2l8 8M10 2l-8 8" /></svg>
+          </button>
         </div>
-        <span class="term-status" :class="{ connected }">{{ connected ? '已连接' : '连接中...' }}</span>
+        <span
+          class="term-status"
+          :class="{ connected }"
+        >{{ connected ? '已连接' : '连接中...' }}</span>
       </div>
-      <div ref="termEl" class="term-body"></div>
+      <div
+        ref="termEl"
+        class="term-body"
+      ></div>
     </div>
   </div>
 </template>

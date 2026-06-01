@@ -1,21 +1,68 @@
 ﻿<template>
   <Transition name="confirm">
-    <div v-if="visible" class="confirm-overlay" @click.self="onCancel" @keydown.esc="onCancel">
-      <div class="confirm-card" role="dialog" aria-modal="true">
-        <div class="confirm-icon" v-if="icon">
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
-            <circle cx="12" cy="12" r="10" v-if="icon === 'warn'"/>
-            <path d="M12 8v4M12 16h.01" v-if="icon === 'warn'"/>
-            <path d="M5 13l4 4L19 7" v-if="icon === 'success'"/>
+    <div
+      v-if="visible"
+      class="confirm-overlay"
+      @click.self="onCancel"
+      @keydown.esc="onCancel"
+    >
+      <div
+        class="confirm-card"
+        role="dialog"
+        aria-modal="true"
+      >
+        <div
+          v-if="icon"
+          class="confirm-icon"
+        >
+          <svg
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+          >
+            <circle
+              v-if="icon === 'warn'"
+              cx="12"
+              cy="12"
+              r="10"
+            />
+            <path
+              v-if="icon === 'warn'"
+              d="M12 8v4M12 16h.01"
+            />
+            <path
+              v-if="icon === 'success'"
+              d="M5 13l4 4L19 7"
+            />
           </svg>
         </div>
-        <h3 class="confirm-title">{{ title }}</h3>
-        <p class="confirm-msg" v-if="message">{{ message }}</p>
+        <h3 class="confirm-title">
+          {{ title }}
+        </h3>
+        <p
+          v-if="message"
+          class="confirm-msg"
+        >
+          {{ message }}
+        </p>
         <div class="confirm-actions">
-          <button class="confirm-btn confirm-btn-cancel" @click="onCancel" ref="cancelBtn">
+          <button
+            ref="cancelBtn"
+            class="confirm-btn confirm-btn-cancel"
+            @click="onCancel"
+          >
             {{ cancelText }}
           </button>
-          <button class="confirm-btn" :class="'confirm-btn-' + variant" @click="onConfirm" ref="confirmBtn">
+          <button
+            ref="confirmBtn"
+            class="confirm-btn"
+            :class="'confirm-btn-' + variant"
+            @click="onConfirm"
+          >
             {{ confirmText }}
           </button>
         </div>

@@ -1,13 +1,26 @@
 <template>
-  <div class="agent-bubble" :class="status">
+  <div
+    class="agent-bubble"
+    :class="status"
+  >
     <div class="agent-bubble-head">
       <span class="agent-icon">{{ icon }}</span>
       <span class="agent-label">子 Agent</span>
-      <span v-if="round" class="agent-round">R{{ round }}</span>
+      <span
+        v-if="round"
+        class="agent-round"
+      >R{{ round }}</span>
       <span class="agent-status-text">{{ statusText }}</span>
     </div>
-    <div class="agent-bubble-goal">{{ goal }}</div>
-    <div v-if="summary" class="agent-bubble-summary">{{ summary }}</div>
+    <div class="agent-bubble-goal">
+      {{ goal }}
+    </div>
+    <div
+      v-if="summary"
+      class="agent-bubble-summary"
+    >
+      {{ summary }}
+    </div>
   </div>
 </template>
 

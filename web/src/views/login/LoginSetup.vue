@@ -2,50 +2,137 @@
   <div class="setup-card">
     <!-- Step progress bar -->
     <div class="progress-bar">
-      <div class="progress-step" :class="{ active: wizardStep <= 1, done: wizardStep > 1 }">
+      <div
+        class="progress-step"
+        :class="{ active: wizardStep <= 1, done: wizardStep > 1 }"
+      >
         <span class="progress-dot">1</span>
         <span class="progress-label">设置密码</span>
       </div>
-      <span class="progress-line" :class="{ fill: wizardStep > 1 }"></span>
-      <div class="progress-step" :class="{ active: wizardStep >= 2, done: wizardStep > 2 }">
+      <span
+        class="progress-line"
+        :class="{ fill: wizardStep > 1 }"
+      ></span>
+      <div
+        class="progress-step"
+        :class="{ active: wizardStep >= 2, done: wizardStep > 2 }"
+      >
         <span class="progress-dot">2</span>
         <span class="progress-label">系统配置</span>
       </div>
     </div>
 
     <!-- Step transition wrapper -->
-    <Transition :name="transitionName" mode="out-in">
+    <Transition
+      :name="transitionName"
+      mode="out-in"
+    >
       <!-- Step 1: Set admin password -->
-      <div v-if="wizardStep === 1" key="step1" class="step-panel">
-        <p class="setup-desc">首次使用，请为管理员 <strong>admin</strong> 设置密码</p>
+      <div
+        v-if="wizardStep === 1"
+        key="step1"
+        class="step-panel"
+      >
+        <p class="setup-desc">
+          首次使用，请为管理员 <strong>admin</strong> 设置密码
+        </p>
         <div class="field">
-          <input type="password" v-model="setupPassword" class="form-input" placeholder="输入密码（至少 6 位）" @keyup.enter="doSetupPassword" />
+          <input
+            v-model="setupPassword"
+            type="password"
+            class="form-input"
+            placeholder="输入密码（至少 6 位）"
+            @keyup.enter="doSetupPassword"
+          />
         </div>
         <div class="field">
-          <input type="password" v-model="setupPassword2" class="form-input" placeholder="确认密码" @keyup.enter="doSetupPassword" />
+          <input
+            v-model="setupPassword2"
+            type="password"
+            class="form-input"
+            placeholder="确认密码"
+            @keyup.enter="doSetupPassword"
+          />
         </div>
         <Transition name="slide-down">
-          <div v-if="error" class="error-alert">
-            <svg viewBox="0 0 16 16" fill="none" class="error-icon"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.2"/><path d="M8 5v3.5M8 11.5v.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+          <div
+            v-if="error"
+            class="error-alert"
+          >
+            <svg
+              viewBox="0 0 16 16"
+              fill="none"
+              class="error-icon"
+            ><circle
+              cx="8"
+              cy="8"
+              r="7"
+              stroke="currentColor"
+              stroke-width="1.2"
+            /><path
+              d="M8 5v3.5M8 11.5v.5"
+              stroke="currentColor"
+              stroke-width="1.3"
+              stroke-linecap="round"
+            /></svg>
             <span>{{ error }}</span>
           </div>
         </Transition>
-        <button class="submit-btn" :disabled="!canProceed || settingUp" @click="doSetupPassword">
+        <button
+          class="submit-btn"
+          :disabled="!canProceed || settingUp"
+          @click="doSetupPassword"
+        >
           {{ settingUp ? '设置中...' : '下一步' }}
         </button>
       </div>
 
       <!-- Step 2: System check -->
-      <div v-else-if="wizardStep === 2" key="step2" class="step-panel">
-        <p class="setup-desc">系统环境配置</p>
-        <p class="setup-info">将创建 <strong>yunxi</strong> 系统用户和用户组，用于隔离服务权限，保障系统安全。</p>
+      <div
+        v-else-if="wizardStep === 2"
+        key="step2"
+        class="step-panel"
+      >
+        <p class="setup-desc">
+          系统环境配置
+        </p>
+        <p class="setup-info">
+          将创建 <strong>yunxi</strong> 系统用户和用户组，用于隔离服务权限，保障系统安全。
+        </p>
         <div class="check-list">
           <TransitionGroup name="check-stagger">
-            <div v-for="s in visibleSteps" :key="s.name" class="check-item" :class="{ ok: s.success, fail: s.status === 'fail' }">
+            <div
+              v-for="s in visibleSteps"
+              :key="s.name"
+              class="check-item"
+              :class="{ ok: s.success, fail: s.status === 'fail' }"
+            >
               <span class="check-icon">
-                <svg v-if="s.success" viewBox="0 0 14 14" fill="none"><path d="M3 7L6 10L11 4" stroke="#22c55e" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-                <svg v-else-if="s.status === 'fail'" viewBox="0 0 14 14" fill="none"><path d="M4 4l6 6M10 4l-6 6" stroke="#ef4444" stroke-width="1.8" stroke-linecap="round"/></svg>
-                <span class="check-spinner" v-else></span>
+                <svg
+                  v-if="s.success"
+                  viewBox="0 0 14 14"
+                  fill="none"
+                ><path
+                  d="M3 7L6 10L11 4"
+                  stroke="#22c55e"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                /></svg>
+                <svg
+                  v-else-if="s.status === 'fail'"
+                  viewBox="0 0 14 14"
+                  fill="none"
+                ><path
+                  d="M4 4l6 6M10 4l-6 6"
+                  stroke="#ef4444"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                /></svg>
+                <span
+                  v-else
+                  class="check-spinner"
+                ></span>
               </span>
               <span class="check-name">{{ s.name }}</span>
               <span class="check-msg">{{ s.message }}</span>
@@ -53,19 +140,60 @@
           </TransitionGroup>
         </div>
         <Transition name="slide-down">
-          <div v-if="error" class="error-alert">
-            <svg viewBox="0 0 16 16" fill="none" class="error-icon"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.2"/><path d="M8 5v3.5M8 11.5v.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+          <div
+            v-if="error"
+            class="error-alert"
+          >
+            <svg
+              viewBox="0 0 16 16"
+              fill="none"
+              class="error-icon"
+            ><circle
+              cx="8"
+              cy="8"
+              r="7"
+              stroke="currentColor"
+              stroke-width="1.2"
+            /><path
+              d="M8 5v3.5M8 11.5v.5"
+              stroke="currentColor"
+              stroke-width="1.3"
+              stroke-linecap="round"
+            /></svg>
             <span>{{ error }}</span>
           </div>
         </Transition>
-        <div v-if="allOk" class="success-banner">
-          <svg viewBox="0 0 16 16" fill="none"><path d="M3 8.5L6.5 12L13 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <div
+          v-if="allOk"
+          class="success-banner"
+        >
+          <svg
+            viewBox="0 0 16 16"
+            fill="none"
+          ><path
+            d="M3 8.5L6.5 12L13 5"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          /></svg>
           <span>配置完成！{{ countdown }} 秒后自动跳转...</span>
         </div>
-        <button v-if="!allOk" class="submit-btn" :disabled="runningSetup" @click="runSetup">
+        <button
+          v-if="!allOk"
+          class="submit-btn"
+          :disabled="runningSetup"
+          @click="runSetup"
+        >
           {{ runningSetup ? '配置中...' : '一键配置' }}
         </button>
-        <button v-if="!allOk" class="submit-btn secondary" @click="goBack">返回上一步</button>
+        <button
+          v-if="!allOk"
+          class="submit-btn secondary"
+          @click="goBack"
+        >
+          返回上一步
+        </button>
       </div>
     </Transition>
   </div>

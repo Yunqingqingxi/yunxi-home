@@ -1,25 +1,63 @@
 <template>
   <div class="history-page">
     <h3>更新历史</h3>
-    <div class="stat-strip" v-if="records.length">
-      <div class="strip-item">总记录 <strong>{{ pagination.total }}</strong></div>
-      <div class="strip-item">成功 <strong>{{ records.filter(r=>r.status==='success').length }}</strong></div>
-      <div class="strip-item">最近更新 <strong>{{ formatTime(records[0]?.created_at) }}</strong></div>
+    <div
+      v-if="records.length"
+      class="stat-strip"
+    >
+      <div class="strip-item">
+        总记录 <strong>{{ pagination.total }}</strong>
+      </div>
+      <div class="strip-item">
+        成功 <strong>{{ records.filter(r=>r.status==='success').length }}</strong>
+      </div>
+      <div class="strip-item">
+        最近更新 <strong>{{ formatTime(records[0]?.created_at) }}</strong>
+      </div>
     </div>
-    <div class="table-card" v-if="records.length">
+    <div
+      v-if="records.length"
+      class="table-card"
+    >
       <table class="native-table">
-        <thead><tr><th>类型</th><th>域名</th><th>RR</th><th>旧IP</th><th>新IP</th><th>状态</th><th class="col-hide-mobile">时间</th></tr></thead>
-        <tbody><tr v-for="r in records" :key="r.id">
-          <td><span class="tag" :class="r.type==='AAAA'?'tag-green':'tag-blue'">{{ r.type }}</span></td>
-          <td>{{ r.domain }}</td><td>{{ r.rr || '@' }}</td>
-          <td><code class="cell-code">{{ r.old_ip || '-' }}</code></td>
-          <td><code class="cell-code">{{ r.new_ip || '-' }}</code></td>
-          <td><span class="tag" :class="r.status==='success'?'tag-green':'tag-red'">{{ r.status==='success'?'成功':'失败' }}</span></td>
-          <td class="text-muted col-hide-mobile">{{ formatTime(r.created_at) }}</td>
-        </tr></tbody>
+        <thead>
+          <tr>
+            <th>类型</th><th>域名</th><th>RR</th><th>旧IP</th><th>新IP</th><th>状态</th><th class="col-hide-mobile">
+              时间
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr
+            v-for="r in records"
+            :key="r.id"
+          >
+            <td>
+              <span
+                class="tag"
+                :class="r.type==='AAAA'?'tag-green':'tag-blue'"
+              >{{ r.type }}</span>
+            </td>
+            <td>{{ r.domain }}</td><td>{{ r.rr || '@' }}</td>
+            <td><code class="cell-code">{{ r.old_ip || '-' }}</code></td>
+            <td><code class="cell-code">{{ r.new_ip || '-' }}</code></td>
+            <td>
+              <span
+                class="tag"
+                :class="r.status==='success'?'tag-green':'tag-red'"
+              >{{ r.status==='success'?'成功':'失败' }}</span>
+            </td>
+            <td class="text-muted col-hide-mobile">
+              {{ formatTime(r.created_at) }}
+            </td>
+          </tr>
+        </tbody>
       </table>
     </div>
-    <a-empty v-if="!loading && !records.length" description="暂无更新记录" />
+    <a-empty
+      v-if="!loading && !records.length"
+      description="暂无更新记录"
+    />
   </div>
 </template>
 

@@ -40,7 +40,7 @@ api.interceptors.response.use(
       error.serverMessage = resp.data.message
     }
     return Promise.reject(error)
-  }
+  },
 )
 
 export default api

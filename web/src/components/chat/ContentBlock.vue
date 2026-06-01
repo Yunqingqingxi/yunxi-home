@@ -1,7 +1,16 @@
 <template>
-  <div class="content-block" :class="{ streaming }">
-    <div class="content-body" v-html="displayHtml"></div>
-    <span v-if="streaming" class="cursor-blink">|</span>
+  <div
+    class="content-block"
+    :class="{ streaming }"
+  >
+    <div
+      class="content-body"
+      v-html="displayHtml"
+    ></div>
+    <span
+      v-if="streaming"
+      class="cursor-blink"
+    >|</span>
   </div>
 </template>
 

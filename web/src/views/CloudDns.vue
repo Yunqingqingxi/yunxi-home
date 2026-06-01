@@ -3,62 +3,200 @@
     <PageHeader title="云解析记录">
       <template #actions>
         <div class="header-controls">
-          <a-select v-model="selectedDomain" placeholder="选择域名" style="width:220px" @change="loadRecords" allow-search>
-            <a-option v-for="d in domains" :key="d.domain_name" :value="d.domain_name">{{ d.domain_name }} ({{ d.record_count }}条)</a-option>
+          <a-select
+            v-model="selectedDomain"
+            placeholder="选择域名"
+            style="width:220px"
+            allow-search
+            @change="loadRecords"
+          >
+            <a-option
+              v-for="d in domains"
+              :key="d.domain_name"
+              :value="d.domain_name"
+            >
+              {{ d.domain_name }} ({{ d.record_count }}条)
+            </a-option>
           </a-select>
-          <a-button size="small" @click="loadDomains" :loading="loadingDomains">刷新</a-button>
-          <a-button type="primary" size="small" @click="openAdd" v-if="selectedDomain">添加记录</a-button>
+          <a-button
+            size="small"
+            :loading="loadingDomains"
+            @click="loadDomains"
+          >
+            刷新
+          </a-button>
+          <a-button
+            v-if="selectedDomain"
+            type="primary"
+            size="small"
+            @click="openAdd"
+          >
+            添加记录
+          </a-button>
         </div>
       </template>
     </PageHeader>
 
-    <a-alert v-if="error" type="error" closable @close="error=''">{{ error }}</a-alert>
-    <a-alert v-if="msg" type="success" closable @close="msg=''">{{ msg }}</a-alert>
+    <a-alert
+      v-if="error"
+      type="error"
+      closable
+      @close="error=''"
+    >
+      {{ error }}
+    </a-alert>
+    <a-alert
+      v-if="msg"
+      type="success"
+      closable
+      @close="msg=''"
+    >
+      {{ msg }}
+    </a-alert>
 
-    <a-table v-if="selectedDomain" :data="records" :columns="columns" :pagination="pagination" row-key="RecordId" size="small" :loading="loading" @page-change="onPageChange">
+    <a-table
+      v-if="selectedDomain"
+      :data="records"
+      :columns="columns"
+      :pagination="pagination"
+      row-key="RecordId"
+      size="small"
+      :loading="loading"
+      @page-change="onPageChange"
+    >
       <template #Type="{ record }">
-        <a-tag :color="typeColor(record.Type)" size="small">{{ record.Type }}</a-tag>
+        <a-tag
+          :color="typeColor(record.Type)"
+          size="small"
+        >
+          {{ record.Type }}
+        </a-tag>
       </template>
       <template #Status="{ record }">
-        <a-tag :color="record.Status === 'Enable' ? 'green' : 'red'" size="small">{{ record.Status === 'Enable' ? '启用' : '停用' }}</a-tag>
+        <a-tag
+          :color="record.Status === 'Enable' ? 'green' : 'red'"
+          size="small"
+        >
+          {{ record.Status === 'Enable' ? '启用' : '停用' }}
+        </a-tag>
       </template>
       <template #actions="{ record }">
         <a-space>
-          <a-button size="mini" @click="openEdit(record)">编辑</a-button>
-          <a-popconfirm content="确认删除？" @ok="doDelete(record.RecordId)">
-            <a-button size="mini" status="danger">删除</a-button>
+          <a-button
+            size="mini"
+            @click="openEdit(record)"
+          >
+            编辑
+          </a-button>
+          <a-popconfirm
+            content="确认删除？"
+            @ok="doDelete(record.RecordId)"
+          >
+            <a-button
+              size="mini"
+              status="danger"
+            >
+              删除
+            </a-button>
           </a-popconfirm>
         </a-space>
       </template>
     </a-table>
-    <a-empty v-if="selectedDomain && !loading && !records.length" description="暂无记录" />
-    <a-empty v-if="!selectedDomain" description="请先选择一个域名" />
+    <a-empty
+      v-if="selectedDomain && !loading && !records.length"
+      description="暂无记录"
+    />
+    <a-empty
+      v-if="!selectedDomain"
+      description="请先选择一个域名"
+    />
 
-    <a-modal v-model:visible="modalVisible" :title="editing ? '编辑记录' : '添加记录'" @ok="doSave" :ok-loading="saving" width="460px">
-      <a-form :model="form" layout="vertical" size="medium">
-        <a-form-item field="domain" label="域名">
-          <a-input :model-value="selectedDomain" disabled />
+    <a-modal
+      v-model:visible="modalVisible"
+      :title="editing ? '编辑记录' : '添加记录'"
+      :ok-loading="saving"
+      width="460px"
+      @ok="doSave"
+    >
+      <a-form
+        :model="form"
+        layout="vertical"
+        size="medium"
+      >
+        <a-form-item
+          field="domain"
+          label="域名"
+        >
+          <a-input
+            :model-value="selectedDomain"
+            disabled
+          />
         </a-form-item>
-        <a-form-item field="rr" label="主机记录 (RR)" required>
-          <a-input v-model="form.rr" placeholder="@ 或 www" :disabled="!!editing" />
+        <a-form-item
+          field="rr"
+          label="主机记录 (RR)"
+          required
+        >
+          <a-input
+            v-model="form.rr"
+            placeholder="@ 或 www"
+            :disabled="!!editing"
+          />
         </a-form-item>
-        <a-form-item field="type" label="记录类型" required>
-          <a-select v-model="form.type" :disabled="!!editing">
-            <a-option v-for="t in recordTypes" :key="t" :value="t">{{ t }}</a-option>
+        <a-form-item
+          field="type"
+          label="记录类型"
+          required
+        >
+          <a-select
+            v-model="form.type"
+            :disabled="!!editing"
+          >
+            <a-option
+              v-for="t in recordTypes"
+              :key="t"
+              :value="t"
+            >
+              {{ t }}
+            </a-option>
           </a-select>
         </a-form-item>
-        <a-form-item field="value" label="记录值" required>
-          <a-input v-model="form.value" :placeholder="typePlaceholder" />
+        <a-form-item
+          field="value"
+          label="记录值"
+          required
+        >
+          <a-input
+            v-model="form.value"
+            :placeholder="typePlaceholder"
+          />
         </a-form-item>
-        <a-form-item field="ttl" label="TTL">
+        <a-form-item
+          field="ttl"
+          label="TTL"
+        >
           <a-select v-model="form.ttl">
-            <a-option :value="60">60s</a-option>
-            <a-option :value="120">120s</a-option>
-            <a-option :value="300">300s</a-option>
-            <a-option :value="600">600s</a-option>
-            <a-option :value="1800">1800s</a-option>
-            <a-option :value="3600">3600s</a-option>
-            <a-option :value="86400">86400s</a-option>
+            <a-option :value="60">
+              60s
+            </a-option>
+            <a-option :value="120">
+              120s
+            </a-option>
+            <a-option :value="300">
+              300s
+            </a-option>
+            <a-option :value="600">
+              600s
+            </a-option>
+            <a-option :value="1800">
+              1800s
+            </a-option>
+            <a-option :value="3600">
+              3600s
+            </a-option>
+            <a-option :value="86400">
+              86400s
+            </a-option>
           </a-select>
         </a-form-item>
       </a-form>

@@ -1,5 +1,8 @@
 ﻿<template>
-  <div v-if="agents.length > 0" class="agent-panel">
+  <div
+    v-if="agents.length > 0"
+    class="agent-panel"
+  >
     <div
       v-for="agent in visibleAgents"
       :key="agent.agent_id"
@@ -9,13 +12,22 @@
       <div class="agent-header">
         <span class="agent-status-icon">{{ statusIcon(agent.status || agent.agent_status) }}</span>
         <span class="agent-goal">{{ truncate(agent.goal || agent.agent_goal, 60) }}</span>
-        <span v-if="agent.agent_round" class="agent-round">R{{ agent.agent_round }}</span>
+        <span
+          v-if="agent.agent_round"
+          class="agent-round"
+        >R{{ agent.agent_round }}</span>
       </div>
-      <div v-if="agent.summary || agent.content" class="agent-result">
+      <div
+        v-if="agent.summary || agent.content"
+        class="agent-result"
+      >
         {{ truncate(agent.summary || agent.content, 120) }}
       </div>
     </div>
-    <div v-if="hiddenCount > 0" class="agent-more">
+    <div
+      v-if="hiddenCount > 0"
+      class="agent-more"
+    >
       +{{ hiddenCount }} 个更多子任务
     </div>
   </div>

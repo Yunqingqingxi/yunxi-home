@@ -2,25 +2,51 @@
   <Teleport to="body">
     <!-- Overlay: subtle, no blur, bottom-aligned -->
     <Transition name="slide-up">
-      <div v-if="visible" class="danger-overlay">
+      <div
+        v-if="visible"
+        class="danger-overlay"
+      >
         <!-- Scrim behind the card -->
-        <div class="danger-scrim" />
+        <div class="danger-scrim"></div>
 
         <div class="danger-card">
           <!-- Stripe indicator -->
-          <div class="danger-stripe" />
+          <div class="danger-stripe"></div>
 
           <div class="danger-body">
             <div class="danger-icon-wrap">
-              <svg class="danger-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-                <circle cx="12" cy="12" r="10"/>
-                <line x1="12" y1="8" x2="12" y2="12"/>
-                <line x1="12" y1="16" x2="12.01" y2="16"/>
+              <svg
+                class="danger-icon"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+              >
+                <circle
+                  cx="12"
+                  cy="12"
+                  r="10"
+                />
+                <line
+                  x1="12"
+                  y1="8"
+                  x2="12"
+                  y2="12"
+                />
+                <line
+                  x1="12"
+                  y1="16"
+                  x2="12.01"
+                  y2="16"
+                />
               </svg>
             </div>
 
             <div class="danger-content">
-              <h3 class="danger-title">确认执行危险操作</h3>
+              <h3 class="danger-title">
+                确认执行危险操作
+              </h3>
 
               <div class="danger-details">
                 <div class="detail-line">
@@ -33,19 +59,56 @@
                 </div>
               </div>
 
-              <div v-if="request?.fields?.length" class="danger-fields">
-                <div v-for="f in request.fields" :key="f.name" class="field-row">
-                  <label>{{ f.label }}<span v-if="f.required" class="star">*</span></label>
-                  <input v-model="fieldValues[f.name]" :placeholder="f.value || ''" class="field-input" />
+              <div
+                v-if="request?.fields?.length"
+                class="danger-fields"
+              >
+                <div
+                  v-for="f in request.fields"
+                  :key="f.name"
+                  class="field-row"
+                >
+                  <label>{{ f.label }}<span
+                    v-if="f.required"
+                    class="star"
+                  >*</span></label>
+                  <input
+                    v-model="fieldValues[f.name]"
+                    :placeholder="f.value || ''"
+                    class="field-input"
+                  />
                 </div>
               </div>
             </div>
           </div>
 
           <div class="danger-actions">
-            <button class="btn-cancel" @click="cancel" :disabled="sending">取消</button>
-            <button class="btn-execute" @click="confirm" :disabled="sending">
-              <svg v-if="sending" class="spin-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6" stroke-dasharray="30" stroke-linecap="round"/></svg>
+            <button
+              class="btn-cancel"
+              :disabled="sending"
+              @click="cancel"
+            >
+              取消
+            </button>
+            <button
+              class="btn-execute"
+              :disabled="sending"
+              @click="confirm"
+            >
+              <svg
+                v-if="sending"
+                class="spin-icon"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+              ><circle
+                cx="8"
+                cy="8"
+                r="6"
+                stroke-dasharray="30"
+                stroke-linecap="round"
+              /></svg>
               {{ sending ? '提交中' : '确认执行' }}
             </button>
           </div>

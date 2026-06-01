@@ -46,8 +46,37 @@ export function renderMarkdown(text: string): string {
     let raw = marked.parse(text, { gfm: true, breaks: true }) as string
     raw = raw.replace(/<a\s+href=/g, '<a target="_blank" rel="noopener" href=')
     return DOMPurify.sanitize(raw, {
-      ALLOWED_TAGS: ['p','br','strong','em','del','a','ul','ol','li','h1','h2','h3','h4','h5','h6','pre','code','blockquote','hr','table','thead','tbody','tr','th','td','span','img','input'],
-      ALLOWED_ATTR: ['href','target','class','src','alt','type','checked','disabled'],
+      ALLOWED_TAGS: [
+        'p',
+        'br',
+        'strong',
+        'em',
+        'del',
+        'a',
+        'ul',
+        'ol',
+        'li',
+        'h1',
+        'h2',
+        'h3',
+        'h4',
+        'h5',
+        'h6',
+        'pre',
+        'code',
+        'blockquote',
+        'hr',
+        'table',
+        'thead',
+        'tbody',
+        'tr',
+        'th',
+        'td',
+        'span',
+        'img',
+        'input',
+      ],
+      ALLOWED_ATTR: ['href', 'target', 'class', 'src', 'alt', 'type', 'checked', 'disabled'],
     })
   } catch (e) {
     return DOMPurify.sanitize(text)
@@ -76,8 +105,8 @@ export const useChatStore = defineStore('chat', () => {
   const interactiveRequest = ref<InteractiveRequest | null>(null)
 
   // Whether any agent (subtask) is running
-  const hasRunningAgents = computed<boolean>(
-    () => agents.value.some(a => a.agent_status === 'running' || a.status === 'running')
+  const hasRunningAgents = computed<boolean>(() =>
+    agents.value.some((a) => a.agent_status === 'running' || a.status === 'running'),
   )
 
   // Current turn's streaming assistant message indices
@@ -87,7 +116,10 @@ export const useChatStore = defineStore('chat', () => {
   let _contentFlushTimer: ReturnType<typeof setTimeout> | null = null
 
   function resetStreaming(): void {
-    if (_contentFlushTimer) { clearTimeout(_contentFlushTimer); _contentFlushTimer = null }
+    if (_contentFlushTimer) {
+      clearTimeout(_contentFlushTimer)
+      _contentFlushTimer = null
+    }
     confirmRequest.value = null
     todoList.value = []
     agents.value = []
@@ -106,7 +138,7 @@ export const useChatStore = defineStore('chat', () => {
       status: 'done',
       streaming: false,
       _v: 0,
-      createdAt: Date.now()
+      createdAt: Date.now(),
     }
     messages.value.push(msg)
     return msg
@@ -124,7 +156,7 @@ export const useChatStore = defineStore('chat', () => {
       status: 'streaming',
       streaming: true,
       _v: 0,
-      createdAt: Date.now()
+      createdAt: Date.now(),
     }
     messages.value.push(msg)
     return messages.value.length - 1
@@ -133,7 +165,7 @@ export const useChatStore = defineStore('chat', () => {
   async function sendMessage(
     text: string,
     model: string = '',
-    opts: { reasoning_intensity?: string; plan_mode?: boolean } = {}
+    opts: { reasoning_intensity?: string; plan_mode?: boolean } = {},
   ): Promise<void> {
     const token = localStorage.getItem('token')
     if (!text.trim()) return
@@ -144,10 +176,12 @@ export const useChatStore = defineStore('chat', () => {
       try {
         await fetch('/api/chat/inject', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-          body: JSON.stringify({ session_id: sessionId.value, message: text })
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+          body: JSON.stringify({ session_id: sessionId.value, message: text }),
         })
-      } catch (e) { /* ignore */ }
+      } catch (e) {
+        /* ignore */
+      }
       if (hasRunningAgents.value) {
         const idx = addAssistantPlaceholder()
         streamingPlaceholders.value = [...streamingPlaceholders.value, idx]
@@ -174,9 +208,9 @@ export const useChatStore = defineStore('chat', () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': 'Bearer ' + token
+          Authorization: 'Bearer ' + token,
         },
-        body: JSON.stringify(body)
+        body: JSON.stringify(body),
       })
       if (!res.ok) throw new Error('HTTP ' + res.status)
 
@@ -195,11 +229,15 @@ export const useChatStore = defineStore('chat', () => {
           if (!trimmed.startsWith('data: ')) continue
           try {
             processSSEEvent(JSON.parse(trimmed.slice(6)))
-          } catch (e) { /* skip */ }
+          } catch (e) {
+            /* skip */
+          }
         }
       }
       if (buf.trim().startsWith('data: ')) {
-        try { processSSEEvent(JSON.parse(buf.trim().slice(6))) } catch (e) {}
+        try {
+          processSSEEvent(JSON.parse(buf.trim().slice(6)))
+        } catch (e) {}
       }
     } catch (e: any) {
       const idx = streamingPlaceholders.value[0]
@@ -229,7 +267,7 @@ export const useChatStore = defineStore('chat', () => {
       return
     }
     if (t === 'agent_progress') {
-      const idx = agents.value.findIndex(a => a.agent_id === ev.agent_id)
+      const idx = agents.value.findIndex((a) => a.agent_id === ev.agent_id)
       if (idx >= 0) Object.assign(agents.value[idx], ev)
       else {
         agents.value.push({ ...ev } as AgentInfo)
@@ -241,17 +279,17 @@ export const useChatStore = defineStore('chat', () => {
           agentStatus: ev.agent_status || 'running',
           agentRound: ev.agent_round || 0,
           agentSummary: ev.content || '',
-          createdAt: Date.now()
+          createdAt: Date.now(),
         } as ChatMessage)
       }
       updateSubAgent(sessionId.value, ev as AgentInfo)
       return
     }
     if (t === 'agent_result') {
-      const idx = agents.value.findIndex(a => a.agent_id === ev.agent_id)
+      const idx = agents.value.findIndex((a) => a.agent_id === ev.agent_id)
       const merged = { ...ev, status: ev.agent_status || ev.status || 'done' }
       if (idx >= 0) Object.assign(agents.value[idx], merged)
-      const msgIdx = messages.value.findIndex(m => m.role === 'agent' && m.agentId === ev.agent_id)
+      const msgIdx = messages.value.findIndex((m) => m.role === 'agent' && m.agentId === ev.agent_id)
       if (msgIdx >= 0) {
         messages.value[msgIdx] = {
           ...messages.value[msgIdx],
@@ -268,7 +306,7 @@ export const useChatStore = defineStore('chat', () => {
           agentStatus: merged.status,
           agentRound: ev.agent_round || 0,
           agentSummary: ev.content || ev.summary || '',
-          createdAt: Date.now()
+          createdAt: Date.now(),
         } as ChatMessage)
       }
       updateSubAgent(sessionId.value, merged as AgentInfo)
@@ -323,12 +361,15 @@ export const useChatStore = defineStore('chat', () => {
       msg.blocks = blocks
       msg._v = ++_msgVersion
     } else if (t === 'tool_call') {
-      msg.blocks = [...msg.blocks!, {
-        type: 'tool' as const,
-        name: ev.tool || 'unknown',
-        args: ev.args || '',
-        result: ''
-      }]
+      msg.blocks = [
+        ...msg.blocks!,
+        {
+          type: 'tool' as const,
+          name: ev.tool || 'unknown',
+          args: ev.args || '',
+          result: '',
+        },
+      ]
       msg._v = ++_msgVersion
     } else if (t === 'tool_result') {
       const blocks = [...msg.blocks!]
@@ -341,7 +382,7 @@ export const useChatStore = defineStore('chat', () => {
       msg.blocks = blocks
       msg._v = ++_msgVersion
 
-      const hasPendingTools = blocks.some(b => b.type === 'tool' && !b.result)
+      const hasPendingTools = blocks.some((b) => b.type === 'tool' && !b.result)
       if (!hasPendingTools && blocks.length > 0) {
         finalizeOne(msg)
         const newIdx = addAssistantPlaceholder()
@@ -366,10 +407,16 @@ export const useChatStore = defineStore('chat', () => {
     const contentBlocks = msg.blocks!.filter((b: ChatBlock) => b.type === 'content')
     const thinkingBlocks = msg.blocks!.filter((b: ChatBlock) => b.type === 'thinking')
     const toolBlocks = msg.blocks!.filter((b: ChatBlock) => b.type === 'tool')
-    msg.content = contentBlocks.map(b => b.content).filter(Boolean).join('\n')
+    msg.content = contentBlocks
+      .map((b) => b.content)
+      .filter(Boolean)
+      .join('\n')
     msg.contentHtml = renderMarkdown(msg.content)
-    msg.reasoning = thinkingBlocks.map(b => b.content).filter(Boolean).join('\n')
-    msg.tools = toolBlocks.map(b => ({ name: b.name || '', args: b.args || '', result: b.result || '' }))
+    msg.reasoning = thinkingBlocks
+      .map((b) => b.content)
+      .filter(Boolean)
+      .join('\n')
+    msg.tools = toolBlocks.map((b) => ({ name: b.name || '', args: b.args || '', result: b.result || '' }))
     msg.status = 'done'
     msg.streaming = false
     msg._v = ++_msgVersion
@@ -380,7 +427,7 @@ export const useChatStore = defineStore('chat', () => {
     if (last && last.streaming) {
       finalizeOne(last)
     }
-    messages.value = messages.value.filter(m => {
+    messages.value = messages.value.filter((m) => {
       if (m.streaming && m.role === 'assistant') return false
       if (m.role === 'assistant' && m.status === 'done' && (!m.blocks || !m.blocks.length)) return false
       return true
@@ -388,12 +435,7 @@ export const useChatStore = defineStore('chat', () => {
     resetStreaming()
   }
 
-  function buildBlocksLegacy(
-    role: string,
-    content: string,
-    reasoning: string,
-    toolCalls: ToolCall[]
-  ): ChatBlock[] {
+  function buildBlocksLegacy(role: string, content: string, reasoning: string, toolCalls: ToolCall[]): ChatBlock[] {
     if (role === 'user') {
       return content ? [{ type: 'content' as const, content }] : []
     }
@@ -407,44 +449,46 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function normalizeBlock(b: any): ChatBlock {
-    const type = (b.type === 'tool_call' || b.type === 'tool_result') ? 'tool' : b.type
+    const type = b.type === 'tool_call' || b.type === 'tool_result' ? 'tool' : b.type
     return {
       type,
       content: b.content || b.tool_result || '',
       name: b.name || b.tool_name || '',
       args: b.args || b.tool_args || '',
-      result: b.result || b.tool_result || ''
+      result: b.result || b.tool_result || '',
     }
   }
 
   async function loadSession(sid: string, msgs: any[]): Promise<void> {
     sessionId.value = sid
-    messages.value = (msgs || []).filter(m => m.role !== 'tool').map((m, i) => {
-      const msg: ChatMessage = {
-        id: 'h_' + i + '_' + Math.random().toString(36).slice(2, 6),
-        role: m.role,
-        content: m.content || '',
-        contentHtml: renderMarkdown(m.content || ''),
-        reasoning: m.reasoning_content || '',
-        tools: (m.tool_calls || []).map((tc: any) => ({
-          name: tc.name || '',
-          args: tc.args || '',
-          result: tc.result || ''
-        })),
-        status: 'done',
-        streaming: false,
-        _v: i,
-        createdAt: m.created_at ? new Date(m.created_at).getTime() : Date.now()
-      }
+    messages.value = (msgs || [])
+      .filter((m) => m.role !== 'tool')
+      .map((m, i) => {
+        const msg: ChatMessage = {
+          id: 'h_' + i + '_' + Math.random().toString(36).slice(2, 6),
+          role: m.role,
+          content: m.content || '',
+          contentHtml: renderMarkdown(m.content || ''),
+          reasoning: m.reasoning_content || '',
+          tools: (m.tool_calls || []).map((tc: any) => ({
+            name: tc.name || '',
+            args: tc.args || '',
+            result: tc.result || '',
+          })),
+          status: 'done',
+          streaming: false,
+          _v: i,
+          createdAt: m.created_at ? new Date(m.created_at).getTime() : Date.now(),
+        }
 
-      if (m.blocks && m.blocks.length > 0) {
-        msg.blocks = m.blocks.map(normalizeBlock)
-      } else {
-        msg.blocks = buildBlocksLegacy(m.role, m.content || '', m.reasoning_content || '', msg.tools || [])
-      }
+        if (m.blocks && m.blocks.length > 0) {
+          msg.blocks = m.blocks.map(normalizeBlock)
+        } else {
+          msg.blocks = buildBlocksLegacy(m.role, m.content || '', m.reasoning_content || '', msg.tools || [])
+        }
 
-      return msg
-    })
+        return msg
+      })
   }
 
   async function fetchSessionMessages(sid: string): Promise<boolean> {
@@ -452,7 +496,7 @@ export const useChatStore = defineStore('chat', () => {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const res = await fetch('/api/chat/sessions/' + sid, {
-          headers: { 'Authorization': 'Bearer ' + token }
+          headers: { Authorization: 'Bearer ' + token },
         })
         const data = await res.json()
         if (data.code === 200 && data.data && data.data.messages) {
@@ -460,8 +504,10 @@ export const useChatStore = defineStore('chat', () => {
           return true
         }
         if (data.code !== 404) break
-      } catch (e) { /* ignore */ }
-      if (attempt < 2) await new Promise(r => setTimeout(r, 500))
+      } catch (e) {
+        /* ignore */
+      }
+      if (attempt < 2) await new Promise((r) => setTimeout(r, 500))
     }
     return false
   }
@@ -484,10 +530,14 @@ export const useChatStore = defineStore('chat', () => {
 
     try {
       const res = await fetch('/api/chat/stream/' + sid, {
-        headers: { 'Authorization': 'Bearer ' + token },
+        headers: { Authorization: 'Bearer ' + token },
         signal: controller.signal,
       })
-      if (!res.ok) { isStreaming.value = false; _listeningForEvents = false; return }
+      if (!res.ok) {
+        isStreaming.value = false
+        _listeningForEvents = false
+        return
+      }
 
       const reader = res.body!.getReader()
       const dec = new TextDecoder()
@@ -501,7 +551,9 @@ export const useChatStore = defineStore('chat', () => {
         for (const l of lines) {
           const trimmed = l.trim()
           if (!trimmed.startsWith('data: ')) continue
-          try { processSSEEvent(JSON.parse(trimmed.slice(6))) } catch (e) {}
+          try {
+            processSSEEvent(JSON.parse(trimmed.slice(6)))
+          } catch (e) {}
         }
       }
     } catch (e: any) {
@@ -523,7 +575,10 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function disconnectStream(): void {
-    if (_streamAbort) { _streamAbort.abort(); _streamAbort = null }
+    if (_streamAbort) {
+      _streamAbort.abort()
+      _streamAbort = null
+    }
   }
 
   // ── Multi-Conversation State ──
@@ -535,19 +590,23 @@ export const useChatStore = defineStore('chat', () => {
     const token = localStorage.getItem('token')
     try {
       const res = await fetch('/api/chat/sessions', {
-        headers: { 'Authorization': 'Bearer ' + token }
+        headers: { Authorization: 'Bearer ' + token },
       })
       const data = await res.json()
       if (data.code === 200 && data.data) {
-        conversations.value = (data.data || []).map((s: any) => ({
-          id: s.id,
-          title: s.title || '新对话',
-          createdAt: s.created_at,
-          updatedAt: s.updated_at,
-          messageCount: s.message_count || 0,
-        })).sort((a: Conversation, b: Conversation) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+        conversations.value = (data.data || [])
+          .map((s: any) => ({
+            id: s.id,
+            title: s.title || '新对话',
+            createdAt: s.created_at,
+            updatedAt: s.updated_at,
+            messageCount: s.message_count || 0,
+          }))
+          .sort((a: Conversation, b: Conversation) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
       }
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+      /* ignore */
+    }
   }
 
   async function switchConversation(id: string): Promise<boolean> {
@@ -572,22 +631,51 @@ export const useChatStore = defineStore('chat', () => {
   function updateSubAgent(convId: string, agent: AgentInfo): void {
     if (!subAgents.value[convId]) subAgents.value[convId] = []
     const list = subAgents.value[convId]
-    const idx = list.findIndex(a => a.id === agent.agent_id)
+    const idx = list.findIndex((a) => a.id === agent.agent_id)
     if (idx >= 0) {
-      list[idx] = { ...list[idx], status: agent.agent_status || agent.status || '', summary: agent.content || list[idx].summary }
+      list[idx] = {
+        ...list[idx],
+        status: agent.agent_status || agent.status || '',
+        summary: agent.content || list[idx].summary,
+      }
     } else {
-      list.push({ id: agent.agent_id!, goal: agent.agent_goal || '', status: agent.agent_status || 'running', summary: '' })
+      list.push({
+        id: agent.agent_id!,
+        goal: agent.agent_goal || '',
+        status: agent.agent_status || 'running',
+        summary: '',
+      })
     }
   }
 
   return {
-    messages, sessionId, isStreaming, loading, hasRunningAgents,
-    streamingPlaceholders, hintTexts, todoList, agents, confirmRequest, interactiveRequest,
-    resetStreaming, sendMessage, loadSession,
-    fetchSessionMessages, clearCurrent,
-    addUserMessage, addAssistantPlaceholder, processSSEEvent, finalizeStream,
-    connectStream, disconnectStream,
-    conversations, activeConversationId, subAgents,
-    loadConversations, switchConversation, updateSubAgent,
+    messages,
+    sessionId,
+    isStreaming,
+    loading,
+    hasRunningAgents,
+    streamingPlaceholders,
+    hintTexts,
+    todoList,
+    agents,
+    confirmRequest,
+    interactiveRequest,
+    resetStreaming,
+    sendMessage,
+    loadSession,
+    fetchSessionMessages,
+    clearCurrent,
+    addUserMessage,
+    addAssistantPlaceholder,
+    processSSEEvent,
+    finalizeStream,
+    connectStream,
+    disconnectStream,
+    conversations,
+    activeConversationId,
+    subAgents,
+    loadConversations,
+    switchConversation,
+    updateSubAgent,
   }
 })

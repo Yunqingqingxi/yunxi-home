@@ -2,37 +2,102 @@
   <div class="logs-page">
     <!-- Tabs -->
     <div class="logs-tabs">
-      <button :class="['tab', { active: tab === 'chat' }]" @click="tab = 'chat'">会话日志</button>
-      <button :class="['tab', { active: tab === 'system' }]" @click="tab = 'system'">系统日志</button>
+      <button
+        :class="['tab', { active: tab === 'chat' }]"
+        @click="tab = 'chat'"
+      >
+        会话日志
+      </button>
+      <button
+        :class="['tab', { active: tab === 'system' }]"
+        @click="tab = 'system'"
+      >
+        系统日志
+      </button>
     </div>
 
     <!-- Chat Logs -->
-    <div v-if="tab === 'chat'" class="chat-logs-layout">
+    <div
+      v-if="tab === 'chat'"
+      class="chat-logs-layout"
+    >
       <div class="session-list-panel">
-        <div class="panel-head">会话列表</div>
-        <div class="date-filter" v-if="sessionDates.length > 1">
-          <select v-model="selectedDate" class="date-select">
-            <option value="">全部日期</option>
-            <option v-for="d in sessionDates" :key="d" :value="d">{{ d }}</option>
+        <div class="panel-head">
+          会话列表
+        </div>
+        <div
+          v-if="sessionDates.length > 1"
+          class="date-filter"
+        >
+          <select
+            v-model="selectedDate"
+            class="date-select"
+          >
+            <option value="">
+              全部日期
+            </option>
+            <option
+              v-for="d in sessionDates"
+              :key="d"
+              :value="d"
+            >
+              {{ d }}
+            </option>
           </select>
         </div>
-        <div v-if="loadingSessions" class="empty-panel">加载中...</div>
-        <div v-else-if="!sessions.length" class="empty-panel">暂无日志</div>
-        <div v-else class="session-list">
-          <template v-for="item in sessionsByDate" :key="item._date || item.session_id">
-            <div v-if="item._date" class="session-date-head">{{ item._date }}</div>
-            <div v-else
-            :class="['session-item', { active: selectedSession === item.session_id }]"
-            @click="selectSession(item)">
-            <button class="item-delete-btn" title="删除" @click.stop="deleteChatLog(item.session_id)">✕</button>
-            <div class="si-title">{{ item.session_id?.slice(0,20) }}...</div>
-            <div class="si-meta">
-              <span class="si-rounds">{{ item.rounds || '-' }} 轮</span>
-              <span class="si-size">{{ fmtSize(item.size) }}</span>
-              <span v-if="item.active" class="si-live">● LIVE</span>
+        <div
+          v-if="loadingSessions"
+          class="empty-panel"
+        >
+          加载中...
+        </div>
+        <div
+          v-else-if="!sessions.length"
+          class="empty-panel"
+        >
+          暂无日志
+        </div>
+        <div
+          v-else
+          class="session-list"
+        >
+          <template
+            v-for="item in sessionsByDate"
+            :key="item._date || item.session_id"
+          >
+            <div
+              v-if="item._date"
+              class="session-date-head"
+            >
+              {{ item._date }}
             </div>
-            <div class="si-date">{{ fmtDate(item.created) }}</div>
-          </div>
+            <div
+              v-else
+              :class="['session-item', { active: selectedSession === item.session_id }]"
+              @click="selectSession(item)"
+            >
+              <button
+                class="item-delete-btn"
+                title="删除"
+                @click.stop="deleteChatLog(item.session_id)"
+              >
+                ✕
+              </button>
+              <div class="si-title">
+                {{ item.session_id?.slice(0,20) }}...
+              </div>
+              <div class="si-meta">
+                <span class="si-rounds">{{ item.rounds || '-' }} 轮</span>
+                <span class="si-size">{{ fmtSize(item.size) }}</span>
+                <span
+                  v-if="item.active"
+                  class="si-live"
+                >● LIVE</span>
+              </div>
+              <div class="si-date">
+                {{ fmtDate(item.created) }}
+              </div>
+            </div>
           </template>
         </div>
       </div>
@@ -41,27 +106,68 @@
         <div class="panel-head">
           <span>日志内容</span>
           <div class="panel-head-actions">
-            <button v-if="selectedSession" class="btn-mini" @click="downloadChatLog">↓ 下载</button>
+            <button
+              v-if="selectedSession"
+              class="btn-mini"
+              @click="downloadChatLog"
+            >
+              ↓ 下载
+            </button>
           </div>
         </div>
 
-        <div v-if="!selectedSession" class="empty-panel">← 选择左侧会话查看日志</div>
-        <div v-else-if="loadingLog" class="empty-panel">加载中...</div>
-        <pre v-else class="log-text-view">{{ logText }}</pre>
+        <div
+          v-if="!selectedSession"
+          class="empty-panel"
+        >
+          ← 选择左侧会话查看日志
+        </div>
+        <div
+          v-else-if="loadingLog"
+          class="empty-panel"
+        >
+          加载中...
+        </div>
+        <pre
+          v-else
+          class="log-text-view"
+        >{{ logText }}</pre>
       </div>
     </div>
 
     <!-- System Logs -->
-    <div v-if="tab === 'system'" class="system-logs-layout">
+    <div
+      v-if="tab === 'system'"
+      class="system-logs-layout"
+    >
       <div class="sys-date-panel">
-        <div class="panel-head">日期</div>
-        <div v-if="loadingSysFiles" class="empty-panel">加载中...</div>
-        <div v-else class="sys-date-list">
-          <div v-for="f in sysFiles" :key="f.date"
+        <div class="panel-head">
+          日期
+        </div>
+        <div
+          v-if="loadingSysFiles"
+          class="empty-panel"
+        >
+          加载中...
+        </div>
+        <div
+          v-else
+          class="sys-date-list"
+        >
+          <div
+            v-for="f in sysFiles"
+            :key="f.date"
             :class="['sys-date-item', { active: selectedSysDate === f.date }]"
-            @click="selectSysDate(f)">
+            @click="selectSysDate(f)"
+          >
             <span>{{ f.date }}</span>
-            <button class="item-delete-btn" title="删除" @click.stop="deleteSystemLog(f.date)">✕</button>
+            <button
+              class="item-delete-btn"
+              title="删除"
+              @click.stop="deleteSystemLog(f.date)"
+            >
+              ✕
+            </button>
           </div>
         </div>
       </div>
@@ -70,29 +176,90 @@
         <div class="panel-head">
           <span>{{ selectedSysDate || '选择日期' }}</span>
           <div class="panel-head-actions">
-            <button class="btn-mini" @click="toggleSysOrder">{{ sysLogOrder === 'desc' ? '↓ 最新优先' : '↑ 最早优先' }}</button>
-            <label v-for="l in sysLevels" :key="l.key" class="filter-cb"><input type="checkbox" v-model="l.on" @change="reloadSysLog" />{{ l.label }}</label>
-            <input v-model="sysLogSearch" placeholder="搜索..." class="search-inp" @input="reloadSysLog" />
-            <label class="live-toggle"><input type="checkbox" v-model="sysLiveTail" />实时</label>
-            <button v-if="selectedSysDate" class="btn-mini" @click="downloadSysLog">↓ 下载</button>
+            <button
+              class="btn-mini"
+              @click="toggleSysOrder"
+            >
+              {{ sysLogOrder === 'desc' ? '↓ 最新优先' : '↑ 最早优先' }}
+            </button>
+            <label
+              v-for="l in sysLevels"
+              :key="l.key"
+              class="filter-cb"
+            ><input
+              v-model="l.on"
+              type="checkbox"
+              @change="reloadSysLog"
+            />{{ l.label }}</label>
+            <input
+              v-model="sysLogSearch"
+              placeholder="搜索..."
+              class="search-inp"
+              @input="reloadSysLog"
+            />
+            <label class="live-toggle"><input
+              v-model="sysLiveTail"
+              type="checkbox"
+            />实时</label>
+            <button
+              v-if="selectedSysDate"
+              class="btn-mini"
+              @click="downloadSysLog"
+            >
+              ↓ 下载
+            </button>
           </div>
         </div>
-        <div v-if="!selectedSysDate" class="empty-panel">← 选择左侧日期</div>
-        <div v-else-if="loadingSysLog" class="empty-panel">加载中...</div>
-        <div v-else class="sys-log-content" ref="sysLogEl">
-          <div v-for="(line, i) in sysLines" :key="i"
-            :class="['sys-line', 'sys-' + lineLevel(line)]">
+        <div
+          v-if="!selectedSysDate"
+          class="empty-panel"
+        >
+          ← 选择左侧日期
+        </div>
+        <div
+          v-else-if="loadingSysLog"
+          class="empty-panel"
+        >
+          加载中...
+        </div>
+        <div
+          v-else
+          ref="sysLogEl"
+          class="sys-log-content"
+        >
+          <div
+            v-for="(line, i) in sysLines"
+            :key="i"
+            :class="['sys-line', 'sys-' + lineLevel(line)]"
+          >
             {{ line }}
           </div>
-          <div v-if="sysHasMore" class="load-more">
-            <button @click="loadMoreSysLog">加载更多...</button>
+          <div
+            v-if="sysHasMore"
+            class="load-more"
+          >
+            <button @click="loadMoreSysLog">
+              加载更多...
+            </button>
           </div>
-          <div v-if="sysLiveTail" ref="sysLiveAnchor"></div>
+          <div
+            v-if="sysLiveTail"
+            ref="sysLiveAnchor"
+          ></div>
         </div>
       </div>
     </div>
 
-    <ConfirmDialog :visible="confirmDialog.visible" :title="confirmDialog.title" :message="confirmDialog.message" :confirm-text="confirmDialog.confirmText" :variant="confirmDialog.variant" icon="warn" @confirm="confirmDialog.visible = false; confirmDialog.resolve(true)" @cancel="confirmDialog.visible = false; confirmDialog.resolve(false)" />
+    <ConfirmDialog
+      :visible="confirmDialog.visible"
+      :title="confirmDialog.title"
+      :message="confirmDialog.message"
+      :confirm-text="confirmDialog.confirmText"
+      :variant="confirmDialog.variant"
+      icon="warn"
+      @confirm="confirmDialog.visible = false; confirmDialog.resolve(true)"
+      @cancel="confirmDialog.visible = false; confirmDialog.resolve(false)"
+    />
   </div>
 </template>
 

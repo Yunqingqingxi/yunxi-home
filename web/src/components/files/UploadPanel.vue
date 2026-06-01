@@ -1,16 +1,50 @@
 <template>
-  <div v-if="tasks.length" class="upload-panel" :class="{ collapsed }">
-    <div class="up-head" @click="collapsed = !collapsed">
+  <div
+    v-if="tasks.length"
+    class="upload-panel"
+    :class="{ collapsed }"
+  >
+    <div
+      class="up-head"
+      @click="collapsed = !collapsed"
+    >
       <span>{{ hasActive ? '上传中' : '已完成' }} ({{ tasks.length }})</span>
-      <button v-if="!hasActive" class="up-dismiss" @click.stop="$emit('clear')">✕</button>
+      <button
+        v-if="!hasActive"
+        class="up-dismiss"
+        @click.stop="$emit('clear')"
+      >
+        ✕
+      </button>
     </div>
-    <div v-if="!collapsed" class="up-body">
-      <div v-for="t in tasks" :key="t.id" class="up-item">
-        <div class="up-name">{{ t.name }}</div>
-        <div class="up-track"><div class="up-fill" :style="{ width: t.progress + '%' }" :class="t.status"></div></div>
+    <div
+      v-if="!collapsed"
+      class="up-body"
+    >
+      <div
+        v-for="t in tasks"
+        :key="t.id"
+        class="up-item"
+      >
+        <div class="up-name">
+          {{ t.name }}
+        </div>
+        <div class="up-track">
+          <div
+            class="up-fill"
+            :style="{ width: t.progress + '%' }"
+            :class="t.status"
+          ></div>
+        </div>
         <div class="up-meta">
           <span :class="['up-status', t.status]">{{ t.status === 'uploading' ? t.progress + '%' : t.status === 'done' ? '✓' : '✗' }}</span>
-          <button v-if="t.status === 'uploading'" class="up-cancel" @click="$emit('cancel', t.id)">✕</button>
+          <button
+            v-if="t.status === 'uploading'"
+            class="up-cancel"
+            @click="$emit('cancel', t.id)"
+          >
+            ✕
+          </button>
         </div>
       </div>
     </div>

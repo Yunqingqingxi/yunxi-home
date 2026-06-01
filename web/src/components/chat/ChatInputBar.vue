@@ -1,62 +1,310 @@
 <template>
-  <svg style="position:absolute;width:0;height:0" aria-hidden="true">
+  <svg
+    style="position:absolute;width:0;height:0"
+    aria-hidden="true"
+  >
     <defs>
-      <linearGradient id="fg-md" x1="1.5" y1="-1" x2="23.5" y2="28" gradientUnits="userSpaceOnUse"><stop stop-color="#6D93FF"/><stop offset="1" stop-color="#5A71F0"/></linearGradient>
-      <linearGradient id="fg-doc" x1="1.5" y1="-1" x2="23.5" y2="28" gradientUnits="userSpaceOnUse"><stop stop-color="#2B7FFF"/><stop offset="1" stop-color="#1A5CD0"/></linearGradient>
-      <linearGradient id="fg-ppt" x1="1.5" y1="-1" x2="23.5" y2="28" gradientUnits="userSpaceOnUse"><stop stop-color="#FF6B35"/><stop offset="1" stop-color="#D9441E"/></linearGradient>
-      <linearGradient id="fg-xls" x1="1.5" y1="-1" x2="23.5" y2="28" gradientUnits="userSpaceOnUse"><stop stop-color="#21A366"/><stop offset="1" stop-color="#147A48"/></linearGradient>
-      <linearGradient id="fg-pdf" x1="1.5" y1="-1" x2="23.5" y2="28" gradientUnits="userSpaceOnUse"><stop stop-color="#E53935"/><stop offset="1" stop-color="#B71C1C"/></linearGradient>
-      <linearGradient id="fg-txt" x1="1.5" y1="-1" x2="23.5" y2="28" gradientUnits="userSpaceOnUse"><stop stop-color="#78909C"/><stop offset="1" stop-color="#546E7A"/></linearGradient>
-      <linearGradient id="fg-img" x1="1.5" y1="-1" x2="23.5" y2="28" gradientUnits="userSpaceOnUse"><stop stop-color="#AB47BC"/><stop offset="1" stop-color="#8E24AA"/></linearGradient>
-      <linearGradient id="fg-zip" x1="1.5" y1="-1" x2="23.5" y2="28" gradientUnits="userSpaceOnUse"><stop stop-color="#FFA726"/><stop offset="1" stop-color="#F57C00"/></linearGradient>
-      <linearGradient id="fg-default-0" x1="1.5" y1="-1" x2="23.5" y2="28" gradientUnits="userSpaceOnUse"><stop stop-color="#6D93FF"/><stop offset="1" stop-color="#5A71F0"/></linearGradient>
-      <linearGradient id="fg-default-1" x1="1.5" y1="-1" x2="23.5" y2="28" gradientUnits="userSpaceOnUse"><stop stop-color="#26C6DA"/><stop offset="1" stop-color="#0097A7"/></linearGradient>
-      <linearGradient id="fg-default-2" x1="1.5" y1="-1" x2="23.5" y2="28" gradientUnits="userSpaceOnUse"><stop stop-color="#66BB6A"/><stop offset="1" stop-color="#388E3C"/></linearGradient>
-      <linearGradient id="fg-default-3" x1="1.5" y1="-1" x2="23.5" y2="28" gradientUnits="userSpaceOnUse"><stop stop-color="#FF7043"/><stop offset="1" stop-color="#E64A19"/></linearGradient>
+      <linearGradient
+        id="fg-md"
+        x1="1.5"
+        y1="-1"
+        x2="23.5"
+        y2="28"
+        gradientUnits="userSpaceOnUse"
+      ><stop stop-color="#6D93FF" /><stop
+        offset="1"
+        stop-color="#5A71F0"
+      /></linearGradient>
+      <linearGradient
+        id="fg-doc"
+        x1="1.5"
+        y1="-1"
+        x2="23.5"
+        y2="28"
+        gradientUnits="userSpaceOnUse"
+      ><stop stop-color="#2B7FFF" /><stop
+        offset="1"
+        stop-color="#1A5CD0"
+      /></linearGradient>
+      <linearGradient
+        id="fg-ppt"
+        x1="1.5"
+        y1="-1"
+        x2="23.5"
+        y2="28"
+        gradientUnits="userSpaceOnUse"
+      ><stop stop-color="#FF6B35" /><stop
+        offset="1"
+        stop-color="#D9441E"
+      /></linearGradient>
+      <linearGradient
+        id="fg-xls"
+        x1="1.5"
+        y1="-1"
+        x2="23.5"
+        y2="28"
+        gradientUnits="userSpaceOnUse"
+      ><stop stop-color="#21A366" /><stop
+        offset="1"
+        stop-color="#147A48"
+      /></linearGradient>
+      <linearGradient
+        id="fg-pdf"
+        x1="1.5"
+        y1="-1"
+        x2="23.5"
+        y2="28"
+        gradientUnits="userSpaceOnUse"
+      ><stop stop-color="#E53935" /><stop
+        offset="1"
+        stop-color="#B71C1C"
+      /></linearGradient>
+      <linearGradient
+        id="fg-txt"
+        x1="1.5"
+        y1="-1"
+        x2="23.5"
+        y2="28"
+        gradientUnits="userSpaceOnUse"
+      ><stop stop-color="#78909C" /><stop
+        offset="1"
+        stop-color="#546E7A"
+      /></linearGradient>
+      <linearGradient
+        id="fg-img"
+        x1="1.5"
+        y1="-1"
+        x2="23.5"
+        y2="28"
+        gradientUnits="userSpaceOnUse"
+      ><stop stop-color="#AB47BC" /><stop
+        offset="1"
+        stop-color="#8E24AA"
+      /></linearGradient>
+      <linearGradient
+        id="fg-zip"
+        x1="1.5"
+        y1="-1"
+        x2="23.5"
+        y2="28"
+        gradientUnits="userSpaceOnUse"
+      ><stop stop-color="#FFA726" /><stop
+        offset="1"
+        stop-color="#F57C00"
+      /></linearGradient>
+      <linearGradient
+        id="fg-default-0"
+        x1="1.5"
+        y1="-1"
+        x2="23.5"
+        y2="28"
+        gradientUnits="userSpaceOnUse"
+      ><stop stop-color="#6D93FF" /><stop
+        offset="1"
+        stop-color="#5A71F0"
+      /></linearGradient>
+      <linearGradient
+        id="fg-default-1"
+        x1="1.5"
+        y1="-1"
+        x2="23.5"
+        y2="28"
+        gradientUnits="userSpaceOnUse"
+      ><stop stop-color="#26C6DA" /><stop
+        offset="1"
+        stop-color="#0097A7"
+      /></linearGradient>
+      <linearGradient
+        id="fg-default-2"
+        x1="1.5"
+        y1="-1"
+        x2="23.5"
+        y2="28"
+        gradientUnits="userSpaceOnUse"
+      ><stop stop-color="#66BB6A" /><stop
+        offset="1"
+        stop-color="#388E3C"
+      /></linearGradient>
+      <linearGradient
+        id="fg-default-3"
+        x1="1.5"
+        y1="-1"
+        x2="23.5"
+        y2="28"
+        gradientUnits="userSpaceOnUse"
+      ><stop stop-color="#FF7043" /><stop
+        offset="1"
+        stop-color="#E64A19"
+      /></linearGradient>
     </defs>
   </svg>
   <div :class="store.sessionId ? 'input-bar-floating' : 'input-bar-bottom'">
     <!-- Attachments & hints -->
-    <div v-if="attachedFiles.length" class="attach-bar">
-      <div v-for="(f, i) in attachedFiles" :key="i" class="file-card" :class="{ uploading: f.uploading }">
+    <div
+      v-if="attachedFiles.length"
+      class="attach-bar"
+    >
+      <div
+        v-for="(f, i) in attachedFiles"
+        :key="i"
+        class="file-card"
+        :class="{ uploading: f.uploading }"
+      >
         <div class="file-card-icon">
-          <svg width="24" height="28" viewBox="0 0 24 28" fill="none">
-            <path d="M16.5 0l7 7v15.6c0 2.25 0 3.375-.573 4.164a3 3 0 0 1-.663.663C21.475 28 20.349 28 18.1 28H5.9c-2.25 0-3.375 0-4.164-.573a3 3 0 0 1-.663-.663C.5 25.975.5 24.849.5 22.6V5.4c0-2.25 0-3.375.573-4.164a3 3 0 0 1 .663-.663C2.525 0 3.651 0 5.9 0h10.6z" :fill="fileIconGradient(f.name, i)"/><path d="M16.5 0l7 7h-3.8c-1.12 0-1.68 0-2.108-.218a2 2 0 0 1-.874-.874C16.5 5.48 16.5 4.92 16.5 3.8V0z" fill="#fff" fill-opacity=".55"/><path d="M6 11.784c0-.433.351-.784.784-.784h10.432a.784.784 0 1 1 0 1.568H6.784A.784.784 0 0 1 6 11.784zM6 15.784c0-.433.351-.784.784-.784h10.432a.784.784 0 1 1 0 1.568H6.784A.784.784 0 0 1 6 15.784zM6.114 19.817c0-.433.35-.784.784-.784h6.318a.784.784 0 1 1 0 1.568H6.898a.784.784 0 0 1-.784-.784z" fill="#fff"/>
+          <svg
+            width="24"
+            height="28"
+            viewBox="0 0 24 28"
+            fill="none"
+          >
+            <path
+              d="M16.5 0l7 7v15.6c0 2.25 0 3.375-.573 4.164a3 3 0 0 1-.663.663C21.475 28 20.349 28 18.1 28H5.9c-2.25 0-3.375 0-4.164-.573a3 3 0 0 1-.663-.663C.5 25.975.5 24.849.5 22.6V5.4c0-2.25 0-3.375.573-4.164a3 3 0 0 1 .663-.663C2.525 0 3.651 0 5.9 0h10.6z"
+              :fill="fileIconGradient(f.name, i)"
+            /><path
+              d="M16.5 0l7 7h-3.8c-1.12 0-1.68 0-2.108-.218a2 2 0 0 1-.874-.874C16.5 5.48 16.5 4.92 16.5 3.8V0z"
+              fill="#fff"
+              fill-opacity=".55"
+            /><path
+              d="M6 11.784c0-.433.351-.784.784-.784h10.432a.784.784 0 1 1 0 1.568H6.784A.784.784 0 0 1 6 11.784zM6 15.784c0-.433.351-.784.784-.784h10.432a.784.784 0 1 1 0 1.568H6.784A.784.784 0 0 1 6 15.784zM6.114 19.817c0-.433.35-.784.784-.784h6.318a.784.784 0 1 1 0 1.568H6.898a.784.784 0 0 1-.784-.784z"
+              fill="#fff"
+            />
           </svg>
         </div>
         <div class="file-card-info">
           <span class="file-card-name">{{ f.name }}</span>
           <span class="file-card-meta">{{ fileExt(f.name).toUpperCase() }} {{ fmtFileSize(f.size) }}</span>
         </div>
-        <span v-if="f.uploading" class="file-card-progress">{{ f.progress }}%</span>
-        <div class="file-card-close" @click.stop="removeFile(i)" tabindex="0">
-          <svg width="12" height="12" viewBox="0 0 14 14" fill="none"><path d="M10.6 4.4L7 8L3.4 4.4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M10.6 10.6L7 7L3.4 10.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        <span
+          v-if="f.uploading"
+          class="file-card-progress"
+        >{{ f.progress }}%</span>
+        <div
+          class="file-card-close"
+          tabindex="0"
+          @click.stop="removeFile(i)"
+        >
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 14 14"
+            fill="none"
+          ><path
+            d="M10.6 4.4L7 8L3.4 4.4"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+          /><path
+            d="M10.6 10.6L7 7L3.4 10.6"
+            stroke="currentColor"
+            stroke-width="1.5"
+            stroke-linecap="round"
+          /></svg>
         </div>
       </div>
     </div>
 
     <!-- Main input row: textarea + actions inline -->
     <div class="input-main">
-      <input ref="fileInput" type="file" style="display:none" @change="onFileAttach" multiple />
-      <button class="act-btn" title="附加文件" @click="$refs.fileInput.click()">
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M10 4v7a3 3 0 01-6 0V5a2 2 0 014 0v5.5a1 1 0 01-2 0V5"/></svg>
+      <input
+        ref="fileInput"
+        type="file"
+        style="display:none"
+        multiple
+        @change="onFileAttach"
+      />
+      <button
+        class="act-btn"
+        title="附加文件"
+        @click="$refs.fileInput.click()"
+      >
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 16 16"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+          stroke-linecap="round"
+        ><path d="M10 4v7a3 3 0 01-6 0V5a2 2 0 014 0v5.5a1 1 0 01-2 0V5" /></svg>
       </button>
 
-      <button class="act-btn" :class="{ active: planMode }" @click="planMode = !planMode" title="Plan 多步规划">
-        <svg width="14" height="14" viewBox="0 0 13 13" fill="none" stroke="currentColor" stroke-width="1.3"><rect x="1.5" y="1.5" width="4" height="3" rx="0.8"/><rect x="7.5" y="1.5" width="4" height="3" rx="0.8"/><rect x="1.5" y="8.5" width="4" height="3" rx="0.8"/><rect x="7.5" y="8.5" width="4" height="3" rx="0.8"/></svg>
+      <button
+        class="act-btn"
+        :class="{ active: planMode }"
+        title="Plan 多步规划"
+        @click="planMode = !planMode"
+      >
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 13 13"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.3"
+        ><rect
+          x="1.5"
+          y="1.5"
+          width="4"
+          height="3"
+          rx="0.8"
+        /><rect
+          x="7.5"
+          y="1.5"
+          width="4"
+          height="3"
+          rx="0.8"
+        /><rect
+          x="1.5"
+          y="8.5"
+          width="4"
+          height="3"
+          rx="0.8"
+        /><rect
+          x="7.5"
+          y="8.5"
+          width="4"
+          height="3"
+          rx="0.8"
+        /></svg>
       </button>
 
       <div class="input-wrapper">
-        <textarea ref="inputEl" v-model="input" class="input-field" :class="['model-'+modelKey, { focused: inputFocused, 'cmd-mode': showCommands }]" :placeholder="inputPlaceholder"
+        <textarea
+          ref="inputEl"
+          v-model="input"
+          class="input-field"
+          :class="['model-'+modelKey, { focused: inputFocused, 'cmd-mode': showCommands }]"
+          :placeholder="inputPlaceholder"
           :rows="1"
-          @keydown="onKeydown" @focus="inputFocused = true" @blur="inputFocused = false"
-          @input="onInputResize" maxlength="4000"></textarea>
-        <button type="button" class="model-dot" :class="modelKey" @mousedown.prevent @click.stop="modelMenuOpen = !modelMenuOpen" :title="currentModelName + ' ▼'"></button>
-        <div v-if="modelMenuOpen" class="model-dropdown" @click.stop>
-          <button v-for="m in modelOptions" :key="m.key"
+          maxlength="4000"
+          @keydown="onKeydown"
+          @focus="inputFocused = true"
+          @blur="inputFocused = false"
+          @input="onInputResize"
+        ></textarea>
+        <button
+          type="button"
+          class="model-dot"
+          :class="modelKey"
+          :title="currentModelName + ' ▼'"
+          @mousedown.prevent
+          @click.stop="modelMenuOpen = !modelMenuOpen"
+        ></button>
+        <div
+          v-if="modelMenuOpen"
+          class="model-dropdown"
+          @click.stop
+        >
+          <button
+            v-for="m in modelOptions"
+            :key="m.key"
             :class="['model-opt', { active: modelKey === m.key }]"
-            @click="onModelChange(m.key); modelMenuOpen = false">
-            <span class="seg-dot" :class="m.key"></span>
+            @click="onModelChange(m.key); modelMenuOpen = false"
+          >
+            <span
+              class="seg-dot"
+              :class="m.key"
+            ></span>
             <div class="model-opt-info">
               <span class="model-opt-label">{{ m.label }}</span>
               <span class="model-opt-desc">{{ m.desc }}</span>
@@ -65,9 +313,12 @@
           <div class="model-dropdown-div"></div>
           <div class="model-reasoning-row">
             <span class="model-reasoning-label">推理</span>
-            <button v-for="r in reasoningLevels" :key="r.key"
+            <button
+              v-for="r in reasoningLevels"
+              :key="r.key"
               :class="['seg-item', { active: reasoning === r.key }]"
-              @click="reasoning = r.key">
+              @click="reasoning = r.key"
+            >
               {{ r.label }}
             </button>
           </div>
@@ -77,24 +328,61 @@
       <button
         :class="['send-btn', isBusy && !input.trim() ? 'stop' : '', hasAgent ? 'agent-running' : '', input.trim() || attachedFiles.length ? 'active' : '']"
         :disabled="!isBusy && !input.trim() && !attachedFiles.length"
-        @click="isBusy && !input.trim() ? stopGeneration() : doSend()"
         :title="hasAgent ? 'Agent 执行中，输入消息将注入不中断' : isBusy ? '停止' : '发送'"
+        @click="isBusy && !input.trim() ? stopGeneration() : doSend()"
       >
-        <svg v-if="isBusy && !input.trim()" width="14" height="14" viewBox="0 0 13 13" fill="currentColor"><rect x="2.5" y="2.5" width="8" height="8" rx="1.5"/></svg>
-        <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2L15 22l-4-9-9-4 20-7z"/></svg>
+        <svg
+          v-if="isBusy && !input.trim()"
+          width="14"
+          height="14"
+          viewBox="0 0 13 13"
+          fill="currentColor"
+        ><rect
+          x="2.5"
+          y="2.5"
+          width="8"
+          height="8"
+          rx="1.5"
+        /></svg>
+        <svg
+          v-else
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.6"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        ><path d="M22 2L11 13" /><path d="M22 2L15 22l-4-9-9-4 20-7z" /></svg>
       </button>
     </div>
 
     <!-- Command palette -->
-    <div v-if="showCommands" class="cmd-palette">
-      <div v-for="(cmd, i) in filteredCommands" :key="cmd.name"
+    <div
+      v-if="showCommands"
+      class="cmd-palette"
+    >
+      <div
+        v-for="(cmd, i) in filteredCommands"
+        :key="cmd.name"
         :class="['cmd-item', { active: i === cmdIndex }]"
-        @mousedown.prevent @click="selectCommand(cmd)">
+        @mousedown.prevent
+        @click="selectCommand(cmd)"
+      >
         <span class="cmd-name">/{{ cmd.name }}</span>
-        <span v-if="cmd.args" class="cmd-args">{{ cmd.args }}</span>
+        <span
+          v-if="cmd.args"
+          class="cmd-args"
+        >{{ cmd.args }}</span>
         <span class="cmd-desc">{{ cmd.desc }}</span>
       </div>
-      <div v-if="!filteredCommands.length" class="cmd-empty">无匹配指令</div>
+      <div
+        v-if="!filteredCommands.length"
+        class="cmd-empty"
+      >
+        无匹配指令
+      </div>
     </div>
 
     <CronPanel v-if="store.sessionId" />
@@ -277,7 +565,7 @@ function onKeydown(e) {
     if (e.key === 'Tab' || e.key === 'Enter') { e.preventDefault(); const cmd = filteredCommands.value[cmdIndex.value]; if (cmd) selectCommand(cmd); return }
     if (e.key === 'Escape') { input.value = ''; cmdIndex.value = 0; return }
   }
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); store.isStreaming && !input.trim() ? stopGeneration() : doSend() }
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); store.isStreaming && !input.value.trim() ? stopGeneration() : doSend() }
 }
 function stopGeneration() { store.resetStreaming() }
 

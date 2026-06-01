@@ -14,7 +14,9 @@ function getStored(): Theme | null {
   try {
     const v = localStorage.getItem(STORAGE_KEY)
     if (v === 'dark' || v === 'light') return v
-  } catch (_) { /* noop */ }
+  } catch (_) {
+    /* noop */
+  }
   return null
 }
 
@@ -35,10 +37,18 @@ export const useThemeStore = defineStore('theme', () => {
     theme.value = newTheme
   }
 
-  watch(theme, (val: Theme) => {
-    apply(val)
-    try { localStorage.setItem(STORAGE_KEY, val) } catch (_) { /* noop */ }
-  }, { immediate: true })
+  watch(
+    theme,
+    (val: Theme) => {
+      apply(val)
+      try {
+        localStorage.setItem(STORAGE_KEY, val)
+      } catch (_) {
+        /* noop */
+      }
+    },
+    { immediate: true },
+  )
 
   if (typeof window !== 'undefined') {
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e: MediaQueryListEvent) => {

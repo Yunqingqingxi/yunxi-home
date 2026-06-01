@@ -3,95 +3,330 @@
     <div class="dns-header">
       <h3>DNS 管理</h3>
       <div class="dns-actions">
-        <a-button size="small" :loading="triggering" @click="doTrigger">触发更新</a-button>
-        <a-button type="primary" size="small" @click="openAdd">添加记录</a-button>
+        <a-button
+          size="small"
+          :loading="triggering"
+          @click="doTrigger"
+        >
+          触发更新
+        </a-button>
+        <a-button
+          type="primary"
+          size="small"
+          @click="openAdd"
+        >
+          添加记录
+        </a-button>
       </div>
     </div>
 
     <!-- Quick stat strip -->
-    <div class="stat-strip" v-if="records.length || history.length">
-      <div class="strip-item">记录 <strong>{{ records.length }}</strong></div>
-      <div class="strip-item">IPv6 <strong>{{ records.filter(r=>r.type==='AAAA').length }}</strong></div>
-      <div class="strip-item">已启用 <strong>{{ records.filter(r=>r.enabled).length }}</strong></div>
-      <div class="strip-item">更新 <strong>{{ historyPagination.total }}</strong> 次</div>
+    <div
+      v-if="records.length || history.length"
+      class="stat-strip"
+    >
+      <div class="strip-item">
+        记录 <strong>{{ records.length }}</strong>
+      </div>
+      <div class="strip-item">
+        IPv6 <strong>{{ records.filter(r=>r.type==='AAAA').length }}</strong>
+      </div>
+      <div class="strip-item">
+        已启用 <strong>{{ records.filter(r=>r.enabled).length }}</strong>
+      </div>
+      <div class="strip-item">
+        更新 <strong>{{ historyPagination.total }}</strong> 次
+      </div>
     </div>
 
     <!-- Tabs -->
     <div class="tab-bar">
-      <button :class="['tab', { active: activeTab === 'records' }]" @click="activeTab = 'records'">域名记录</button>
-      <button :class="['tab', { active: activeTab === 'history' }]" @click="activeTab = 'history'">更新历史</button>
+      <button
+        :class="['tab', { active: activeTab === 'records' }]"
+        @click="activeTab = 'records'"
+      >
+        域名记录
+      </button>
+      <button
+        :class="['tab', { active: activeTab === 'history' }]"
+        @click="activeTab = 'history'"
+      >
+        更新历史
+      </button>
     </div>
 
     <!-- Records tab -->
-    <Transition :name="slideDirection" mode="out-in">
-    <div v-if="activeTab === 'records'" key="records" class="table-card" v-show="records.length || !loading">
-      <table class="native-table" v-if="records.length">
-        <thead><tr><th>类型</th><th>域名</th><th>RR</th><th>记录值</th><th class="col-hide-mobile">TTL</th><th class="col-hide-mobile">频率</th><th>状态</th><th>更新时间</th><th>操作</th></tr></thead>
-        <tbody><tr v-for="r in records" :key="r.id">
-          <td><span class="tag" :class="r.type==='AAAA'?'tag-green':'tag-blue'">{{ r.type }}</span></td>
-          <td>{{ r.domain }}</td><td>{{ r.rr }}</td>
-          <td><code class="cell-code">{{ r.value || '等待更新' }}</code></td>
-          <td class="col-hide-mobile">{{ r.ttl }}s</td>
-          <td class="col-hide-mobile">{{ formatCron(r.cron_expr) }}</td>
-          <td><span class="tag" :class="r.enabled?'tag-green':'tag-gray'">{{ r.enabled?'启用':'停用' }}</span></td>
-          <td class="text-muted">{{ formatTime(r.updated_at) }}</td>
-          <td class="row-actions">
-            <button class="btn-sm" @click="openEdit(r)">编辑</button>
-            <button class="btn-sm btn-warn" @click="toggleEnable(r)">{{ r.enabled?'停用':'启用' }}</button>
-            <button class="btn-sm btn-danger" @click="doDelete(r.id)">删除</button>
-          </td>
-        </tr></tbody>
-      </table>
-      <a-empty v-if="!loading && !records.length" description="暂无记录" />
-    </div>
-
-    <!-- History tab -->
-    <div v-if="activeTab === 'history'" key="history" class="table-card" v-show="history.length || !loadingHistory">
-
-      <table class="native-table" v-if="history.length">
-        <thead><tr><th>类型</th><th>域名</th><th>RR</th><th>旧IP</th><th>新IP</th><th>状态</th><th class="col-hide-mobile">时间</th></tr></thead>
-        <tbody><tr v-for="r in history" :key="r.id">
-          <td><span class="tag" :class="r.type==='AAAA'?'tag-green':'tag-blue'">{{ r.type }}</span></td>
-          <td>{{ r.domain }}</td><td>{{ r.rr || '@' }}</td>
-          <td><code class="cell-code">{{ r.old_ip || '-' }}</code></td>
-          <td><code class="cell-code">{{ r.new_ip || '-' }}</code></td>
-          <td><span class="tag" :class="r.status==='success'?'tag-green':'tag-red'">{{ r.status==='success'?'成功':'失败' }}</span></td>
-          <td class="text-muted col-hide-mobile">{{ formatTime(r.created_at) }}</td>
-        </tr></tbody>
-      </table>
-      <a-empty v-if="!loadingHistory && !history.length" description="暂无更新记录" />
-      <div v-if="historyPagination.total > historyPagination.pageSize" class="pagination">
-        <button :disabled="historyPagination.current <= 1" @click="loadHistory(historyPagination.current - 1)">上一页</button>
-        <span>{{ historyPagination.current }} / {{ Math.ceil(historyPagination.total / historyPagination.pageSize) }}</span>
-        <button :disabled="historyPagination.current >= Math.ceil(historyPagination.total / historyPagination.pageSize)" @click="loadHistory(historyPagination.current + 1)">下一页</button>
+    <Transition
+      :name="slideDirection"
+      mode="out-in"
+    >
+      <div
+        v-if="activeTab === 'records'"
+        v-show="records.length || !loading"
+        key="records"
+        class="table-card"
+      >
+        <table
+          v-if="records.length"
+          class="native-table"
+        >
+          <thead>
+            <tr>
+              <th>类型</th><th>域名</th><th>RR</th><th>记录值</th><th class="col-hide-mobile">
+                TTL
+              </th><th class="col-hide-mobile">
+                频率
+              </th><th>状态</th><th>更新时间</th><th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="r in records"
+              :key="r.id"
+            >
+              <td>
+                <span
+                  class="tag"
+                  :class="r.type==='AAAA'?'tag-green':'tag-blue'"
+                >{{ r.type }}</span>
+              </td>
+              <td>{{ r.domain }}</td><td>{{ r.rr }}</td>
+              <td><code class="cell-code">{{ r.value || '等待更新' }}</code></td>
+              <td class="col-hide-mobile">
+                {{ r.ttl }}s
+              </td>
+              <td class="col-hide-mobile">
+                {{ formatCron(r.cron_expr) }}
+              </td>
+              <td>
+                <span
+                  class="tag"
+                  :class="r.enabled?'tag-green':'tag-gray'"
+                >{{ r.enabled?'启用':'停用' }}</span>
+              </td>
+              <td class="text-muted">
+                {{ formatTime(r.updated_at) }}
+              </td>
+              <td class="row-actions">
+                <button
+                  class="btn-sm"
+                  @click="openEdit(r)"
+                >
+                  编辑
+                </button>
+                <button
+                  class="btn-sm btn-warn"
+                  @click="toggleEnable(r)"
+                >
+                  {{ r.enabled?'停用':'启用' }}
+                </button>
+                <button
+                  class="btn-sm btn-danger"
+                  @click="doDelete(r.id)"
+                >
+                  删除
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <a-empty
+          v-if="!loading && !records.length"
+          description="暂无记录"
+        />
       </div>
-    </div>
+
+      <!-- History tab -->
+      <div
+        v-if="activeTab === 'history'"
+        v-show="history.length || !loadingHistory"
+        key="history"
+        class="table-card"
+      >
+        <table
+          v-if="history.length"
+          class="native-table"
+        >
+          <thead>
+            <tr>
+              <th>类型</th><th>域名</th><th>RR</th><th>旧IP</th><th>新IP</th><th>状态</th><th class="col-hide-mobile">
+                时间
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="r in history"
+              :key="r.id"
+            >
+              <td>
+                <span
+                  class="tag"
+                  :class="r.type==='AAAA'?'tag-green':'tag-blue'"
+                >{{ r.type }}</span>
+              </td>
+              <td>{{ r.domain }}</td><td>{{ r.rr || '@' }}</td>
+              <td><code class="cell-code">{{ r.old_ip || '-' }}</code></td>
+              <td><code class="cell-code">{{ r.new_ip || '-' }}</code></td>
+              <td>
+                <span
+                  class="tag"
+                  :class="r.status==='success'?'tag-green':'tag-red'"
+                >{{ r.status==='success'?'成功':'失败' }}</span>
+              </td>
+              <td class="text-muted col-hide-mobile">
+                {{ formatTime(r.created_at) }}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <a-empty
+          v-if="!loadingHistory && !history.length"
+          description="暂无更新记录"
+        />
+        <div
+          v-if="historyPagination.total > historyPagination.pageSize"
+          class="pagination"
+        >
+          <button
+            :disabled="historyPagination.current <= 1"
+            @click="loadHistory(historyPagination.current - 1)"
+          >
+            上一页
+          </button>
+          <span>{{ historyPagination.current }} / {{ Math.ceil(historyPagination.total / historyPagination.pageSize) }}</span>
+          <button
+            :disabled="historyPagination.current >= Math.ceil(historyPagination.total / historyPagination.pageSize)"
+            @click="loadHistory(historyPagination.current + 1)"
+          >
+            下一页
+          </button>
+        </div>
+      </div>
     </Transition>
 
     <!-- Add/Edit Modal -->
-    <a-modal v-model:visible="modalVisible" :title="editing ? '编辑记录' : '添加记录'" @ok="doSave" :ok-loading="saving" :width="modalWidth" :simple="isMobile">
-      <a-form :model="form" layout="vertical" size="medium">
-        <a-form-item field="domain" label="域名" required>
-          <a-select v-model="form.domain" placeholder="选择或输入域名" allow-search allow-create @popup-visible-change="onDomainPopupChange" @change="onDomainChange" :loading="loadingCloud">
-            <a-option v-for="d in cloudDomains" :key="d.domain_name" :value="d.domain_name">{{ d.domain_name }} ({{ d.record_count }}条)</a-option>
+    <a-modal
+      v-model:visible="modalVisible"
+      :title="editing ? '编辑记录' : '添加记录'"
+      :ok-loading="saving"
+      :width="modalWidth"
+      :simple="isMobile"
+      @ok="doSave"
+    >
+      <a-form
+        :model="form"
+        layout="vertical"
+        size="medium"
+      >
+        <a-form-item
+          field="domain"
+          label="域名"
+          required
+        >
+          <a-select
+            v-model="form.domain"
+            placeholder="选择或输入域名"
+            allow-search
+            allow-create
+            :loading="loadingCloud"
+            @popup-visible-change="onDomainPopupChange"
+            @change="onDomainChange"
+          >
+            <a-option
+              v-for="d in cloudDomains"
+              :key="d.domain_name"
+              :value="d.domain_name"
+            >
+              {{ d.domain_name }} ({{ d.record_count }}条)
+            </a-option>
           </a-select>
         </a-form-item>
-        <a-form-item v-if="cloudRecords.length > 0" label="已有记录">
+        <a-form-item
+          v-if="cloudRecords.length > 0"
+          label="已有记录"
+        >
           <div class="cloud-records-hint">
-            <span v-for="r in cloudRecords" :key="r.record_id" class="cloud-record-tag">{{ r.rr || '@' }} → {{ r.value }} <em>{{ r.type }}</em></span>
+            <span
+              v-for="r in cloudRecords"
+              :key="r.record_id"
+              class="cloud-record-tag"
+            >{{ r.rr || '@' }} → {{ r.value }} <em>{{ r.type }}</em></span>
           </div>
         </a-form-item>
-        <a-form-item field="rr" label="主机记录 (RR)" required><a-input v-model="form.rr" placeholder="@ 或 www" /></a-form-item>
-        <a-form-item field="type" label="记录类型" required>
-          <a-radio-group v-model="form.type"><a-radio value="AAAA">AAAA (IPv6)</a-radio><a-radio value="A">A (IPv4)</a-radio></a-radio-group>
+        <a-form-item
+          field="rr"
+          label="主机记录 (RR)"
+          required
+        >
+          <a-input
+            v-model="form.rr"
+            placeholder="@ 或 www"
+          />
         </a-form-item>
-        <a-form-item field="ttl" label="TTL">
-          <a-select v-model="form.ttl"><a-option :value="60">60s</a-option><a-option :value="120">120s</a-option><a-option :value="300">300s</a-option><a-option :value="600">600s</a-option><a-option :value="1800">1800s</a-option><a-option :value="3600">3600s</a-option><a-option :value="86400">86400s</a-option></a-select>
+        <a-form-item
+          field="type"
+          label="记录类型"
+          required
+        >
+          <a-radio-group v-model="form.type">
+            <a-radio value="AAAA">
+              AAAA (IPv6)
+            </a-radio><a-radio value="A">
+              A (IPv4)
+            </a-radio>
+          </a-radio-group>
         </a-form-item>
-        <a-form-item field="cron_expr" label="检测频率">
-          <a-select v-model="form.cron_expr"><a-option value="0 */1 * * * *">每分钟</a-option><a-option value="0 */5 * * * *">每5分钟</a-option><a-option value="0 */10 * * * *">每10分钟</a-option><a-option value="0 */30 * * * *">每30分钟</a-option><a-option value="0 0 * * * *">每小时</a-option><a-option value="0 0 */6 * * *">每6小时</a-option><a-option value="0 0 0 * * *">每天</a-option></a-select>
+        <a-form-item
+          field="ttl"
+          label="TTL"
+        >
+          <a-select v-model="form.ttl">
+            <a-option :value="60">
+              60s
+            </a-option><a-option :value="120">
+              120s
+            </a-option><a-option :value="300">
+              300s
+            </a-option><a-option :value="600">
+              600s
+            </a-option><a-option :value="1800">
+              1800s
+            </a-option><a-option :value="3600">
+              3600s
+            </a-option><a-option :value="86400">
+              86400s
+            </a-option>
+          </a-select>
         </a-form-item>
-        <a-form-item field="enabled" label="启用"><a-switch v-model="form.enabled" /></a-form-item>
+        <a-form-item
+          field="cron_expr"
+          label="检测频率"
+        >
+          <a-select v-model="form.cron_expr">
+            <a-option value="0 */1 * * * *">
+              每分钟
+            </a-option><a-option value="0 */5 * * * *">
+              每5分钟
+            </a-option><a-option value="0 */10 * * * *">
+              每10分钟
+            </a-option><a-option value="0 */30 * * * *">
+              每30分钟
+            </a-option><a-option value="0 0 * * * *">
+              每小时
+            </a-option><a-option value="0 0 */6 * * *">
+              每6小时
+            </a-option><a-option value="0 0 0 * * *">
+              每天
+            </a-option>
+          </a-select>
+        </a-form-item>
+        <a-form-item
+          field="enabled"
+          label="启用"
+        >
+          <a-switch v-model="form.enabled" />
+        </a-form-item>
       </a-form>
     </a-modal>
   </div>

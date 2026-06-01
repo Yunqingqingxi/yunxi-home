@@ -1,20 +1,58 @@
 ﻿<template>
-  <div v-if="items.length > 0" class="todo-panel" :class="{ collapsed: collapsed }">
-    <div class="todo-header" @click="collapsed = !collapsed">
+  <div
+    v-if="items.length > 0"
+    class="todo-panel"
+    :class="{ collapsed: collapsed }"
+  >
+    <div
+      class="todo-header"
+      @click="collapsed = !collapsed"
+    >
       <div class="todo-header-left">
-        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5">
-          <rect x="2" y="2" width="10" height="10" rx="2"/>
-          <path d="M4.5 7l2 2 3-4" stroke-linecap="round" stroke-linejoin="round"/>
+        <svg
+          width="14"
+          height="14"
+          viewBox="0 0 14 14"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+        >
+          <rect
+            x="2"
+            y="2"
+            width="10"
+            height="10"
+            rx="2"
+          />
+          <path
+            d="M4.5 7l2 2 3-4"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
         </svg>
         <span class="todo-title">任务进度</span>
         <span class="todo-count">{{ doneCount }}/{{ items.length }}</span>
       </div>
       <div class="todo-header-right">
         <!-- Mini progress ring -->
-        <svg width="20" height="20" viewBox="0 0 20 20" class="progress-ring">
-          <circle cx="10" cy="10" r="8" fill="none" stroke="var(--border-default)" stroke-width="2"/>
+        <svg
+          width="20"
+          height="20"
+          viewBox="0 0 20 20"
+          class="progress-ring"
+        >
           <circle
-            cx="10" cy="10" r="8"
+            cx="10"
+            cy="10"
+            r="8"
+            fill="none"
+            stroke="var(--border-default)"
+            stroke-width="2"
+          />
+          <circle
+            cx="10"
+            cy="10"
+            r="8"
             fill="none"
             stroke="var(--brand-500)"
             stroke-width="2"
@@ -25,13 +63,24 @@
             class="progress-ring-fill"
           />
         </svg>
-        <svg :class="['chevron', { flipped: !collapsed }]" width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5">
-          <path d="M3 3.5l2 3 2-3"/>
+        <svg
+          :class="['chevron', { flipped: !collapsed }]"
+          width="10"
+          height="10"
+          viewBox="0 0 10 10"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+        >
+          <path d="M3 3.5l2 3 2-3" />
         </svg>
       </div>
     </div>
 
-    <div v-if="!collapsed" class="todo-body">
+    <div
+      v-if="!collapsed"
+      class="todo-body"
+    >
       <div
         v-for="item in items"
         :key="item.id"
@@ -40,7 +89,10 @@
       >
         <span class="todo-status-icon">{{ statusIcon(item.status) }}</span>
         <span class="todo-content">{{ item.active_form || item.content }}</span>
-        <span v-if="item.status === 'in_progress'" class="todo-pulse"></span>
+        <span
+          v-if="item.status === 'in_progress'"
+          class="todo-pulse"
+        ></span>
       </div>
     </div>
   </div>

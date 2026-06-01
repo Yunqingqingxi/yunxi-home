@@ -1,29 +1,94 @@
 <template>
   <div class="home-state">
     <div class="home-core">
-      <svg class="core-ring" viewBox="0 0 120 120" fill="none">
-        <circle cx="60" cy="60" r="52" stroke="var(--brand-300)" stroke-width="0.5" opacity="0.3"/>
-        <circle cx="60" cy="60" r="42" stroke="var(--brand-400)" stroke-width="0.6" opacity="0.4"/>
-        <circle cx="60" cy="60" r="24" stroke="var(--brand-500)" stroke-width="0.8" opacity="0.6"/>
-        <circle cx="60" cy="60" r="7" fill="var(--brand-500)" opacity="0.9">
-          <animate attributeName="r" values="6;8.5;6" dur="3s" repeatCount="indefinite"/>
-          <animate attributeName="opacity" values="0.7;1;0.7" dur="3s" repeatCount="indefinite"/>
+      <svg
+        class="core-ring"
+        viewBox="0 0 120 120"
+        fill="none"
+      >
+        <circle
+          cx="60"
+          cy="60"
+          r="52"
+          stroke="var(--brand-300)"
+          stroke-width="0.5"
+          opacity="0.3"
+        />
+        <circle
+          cx="60"
+          cy="60"
+          r="42"
+          stroke="var(--brand-400)"
+          stroke-width="0.6"
+          opacity="0.4"
+        />
+        <circle
+          cx="60"
+          cy="60"
+          r="24"
+          stroke="var(--brand-500)"
+          stroke-width="0.8"
+          opacity="0.6"
+        />
+        <circle
+          cx="60"
+          cy="60"
+          r="7"
+          fill="var(--brand-500)"
+          opacity="0.9"
+        >
+          <animate
+            attributeName="r"
+            values="6;8.5;6"
+            dur="3s"
+            repeatCount="indefinite"
+          />
+          <animate
+            attributeName="opacity"
+            values="0.7;1;0.7"
+            dur="3s"
+            repeatCount="indefinite"
+          />
         </circle>
       </svg>
       <div class="core-orbits">
-        <span v-for="i in 12" :key="i" class="orbit-dot" :style="orbitStyle(i)" />
+        <span
+          v-for="i in 12"
+          :key="i"
+          class="orbit-dot"
+          :style="orbitStyle(i)"
+        ></span>
       </div>
     </div>
-    <h1 class="home-title">云 兮</h1>
-    <p class="home-desc">你的全能家庭服务器运维伙伴</p>
+    <h1 class="home-title">
+      云 兮
+    </h1>
+    <p class="home-desc">
+      你的全能家庭服务器运维伙伴
+    </p>
     <div class="home-caps">
-      <button v-for="c in caps" :key="c.label" class="cap-pill" @click="$emit('quickStart', c.prompt)">
-        <span class="cap-icon" v-html="c.icon"></span>
+      <button
+        v-for="c in caps"
+        :key="c.label"
+        class="cap-pill"
+        @click="$emit('quickStart', c.prompt)"
+      >
+        <span
+          class="cap-icon"
+          v-html="c.icon"
+        ></span>
         {{ c.label }}
       </button>
     </div>
     <div class="home-quick-prompts">
-      <button v-for="p in quickPrompts" :key="p" class="hint-chip" @click="$emit('quickStart', p)">{{ p }}</button>
+      <button
+        v-for="p in quickPrompts"
+        :key="p"
+        class="hint-chip"
+        @click="$emit('quickStart', p)"
+      >
+        {{ p }}
+      </button>
     </div>
   </div>
 </template>

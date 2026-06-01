@@ -1,25 +1,62 @@
 <template>
-  <div v-if="tasks.length" class="mip-bar" :class="{ collapsed }">
-    <div class="mip-head" @click="collapsed = !collapsed">
+  <div
+    v-if="tasks.length"
+    class="mip-bar"
+    :class="{ collapsed }"
+  >
+    <div
+      class="mip-head"
+      @click="collapsed = !collapsed"
+    >
       <span class="mip-chevron">{{ collapsed ? '▶' : '▼' }}</span>
       <span class="mip-title">MCP 安装</span>
       <span class="mip-summary">{{ runningCount }} 进行中 · {{ doneCount }} 完成</span>
-      <button class="mip-dismiss" @click.stop="$emit('clear')" v-if="!runningCount">✕</button>
+      <button
+        v-if="!runningCount"
+        class="mip-dismiss"
+        @click.stop="$emit('clear')"
+      >
+        ✕
+      </button>
     </div>
-    <div v-if="!collapsed" class="mip-body">
-      <div v-for="t in tasks" :key="t.id" class="mip-task" :class="t.status">
+    <div
+      v-if="!collapsed"
+      class="mip-body"
+    >
+      <div
+        v-for="t in tasks"
+        :key="t.id"
+        class="mip-task"
+        :class="t.status"
+      >
         <div class="mip-task-head">
           <span class="mip-task-name">{{ t.package }}</span>
           <span class="mip-task-pct">{{ t.progress }}%</span>
         </div>
-        <div class="mip-track"><div class="mip-fill" :class="t.status" :style="{ width: t.progress + '%' }"></div></div>
+        <div class="mip-track">
+          <div
+            class="mip-fill"
+            :class="t.status"
+            :style="{ width: t.progress + '%' }"
+          ></div>
+        </div>
         <div class="mip-steps">
-          <div v-for="s in t.steps" :key="s.step" class="mip-step" :class="s.status">
+          <div
+            v-for="s in t.steps"
+            :key="s.step"
+            class="mip-step"
+            :class="s.status"
+          >
             <span class="mip-step-icon">{{ s.status === 'done' ? '✅' : s.status === 'error' ? '❌' : s.status === 'running' ? '⏳' : '○' }}</span>
             <span class="mip-step-msg">{{ s.message }}</span>
           </div>
         </div>
-        <div v-if="t.error" class="mip-error">{{ t.error }}</div>
+        <div
+          v-if="t.error"
+          class="mip-error"
+        >
+          {{ t.error }}
+        </div>
       </div>
     </div>
   </div>
