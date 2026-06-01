@@ -176,6 +176,10 @@ func (p *Provider) ChatStream(ctx context.Context, messages []base.Message, tool
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+p.apiKey)
 	req.Header.Set("Accept", "text/event-stream")
+	// v3.1: SHA256 of system prompt for prefix cache identification
+	if len(messages) > 0 && messages[0].Role == "system" {
+		req.Header.Set("X-Prompt-Hash", base.SystemPromptHash(messages[0].Content))
+	}
 
 	resp, err := p.client.Do(req)
 	if err != nil {

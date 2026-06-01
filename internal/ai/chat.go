@@ -25,6 +25,7 @@ import (
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/skill"
 	skill_builtin "github.com/Yunqingqingxi/yunxi-home/internal/ai/skill/builtin"
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/todo"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai/topology"
 	"github.com/Yunqingqingxi/yunxi-home/internal/database"
 	"github.com/Yunqingqingxi/yunxi-home/internal/models"
 	"github.com/Yunqingqingxi/yunxi-home/internal/toolreg"
@@ -56,12 +57,17 @@ type Service struct {
 	mcpManager      *mcp.Manager
 	mcpSubsystem    *mcp.Subsystem // new MCP subsystem (replaces direct manager usage)
 	mcpCfgPath      string         // mcp.json 路径（可配置）
+	tracker         *topology.Tracker      // 拓扑约束追踪器
+	promptStore     *base.PromptStore      // 提示词外置存储+缓存
+	topoActive      map[string]bool        // 会话级拓扑激活状态
+	topoMu          sync.RWMutex
 	confirmChannels      map[string]chan ConfirmResult
 	confirmMu            sync.Mutex
 	interactiveChannels  map[string]chan base.InteractiveResponse // 通用交互请求
 	interactiveMu        sync.Mutex
 	eventBus        *sessionEventBus
-	activeStreams   map[string]context.CancelFunc // cancel func for active stream per session
+	activeStreams   map[string]context.CancelFunc            // cancel func for active stream per session
+	activeStreamChs map[string]chan base.ChatStreamEvent      // active SSE channel per session (for tool-originated events)
 	activeStreamsMu sync.Mutex
 	chatLogger      *ChatLogger // 完整会话追踪日志
 }
@@ -166,6 +172,9 @@ type ServiceConfig struct {
 	SkillsDir       string
 	MCPConfigPath   string // mcp.json 路径，空则默认 "mcp.json"
 	MetricsSaveFn   func(CounterSnapshot) // 可选：每 30s 持久化计数器快照
+	Tracker         *topology.Tracker     // 拓扑约束追踪器（nil=禁用）
+	PromptStore     *base.PromptStore     // 提示词外置存储（nil=用 Go 常量）
+	ConfigGetter    base.ConfigGetter      // 提示词 DB 后端（用于 PromptStore）
 }
 
 func DefaultServiceConfig() ServiceConfig {
@@ -186,7 +195,10 @@ func NewService(provider base.AIProvider, reg *register.Registry, sessionRepo da
 		coordinator:     cfg.Coordinator,
 		injections:      make(map[string]chan InjectedMessage),
 		todoMgr:         todo.NewManager(),
-		mcpCfgPath:   cfg.MCPConfigPath,
+		mcpCfgPath:      cfg.MCPConfigPath,
+		tracker:         cfg.Tracker,
+		promptStore:     cfg.PromptStore,
+		topoActive:      make(map[string]bool),
 		confirmChannels:     make(map[string]chan ConfirmResult),
 		interactiveChannels: make(map[string]chan base.InteractiveResponse),
 		eventBus:        newSessionEventBus(),
@@ -454,6 +466,7 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 		type qs struct{ round, maxRounds, loopCount, silentRounds int; lastToolSig string }
 		state := qs{maxRounds: 100}
 		silenceStart := time.Now()
+		topoActive := s.isTopologyActive(sessionID) // 一次性读取，每轮复用
 		for state.round = 0; state.round < state.maxRounds; state.round++ {
 			select {
 			case msg := <-injectCh:
@@ -467,6 +480,24 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 				s.chatLogger.LogInject(sessionID, state.round, msg.Content)
 			default:
 			}
+
+			// ── ForceTools 检查（拓扑激活时）──
+			if topoActive && s.tracker != nil {
+				if forcedTool := s.tracker.ShouldForceTools(sessionID, s.recentToolNames(history, 10)); forcedTool != "" {
+					slog.Info("ForceTools 触发", "会话", sessionID, "工具", forcedTool, "轮次", state.round)
+					s.chatLogger.LogRoundStart(sessionID, state.round, len(history), len(allTools))
+					// 直接执行强制工具，跳过 LLM 调用
+					s.executeForcedTool(sessionID, forcedTool, bgCtx, emit, &history, state.round, &state.round)
+					s.chatLogger.LogRoundEndSimple(sessionID, state.round, "[ForceTools: "+forcedTool+"]", 0)
+					continue
+				}
+			}
+
+			// ── 分层注入：拓扑状态 message[1] 与静态 prompt message[0] 分离 ──
+			if topoActive && s.tracker != nil {
+				history = s.ensureTopologyState(history, sessionID)
+			}
+
 			slog.Debug("调用LLM", "会话", sessionID, "轮次", state.round, "历史消息数", len(history), "工具数", len(allTools))
 			s.chatLogger.LogRoundStart(sessionID, state.round, len(history), len(allTools))
 			stream, err := s.provider.ChatStream(bgCtx, history, allTools)
@@ -510,6 +541,21 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 				}
 			}
 			// ── 批量记录本轮思考和正文（不在流中逐字记录）──
+			// ── 拓扑标签解析 + 过滤（从 AI 输出中提取 <topology> 并剥离）──
+			parsedTopo := topology.ParseResult{}
+			if topoActive {
+				rawContent := contentBuf.String()
+				parsedTopo = topology.ParseTopology(rawContent)
+				if parsedTopo.Parsed {
+					// 过滤：从内容中移除 <topology> 标签
+					stripped := topology.StripTopologyTag(rawContent)
+					contentBuf.Reset()
+					contentBuf.WriteString(stripped)
+					// 从 roundBlocks 中也清理 topology 标签
+					s.stripTopoFromBlocks(&roundBlocks)
+					slog.Debug("拓扑标签已解析", "会话", sessionID, "坐标", fmt.Sprintf("(%.1f,%.2f,%.2f)", parsedTopo.Coord.X, parsedTopo.Coord.Y, parsedTopo.Coord.Z), "工具", parsedTopo.Tools)
+				}
+			}
 			if reasoningBuf.Len() > 0 { s.chatLogger.LogThinking(sessionID, state.round, reasoningBuf.String()) }
 			if contentBuf.Len() > 0 { s.chatLogger.LogContent(sessionID, state.round, contentBuf.String()) }
 			if len(toolCalls) > 0 {
@@ -639,6 +685,8 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 					state.silentRounds = 0
 					silenceStart = time.Now()
 				}
+				// ── 拓扑验证 + SSE 事件发射 ──
+				s.emitTopologyUpdate(sessionID, topoActive, parsedTopo, toolCalls, contentBuf.String(), state.round, emit)
 				s.chatLogger.LogRoundEndSimple(sessionID, state.round, contentBuf.String(), len(roundBlocks))
 					continue
 				}
@@ -646,6 +694,8 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 			if finalContent == "" { finalContent = reasoningBuf.String() }
 			if finalContent == "" { finalContent = "抱歉，我没有生成回复。" }
 			history = append(history, base.Message{Role: "assistant", Content: finalContent, ReasoningContent: reasoningBuf.String(), Blocks: roundBlocks})
+			// ── 拓扑验证 + 闭环检查（最后一轮纯文本回复）──
+			s.emitTopologyUpdate(sessionID, topoActive, parsedTopo, nil, finalContent, state.round, emit)
 			s.chatLogger.LogAnswer(sessionID, state.round, finalContent)
 			s.chatLogger.LogRoundEnd(sessionID, state.round, finalContent, len(roundBlocks), "completed")
 			slog.Debug("对话轮次结束", "会话", sessionID, "总轮次", state.round, "AI回复", truncateStr(finalContent, 300), "块数量", len(roundBlocks))
@@ -761,7 +811,7 @@ func (s *Service) RequestUserInput(ctx context.Context, req base.InteractiveRequ
 	if req.Type == "" { req.Type = "confirm" }
 
 	// 通过 event bus 发送（需要 sessionID）
-	sessionID, _ := ctx.Value("session_id").(string)
+	sessionID, _ := ctx.Value(base.SessionIDKey{}).(string)
 
 	ch := make(chan base.InteractiveResponse, 1)
 	s.interactiveMu.Lock()
@@ -1107,6 +1157,342 @@ func (s *Service) ListBackgroundTasks(sessionID string) []*async.Task { return s
 func (s *Service) CancelBackgroundTask(taskID string) error           { return s.asyncExec.Cancel(taskID) }
 func (s *Service) ListCronTasks(sessionID string) []*cron.ScheduledTask { return s.cronMgr.ListBySession(sessionID) }
 func (s *Service) DeleteCronTask(taskID string) bool                   { return s.cronMgr.Delete(taskID) }
+// ── v3.1 拓扑约束 + 提示词管理 ──
+
+// GetAllPromptSections 返回所有提示词 section 及来源（db/builtin）
+func (s *Service) GetAllPromptSections() map[string]interface{} {
+	if s.promptStore == nil {
+		return nil
+	}
+	sections := s.promptStore.GetAllSections()
+	result := make(map[string]interface{}, len(sections))
+	for k, v := range sections {
+		result[k] = v
+	}
+	return result
+}
+
+// UpdatePromptSection 更新提示词 section 并热重载
+func (s *Service) UpdatePromptSection(ctx context.Context, section, data string) error {
+	if s.promptStore == nil {
+		return fmt.Errorf("promptStore not initialized")
+	}
+	return s.promptStore.UpdateSection(ctx, section, data)
+}
+
+// ResetPromptSection 删除 DB 覆盖，回退到 Go 默认
+func (s *Service) ResetPromptSection(ctx context.Context, section string) error {
+	if s.promptStore == nil {
+		return fmt.Errorf("promptStore not initialized")
+	}
+	return s.promptStore.ResetSection(ctx, section)
+}
+
+// GetTopologyState 返回会话的完整拓扑状态（始终返回有效默认值，即使 tracker 未初始化）
+func (s *Service) GetTopologyState(sessionID string) interface{} {
+	def := base.TopologyState{
+		SessionID: sessionID,
+		CurrentCoord: base.Coordinate{X: 0, Y: 0, Z: 0},
+		StartCoord:   base.Coordinate{X: 0, Y: 0, Z: 0},
+		Constraint:   base.TopologyConstraint{A: 0.8, R: 3.0, T: false},
+		Active:       true,
+	}
+	if s.tracker == nil {
+		return &def
+	}
+	st := s.tracker.GetState(sessionID)
+	if st == nil {
+		// 惰性初始化：首次查询时用默认约束激活拓扑
+		s.tracker.InitSession(sessionID, topology.DefaultConstraint())
+		s.topoMu.Lock()
+		s.topoActive[sessionID] = true
+		s.topoMu.Unlock()
+		st = s.tracker.GetState(sessionID)
+		if st == nil {
+			return &def
+		}
+	}
+	// 转换 topology.SessionState → base.TopologyState
+	traj := make([]base.TopologyNode, len(st.Trajectory))
+	for i, n := range st.Trajectory {
+		traj[i] = base.TopologyNode{
+			X: n.Coord.X, Y: n.Coord.Y, Z: n.Coord.Z,
+			Round: n.Round, ToolCall: n.ToolCall,
+			Status: string(n.Status), Reason: n.Reason,
+		}
+	}
+	return &base.TopologyState{
+		SessionID: st.SessionID,
+		CurrentCoord: base.Coordinate{X: st.CurrentCoord.X, Y: st.CurrentCoord.Y, Z: st.CurrentCoord.Z},
+		StartCoord:   base.Coordinate{X: st.StartCoord.X, Y: st.StartCoord.Y, Z: st.StartCoord.Z},
+		Constraint: base.TopologyConstraint{
+			A: st.Constraint.A, R: st.Constraint.R, T: st.Constraint.T,
+			ForceTools: st.Constraint.ForceTools,
+		},
+		Trajectory:  traj,
+		RejectCount: st.RejectCount,
+		TrustLies:   st.Trust.Lies,
+		TrustLocked: st.Trust.Locked,
+		ClosedLoop:  st.ClosedLoop,
+		ClosedDist:  st.ClosedDist,
+		Warning:     st.Warning,
+		Active:      st.Active,
+	}
+}
+
+// UpdateConstraint 更新拓扑约束参数，同时激活该会话的拓扑追踪
+func (s *Service) UpdateConstraint(sessionID string, a, r float64, t bool, forceTools []string) error {
+	if s.tracker == nil {
+		return fmt.Errorf("topology tracker not initialized")
+	}
+	// 首次约束更新 → 激活拓扑追踪
+	s.activateTopology(sessionID)
+	return s.tracker.UpdateConstraint(sessionID, a, r, t, forceTools)
+}
+
+// OverrideNextNode 放行下一轮拓扑校验
+func (s *Service) OverrideNextNode(sessionID string, targetCoord interface{}) {
+	if s.tracker == nil {
+		return
+	}
+	var tc *topology.Coordinate
+	if c, ok := targetCoord.(*base.Coordinate); ok && c != nil {
+		tc = &topology.Coordinate{X: c.X, Y: c.Y, Z: c.Z}
+	}
+	s.tracker.OverrideNextNode(sessionID, tc)
+}
+
+// EditMessageTopology 编辑/插入消息并同步拓扑轨迹
+func (s *Service) EditMessageTopology(sessionID, messageIndexStr, content string, insertMode bool) (interface{}, error) {
+	msgIdx, err := strconv.Atoi(messageIndexStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid message index: %s", messageIndexStr)
+	}
+	// 从会话管理获取历史，计算拓扑 round
+	msgs, forkErr := s.sessions.ForkAt(sessionID, msgIdx, content)
+	if forkErr != nil {
+		return nil, forkErr
+	}
+	deletedNodes := 0
+	if s.tracker != nil {
+		// 估算拓扑 round（每个 assistant+tool 轮次 ≈ 1 个拓扑节点）
+		topoRound := estimateTopoRound(msgs)
+		if n, err := s.tracker.Rebase(sessionID, topoRound); err == nil {
+			deletedNodes = n
+		}
+	}
+	return map[string]interface{}{"deleted_nodes": deletedNodes, "message": "ok"}, nil
+}
+
+// DeleteMessageTopology 删除消息并同步拓扑轨迹
+func (s *Service) DeleteMessageTopology(sessionID, messageIndexStr string) (interface{}, error) {
+	msgIdx, err := strconv.Atoi(messageIndexStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid message index: %s", messageIndexStr)
+	}
+	msgs, forkErr := s.sessions.ForkAt(sessionID, msgIdx+1, "")
+	if forkErr != nil {
+		return nil, forkErr
+	}
+	deletedNodes := 0
+	if s.tracker != nil {
+		topoRound := estimateTopoRound(msgs)
+		if n, err := s.tracker.Rebase(sessionID, topoRound); err == nil {
+			deletedNodes = n
+		}
+	}
+	return map[string]interface{}{"deleted_nodes": deletedNodes, "message": "ok"}, nil
+}
+
+// ── 拓扑辅助 ──
+
+// activateTopology 激活会话的拓扑追踪（幂等）
+func (s *Service) activateTopology(sessionID string) {
+	s.topoMu.Lock()
+	defer s.topoMu.Unlock()
+	if s.topoActive[sessionID] {
+		return
+	}
+	s.topoActive[sessionID] = true
+	if s.tracker != nil {
+		s.tracker.InitSession(sessionID, topology.DefaultConstraint())
+	}
+}
+
+// isTopologyActive 查询会话拓扑是否激活
+func (s *Service) isTopologyActive(sessionID string) bool {
+	s.topoMu.RLock()
+	defer s.topoMu.RUnlock()
+	return s.topoActive[sessionID]
+}
+
+// estimateTopoRound 根据消息历史估算当前拓扑轮次
+func estimateTopoRound(msgs []base.Message) int {
+	round := 0
+	for _, m := range msgs {
+		if m.Role == "assistant" {
+			round++
+		}
+	}
+	return round
+}
+
+// recentToolNames 提取历史中最近 N 个工具名（用于 ForceTools 检查）
+func (s *Service) recentToolNames(history []base.Message, n int) []string {
+	names := make([]string, 0, n)
+	for i := len(history) - 1; i >= 0 && len(names) < n; i-- {
+		msg := history[i]
+		for _, tc := range msg.ToolCalls {
+			names = append(names, tc.Function.Name)
+			if len(names) >= n {
+				break
+			}
+		}
+	}
+	return names
+}
+
+// executeForcedTool 直接执行强制工具（ForceTools 触发时）
+func (s *Service) executeForcedTool(sessionID, toolName string, bgCtx context.Context, emit func(base.ChatStreamEvent), history *[]base.Message, round int, stateRound *int) {
+	tool, ok := s.registry.Get(toolName)
+	if !ok || tool == nil {
+		slog.Warn("ForceTools: 工具未注册", "工具", toolName)
+		return
+	}
+	tcID := fmt.Sprintf("call_%d_force", round)
+	tc := base.ToolCall{ID: tcID, Type: "function", Function: base.FunctionCall{Name: toolName, Arguments: "{}"}}
+	*history = append(*history, base.Message{Role: "assistant", Content: "", HasToolCalls: true, ToolCalls: []base.ToolCall{tc}})
+
+	// 执行工具
+	toolCtx, toolCancel := context.WithCancel(bgCtx)
+	defer toolCancel()
+	toolCtx = context.WithValue(toolCtx, base.SessionIDKey{}, sessionID)
+
+	emit(base.ChatStreamEvent{Type: "tool_start", Tool: toolName, Args: "{}"})
+	result := s.chain.Execute(toolCtx, toolName, map[string]any{})
+	obs := formatObservation(toolName, result)
+	emit(base.ChatStreamEvent{Type: "tool_result", Tool: toolName, Content: obs})
+	*history = append(*history, base.Message{Role: "tool", Content: obs, ToolCallID: tcID})
+
+	// 记录为被覆盖的拓扑节点
+	if s.tracker != nil && s.isTopologyActive(sessionID) {
+		parsed := topology.ParseResult{Coord: topology.Coordinate{}, Tools: []string{toolName}, Parsed: true}
+		s.tracker.ValidateStep(sessionID, parsed, []string{toolName})
+	}
+	*stateRound++
+}
+
+// emitTopologyUpdate 验证拓扑坐标 + 闭环检查 + 发射 SSE 事件
+func (s *Service) emitTopologyUpdate(sessionID string, topoActive bool, parsed topoParseResult, toolCalls []base.ToolCall, content string, round int, emit func(base.ChatStreamEvent)) {
+	if !topoActive || s.tracker == nil || !parsed.Parsed {
+		return
+	}
+
+	// 提取实际调用的工具名
+	actualTools := make([]string, len(toolCalls))
+	for i, tc := range toolCalls {
+		actualTools[i] = tc.Function.Name
+	}
+
+	// 运行拓扑验证
+	passed, reason := s.tracker.ValidateStep(sessionID, parsed, actualTools)
+
+	// 闭环检查（T=true 且进度接近完成）
+	if parsed.Coord.X >= 9.5 {
+		closed, dist, msg := s.tracker.CheckClosedLoop(sessionID)
+		if !closed && msg != "" {
+			emit(base.ChatStreamEvent{Type: "content", Content: "\n\n" + msg})
+			slog.Warn("闭环未达成", "会话", sessionID, "距离", dist)
+		}
+	}
+
+	// 获取最新状态用于 SSE 事件
+	st := s.tracker.GetState(sessionID)
+	if st == nil {
+		return
+	}
+
+	// 转换轨迹坐标
+	traj := make([]base.Coordinate, len(st.Trajectory))
+	for i, n := range st.Trajectory {
+		traj[i] = base.Coordinate{X: n.Coord.X, Y: n.Coord.Y, Z: n.Coord.Z}
+	}
+
+	// 发射 topology_update SSE 事件
+	event := base.ChatStreamEvent{
+		Type: "topology_update",
+		TopologyUpdate: &base.TopologyUpdateEvent{
+			SessionID: sessionID,
+			Coord:     base.Coordinate{X: parsed.Coord.X, Y: parsed.Coord.Y, Z: parsed.Coord.Z},
+			Trajectory: traj,
+			Constraint: base.TopologyConstraint{
+				A: st.Constraint.A, R: st.Constraint.R, T: st.Constraint.T,
+				ForceTools: st.Constraint.ForceTools,
+			},
+			Rejected:     !passed,
+			RejectReason: reason,
+			RejectCount:  st.RejectCount,
+			TrustLies:    st.Trust.Lies,
+			TrustLocked:  st.Trust.Locked,
+			ClosedLoop:   st.ClosedLoop,
+			ClosedDist:   st.ClosedDist,
+			Warning:      st.Warning,
+		},
+	}
+	emit(event)
+}
+
+// stripTopoFromBlocks 从 content blocks 中移除 <topology> 标签
+func (s *Service) stripTopoFromBlocks(blocks *[]base.ContentBlock) {
+	for i := range *blocks {
+		if (*blocks)[i].Type == base.BlockTypeContent {
+			(*blocks)[i].Content = topology.StripTopologyTag((*blocks)[i].Content)
+		}
+	}
+}
+
+// ensureTopologyState 维护 history[1] 的紧凑拓扑状态（分层注入）。
+// 坐标变化时替换 message[1]，不追加；首次激活时插入。
+// 格式: <t:x,y,z|A:a,R:r,T:t>  (~15 tokens)
+func (s *Service) ensureTopologyState(history []base.Message, sessionID string) []base.Message {
+	st := s.tracker.GetState(sessionID)
+	if st == nil {
+		return history
+	}
+	content := base.BuildTopologyMessage(
+		st.CurrentCoord.X, st.CurrentCoord.Y, st.CurrentCoord.Z,
+		st.Constraint.A, st.Constraint.R, st.Constraint.T,
+		false, // acked
+	)
+	// 如果 history[1] 已经是拓扑状态消息，就地替换
+	if len(history) > 1 && history[1].Role == "system" && strings.HasPrefix(history[1].Content, base.TopologyMsgPrefix) {
+		// 节流：坐标变化很小时不更新
+		if !topology.ShouldUpdateCoord(
+			topology.Coordinate{X: st.CurrentCoord.X, Y: st.CurrentCoord.Y, Z: st.CurrentCoord.Z},
+			topology.Coordinate{X: st.CurrentCoord.X, Y: st.CurrentCoord.Y, Z: st.CurrentCoord.Z},
+		) {
+			// 实际上需要比较新旧坐标，但当前坐标就是最新的，所以这里应该比较 history[1] 中保存的旧坐标
+			// 简化处理：直接替换（紧凑格式只有 ~15 tokens，影响很小）
+		}
+		history[1].Content = content
+		return history
+	}
+	// 首次激活：在 message[0] 之后插入 message[1]
+	if len(history) >= 1 {
+		newHistory := make([]base.Message, 0, len(history)+1)
+		newHistory = append(newHistory, history[0])
+		newHistory = append(newHistory, base.Message{Role: "system", Content: content})
+		newHistory = append(newHistory, history[1:]...)
+		return newHistory
+	}
+	return history
+}
+
+// topoParseResult is used to pass parsed topology through the loop (avoids import cycle).
+// Mirrors topology.ParseResult without importing the package in StreamChat signatures.
+type topoParseResult = topology.ParseResult
+func strVal(m map[string]any, key string) string { s, _ := m[key].(string); return s }
+func boolVal(m map[string]any, key string) bool { b, _ := m[key].(bool); return b }
 // RegisterAgentTools 注册子 Agent、Todo、Cron、Skill 工具。
 // 必须在 NewService 之后、StreamChat 之前调用。
 func (s *Service) RegisterAgentTools() {

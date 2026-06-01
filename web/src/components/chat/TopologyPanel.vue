@@ -110,7 +110,28 @@ const constraintT = ref(false)
 let xyChart: any = null
 let xzChart: any = null
 
-const topology = computed<TopologyState | null>(() => chatStore.topology as any)
+// 本地 topology 状态：优先用 store，fallback 到直接 HTTP fetch
+const localTopology = ref<TopologyState | null>(null)
+const topology = computed<TopologyState | null>(() => (chatStore.topology as any) || localTopology.value)
+
+async function fetchTopologyState() {
+  const sessionId = chatStore.sessionId
+  if (!sessionId) return
+  const token = localStorage.getItem('token')
+  try {
+    const res = await fetch(`/api/chat/sessions/${sessionId}/topology`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    const data = await res.json()
+    if (data.code === 200 && data.data) {
+      localTopology.value = data.data as TopologyState
+    }
+  } catch (e) { /* ignore */ }
+}
+
+onMounted(() => {
+  fetchTopologyState()
+})
 
 const warningLevel = computed(() => {
   if (!topology.value?.warning) return ''

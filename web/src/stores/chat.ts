@@ -3,6 +3,7 @@ import { ref, computed, ComputedRef } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import type { ChatMessage, ChatBlock, Conversation, SSEEvent, AgentInfo, ToolCall } from '../types/chat'
+import type { TopologyState, TopologyUpdate } from '../types/topology'
 
 // ── Additional types ──────────────────────
 
@@ -103,6 +104,7 @@ export const useChatStore = defineStore('chat', () => {
   const agents = ref<AgentInfo[]>([])
   const confirmRequest = ref<ConfirmRequest | null>(null)
   const interactiveRequest = ref<InteractiveRequest | null>(null)
+  const topology = ref<TopologyState | null>(null)
 
   // Whether any agent (subtask) is running
   const hasRunningAgents = computed<boolean>(() =>
@@ -312,6 +314,29 @@ export const useChatStore = defineStore('chat', () => {
       updateSubAgent(sessionId.value, merged as AgentInfo)
       return
     }
+    if (t === 'topology_update') {
+      const tu = ev.topology_update as TopologyUpdate | undefined
+      if (tu) {
+        topology.value = {
+          session_id: tu.session_id,
+          current_coord: tu.coord,
+          start_coord: { x: 0, y: 0, z: 0 },
+          constraint: tu.constraint,
+          trajectory: (tu.trajectory || []).map((c, i) => ({
+            x: c.x, y: c.y, z: c.z, round: i,
+            tool_call: '', status: 'committed',
+          })),
+          reject_count: tu.reject_count,
+          trust_lies: tu.trust_lies,
+          trust_locked: tu.trust_locked,
+          closed_loop: tu.closed_loop,
+          closed_distance: tu.closed_distance,
+          warning: tu.warning,
+          active: true,
+        }
+      }
+      return
+    }
     if (t === 'confirm_required') {
       confirmRequest.value = ev.confirm_request || null
       return
@@ -501,6 +526,8 @@ export const useChatStore = defineStore('chat', () => {
         const data = await res.json()
         if (data.code === 200 && data.data && data.data.messages) {
           await loadSession(sid, data.data.messages)
+          // 同步获取拓扑状态
+          fetchTopology(sid)
           return true
         }
         if (data.code !== 404) break
@@ -510,6 +537,21 @@ export const useChatStore = defineStore('chat', () => {
       if (attempt < 2) await new Promise((r) => setTimeout(r, 500))
     }
     return false
+  }
+
+  async function fetchTopology(sid: string): Promise<void> {
+    const token = localStorage.getItem('token')
+    try {
+      const res = await fetch('/api/chat/sessions/' + sid + '/topology', {
+        headers: { Authorization: 'Bearer ' + token },
+      })
+      const data = await res.json()
+      if (data.code === 200 && data.data) {
+        topology.value = data.data as TopologyState
+      }
+    } catch (e) {
+      /* ignore */
+    }
   }
 
   function clearCurrent(): void {
@@ -660,6 +702,7 @@ export const useChatStore = defineStore('chat', () => {
     agents,
     confirmRequest,
     interactiveRequest,
+    topology,
     resetStreaming,
     sendMessage,
     loadSession,

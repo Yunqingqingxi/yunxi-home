@@ -59,6 +59,22 @@ export interface SSEEvent {
   todos?: Array<{ id: string; content: string; status: string }>
   confirm_request?: any
   interactive_request?: any
+  topology_update?: {
+    session_id: string
+    coord: { x: number; y: number; z: number }
+    trajectory: Array<{ x: number; y: number; z: number }>
+    constraint: { a: number; r: number; t: boolean; force_tools: string[] }
+    rejected: boolean
+    reject_reason?: string
+    reject_count: number
+    trust_lies: number
+    trust_locked: boolean
+    closed_loop: boolean
+    closed_distance?: number
+    warning?: string
+    oscillation: boolean
+    override: boolean
+  }
 }
 
 export interface AgentInfo {
