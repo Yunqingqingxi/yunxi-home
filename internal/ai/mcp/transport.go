@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 	"os"
 	"os/exec"
 	"sync"
@@ -88,13 +88,13 @@ func (t *Transport) Send(request map[string]any) (map[string]any, error) {
 		}
 		// 跳过非 JSON 行（日志、warning 等）
 		if line[0] != '{' {
-			slog.Debug("MCP transport: skipping non-JSON line", "line", string(line)[:min(len(line), 100)])
+			log.Debug("MCP transport: skipping non-JSON line", "line", string(line)[:min(len(line), 100)])
 			continue
 		}
 
 		var response map[string]any
 		if err := json.Unmarshal(line, &response); err != nil {
-			slog.Debug("MCP transport: skipping unparseable line", "line", string(line)[:min(len(line), 100)], "error", err)
+			log.Debug("MCP transport: skipping unparseable line", "line", string(line)[:min(len(line), 100)], "error", err)
 			continue
 		}
 

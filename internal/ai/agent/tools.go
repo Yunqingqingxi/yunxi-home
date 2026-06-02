@@ -18,6 +18,7 @@ func ToolDef(mgr *Manager) *base.ToolDef {
 		Description: "派生一个或多个子 Agent 来并行处理子任务。当用户的任务可分解为多个独立子任务时（如同时检查多个系统），使用此工具并行执行。每个子 Agent 有独立上下文和受限工具。",
 		Category:    "agent",
 		RiskLevel:   "mutation",
+		Background:  true,
 		Timeout:     15 * time.Minute,
 		Parameters: base.ToolParams{
 			Type: "object",

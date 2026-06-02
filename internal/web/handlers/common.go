@@ -1,7 +1,7 @@
 package handlers
 
 import (
-	"log/slog"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
@@ -54,6 +54,6 @@ func respondInternal(c echo.Context, detail string, cause error) error {
 
 // logAndRespond logs and responds with an internal error.
 func logAndRespond(c echo.Context, detail string, cause error) error {
-	slog.Error(detail, "error", cause)
+	log.Error(detail, "error", cause)
 	return respondInternal(c, detail, cause)
 }

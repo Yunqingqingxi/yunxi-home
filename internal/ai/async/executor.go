@@ -3,7 +3,7 @@ package async
 
 import (
 	"fmt"
-	"log/slog"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 	"sync"
 	"time"
 )
@@ -163,7 +163,7 @@ func (e *Executor) Submit(tool, sessionID string, args map[string]any, runner fu
 
 // worker 后台 worker
 func (e *Executor) worker(id int) {
-	slog.Info("async worker started", "worker", id)
+	log.Info("async worker started", "worker", id)
 	// Workers just acknowledge that tasks are being processed
 	// Actual work is done in goroutines launched by Submit
 }

@@ -7,10 +7,12 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"log/slog"
 
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 	"github.com/Yunqingqingxi/yunxi-home/internal/sysctl/base"
 )
+
+var log = logger.ForComponent("sysctl")
 
 // systemController 系统控制器实现
 type systemController struct {
@@ -31,7 +33,7 @@ func New(serviceControl, processControl bool) Controller {
 
 // GetSystemInfo 获取系统基本信息
 func (c *systemController) GetSystemInfo() (*base.SysInfo, error) {
-	slog.Info("获取系统信息")
+	log.Info("获取系统信息")
 	hostname, _ := os.Hostname()
 	return &base.SysInfo{
 		Hostname: hostname,
@@ -69,7 +71,7 @@ func (c *systemController) KillProcess(pid int, force bool) error {
 
 // RunCommand 执行系统命令并返回输出
 func (c *systemController) RunCommand(name string, args ...string) (string, error) {
-	slog.Info("执行命令", "命令", name)
+	log.Info("执行命令", "命令", name)
 	cmd := exec.Command(name, args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {

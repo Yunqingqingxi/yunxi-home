@@ -61,9 +61,8 @@ export default defineConfig({
     minify: 'terser',
     terserOptions: {
       compress: {
-        drop_console: true,
         drop_debugger: true,
-        pure_funcs: ['console.log', 'console.debug'],
+        pure_funcs: ['console.debug'],
       },
     },
     // 生成 sourcemap 仅在生产调试时开启

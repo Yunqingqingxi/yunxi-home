@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -124,11 +124,11 @@ func (b *Bot) AppID() string { return b.cfg.AppID }
 func (b *Bot) FetchBotInfo(ctx context.Context) {
 	user, err := b.api.Me(ctx)
 	if err != nil {
-		slog.Warn("QQ Bot 获取自身信息失败", "app_id", b.cfg.AppID, "error", err)
+		log.Warn("QQ Bot 获取自身信息失败", "app_id", b.cfg.AppID, "error", err)
 		return
 	}
 	b.botUser = user
-	slog.Info("QQ Bot 信息已获取", "app_id", b.cfg.AppID, "username", user.Username)
+	log.Info("QQ Bot 信息已获取", "app_id", b.cfg.AppID, "username", user.Username)
 }
 
 func (b *Bot) GetBotInfo() *BotInfo {
@@ -211,7 +211,7 @@ func (b *Bot) Start(ctx context.Context) error {
 		// 每次重连重新获取 gateway（URL 可能变化）
 		apInfo, err := b.api.WS(ctx, nil, "")
 		if err != nil {
-			slog.Error("QQ Bot 获取 gateway 失败，稍后重试", "error", err, "backoff", backoff)
+			log.Error("QQ Bot 获取 gateway 失败，稍后重试", "error", err, "backoff", backoff)
 			select {
 			case <-time.After(backoff):
 				backoff = min(backoff*2, maxBackoff)
@@ -220,7 +220,7 @@ func (b *Bot) Start(ctx context.Context) error {
 				return ctx.Err()
 			}
 		}
-		slog.Info("QQ Bot gateway acquired", "url", apInfo.URL, "shards", apInfo.Shards)
+		log.Info("QQ Bot gateway acquired", "url", apInfo.URL, "shards", apInfo.Shards)
 
 		// 设置全局事件处理器
 		event.DefaultHandlers.C2CMessage = func(ev *dto.WSPayload, data *dto.WSC2CMessageData) error {
@@ -233,14 +233,14 @@ func (b *Bot) Start(ctx context.Context) error {
 		}
 
 		b.SetOnline(true)
-		slog.Info("QQ Bot WebSocket 连接中...")
+		log.Info("QQ Bot WebSocket 连接中...")
 		err = b.sessionMgr.Start(apInfo, b.tokenSource, &intent)
 		b.SetOnline(false)
 
 		if err != nil {
-			slog.Error("QQ Bot WebSocket 断开，将重连", "error", err, "backoff", backoff)
+			log.Error("QQ Bot WebSocket 断开，将重连", "error", err, "backoff", backoff)
 		} else {
-			slog.Info("QQ Bot WebSocket 正常关闭，将重连")
+			log.Info("QQ Bot WebSocket 正常关闭，将重连")
 			backoff = 1 * time.Second // 正常关闭不加速退避
 		}
 
@@ -268,7 +268,7 @@ func (b *Bot) handleGroupMessage(ctx context.Context, data *dto.WSGroupATMessage
 	response, _ := b.processMessage(ctx, userID, content)
 	if response != "" {
 		if !b.msgLimiter.Allow() {
-			slog.Debug("QQ Bot rate limited", "user", userID)
+			log.Debug("QQ Bot rate limited", "user", userID)
 			return
 		}
 		b.replyMarkdown(ctx, data.GroupID, data.ID, response, true)
@@ -296,7 +296,7 @@ func (b *Bot) handlePrivateMessage(ctx context.Context, data *dto.WSC2CMessageDa
 	if content == "" {
 		return
 	}
-	slog.Debug("QQ Bot 收到单聊消息", "content", content, "user", userID, "attachments", len(data.Attachments))
+	log.Debug("QQ Bot 收到单聊消息", "content", content, "user", userID, "attachments", len(data.Attachments))
 
 	response, _ := b.processMessage(ctx, userID, content)
 	if response != "" {
@@ -442,7 +442,7 @@ func (b *Bot) sendC2CFile(ctx context.Context, userID, filePath, fileName string
 	if sendResp.StatusCode != 200 && sendResp.StatusCode != 201 {
 		return fmt.Errorf("发送文件消息失败 status=%d: %s", sendResp.StatusCode, string(sendRespBody))
 	}
-	slog.Info("QQ Bot 文件已发送", "user", userID, "file", fileName, "size", fileSize)
+	log.Info("QQ Bot 文件已发送", "user", userID, "file", fileName, "size", fileSize)
 	return nil
 }
 
@@ -472,7 +472,7 @@ func (b *Bot) uploadC2CFileBase64(ctx context.Context, userID string, data []byt
 	defer resp.Body.Close()
 
 	respBody, _ := io.ReadAll(resp.Body)
-	slog.Debug("QQ Bot 文件上传响应", "status", resp.StatusCode, "body", string(respBody)[:min(len(respBody), 300)])
+	log.Debug("QQ Bot 文件上传响应", "status", resp.StatusCode, "body", string(respBody)[:min(len(respBody), 300)])
 
 	if resp.StatusCode != 200 && resp.StatusCode != 201 {
 		return nil, fmt.Errorf("上传失败 status=%d: %s", resp.StatusCode, string(respBody))
@@ -515,12 +515,12 @@ func (b *Bot) uploadC2CFileMultipart(ctx context.Context, userID, filePath, file
 		// 文件流
 		part, err := mw.CreateFormFile("file", fileName)
 		if err != nil {
-			slog.Error("QQ Bot multipart: 创建文件字段失败", "error", err)
+			log.Error("QQ Bot multipart: 创建文件字段失败", "error", err)
 			return
 		}
 		written, err := io.Copy(part, f)
 		if err != nil {
-			slog.Error("QQ Bot multipart: 写入文件流失败", "error", err, "written", written)
+			log.Error("QQ Bot multipart: 写入文件流失败", "error", err, "written", written)
 		}
 	}()
 
@@ -538,7 +538,7 @@ func (b *Bot) uploadC2CFileMultipart(ctx context.Context, userID, filePath, file
 		timeout = 30 * time.Minute
 	}
 	client := &http.Client{Timeout: timeout}
-	slog.Info("QQ Bot 开始上传大文件", "file", fileName, "sizeMB", fileSize/(1024*1024), "timeout", timeout)
+	log.Info("QQ Bot 开始上传大文件", "file", fileName, "sizeMB", fileSize/(1024*1024), "timeout", timeout)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -592,12 +592,12 @@ func (b *Bot) extractAndSendFiles(ctx context.Context, userID, text string) stri
 	// 沙箱路径 → 真实文件系统路径（始终拼 SandboxRoot）
 	fullPath := filepath.Join(b.cfg.SandboxRoot, strings.TrimPrefix(p, "/")) // TrimPrefix 防止绝对路径覆盖
 	if _, err := os.Stat(fullPath); err == nil {
-	 slog.Debug("QQ Bot 检测到文件引用，准备发送", "name", name, "path", fullPath)
+	 log.Debug("QQ Bot 检测到文件引用，准备发送", "name", name, "path", fullPath)
 	 if err := b.sendC2CFile(ctx, userID, fullPath, name); err != nil {
-	 slog.Warn("QQ Bot 发送文件失败", "name", name, "error", err)
+	 log.Warn("QQ Bot 发送文件失败", "name", name, "error", err)
 	}
 	} else {
-	slog.Warn("QQ Bot 文件不存在，跳过发送", "name", name, "path", fullPath, "error", err)
+	log.Warn("QQ Bot 文件不存在，跳过发送", "name", name, "path", fullPath, "error", err)
 	}
 	}
 	// 去掉文件引用标记，保留纯文本
@@ -685,7 +685,7 @@ func (b *Bot) replyMarkdown(ctx context.Context, groupID, msgID, text string, is
 	chunks := chunkMarkdown(text)
 	for i, chunk := range chunks {
 		if i > 0 && !b.msgLimiter.Allow() {
-			slog.Debug("QQ Bot rate limited during chunk send", "chunk", i)
+			log.Debug("QQ Bot rate limited during chunk send", "chunk", i)
 			return
 		}
 		var err error
@@ -696,7 +696,7 @@ func (b *Bot) replyMarkdown(ctx context.Context, groupID, msgID, text string, is
 		}
 		// Markdown 发送失败时降级为纯文本
 		if err != nil {
-			slog.Debug("Markdown发送失败，降级为纯文本", "error", err, "chunk", i)
+			log.Debug("Markdown发送失败，降级为纯文本", "error", err, "chunk", i)
 			if isGroup {
 				b.replyGroup(ctx, groupID, msgID, chunk, false)
 			} else {
@@ -770,7 +770,7 @@ func (b *Bot) replyGroup(ctx context.Context, groupID, msgID, text string, markd
 		msg.Content = text
 	}
 	if _, err := b.api.PostGroupMessage(ctx, groupID, msg); err != nil {
-		slog.Error("group reply failed", "error", err)
+		log.Error("group reply failed", "error", err)
 	}
 }
 
@@ -784,7 +784,7 @@ func (b *Bot) replyPrivate(ctx context.Context, userID, text string, markdown bo
 		msg.Content = text
 	}
 	if _, err := b.api.PostC2CMessage(ctx, userID, msg); err != nil {
-		slog.Error("private reply failed", "error", err)
+		log.Error("private reply failed", "error", err)
 	}
 }
 
@@ -849,28 +849,28 @@ func (b *Bot) downloadAttachments(ctx context.Context, attachments []*dto.Messag
 
 		req, err := http.NewRequestWithContext(ctx, "GET", att.URL, nil)
 		if err != nil {
-			slog.Warn("QQ Bot 附件下载失败", "url", att.URL, "error", err)
+			log.Warn("QQ Bot 附件下载失败", "url", att.URL, "error", err)
 			continue
 		}
 		resp, err := client.Do(req)
 		if err != nil {
-			slog.Warn("QQ Bot 附件下载失败", "url", att.URL, "error", err)
+			log.Warn("QQ Bot 附件下载失败", "url", att.URL, "error", err)
 			continue
 		}
 		f, err := os.Create(destPath)
 		if err != nil {
 			resp.Body.Close()
-			slog.Warn("QQ Bot 附件保存失败", "path", destPath, "error", err)
+			log.Warn("QQ Bot 附件保存失败", "path", destPath, "error", err)
 			continue
 		}
 		_, err = io.Copy(f, resp.Body)
 		resp.Body.Close()
 		f.Close()
 		if err != nil {
-			slog.Warn("QQ Bot 附件写入失败", "path", destPath, "error", err)
+			log.Warn("QQ Bot 附件写入失败", "path", destPath, "error", err)
 			continue
 		}
-		slog.Debug("QQ Bot 附件已下载", "name", fname, "size", att.Size, "path", "/qqbot/"+fname)
+		log.Debug("QQ Bot 附件已下载", "name", fname, "size", att.Size, "path", "/qqbot/"+fname)
 		// Use the format the AI understands: [文件: name (path)]
 		refs = append(refs, fmt.Sprintf("[文件: %s (/qqbot/%s)]", fname, fname))
 	}
@@ -932,7 +932,7 @@ func (b *Bot) uploadMedia(ctx context.Context, openid, fileURL string, fileType 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("decode upload response: %w", err)
 	}
-	slog.Debug("QQ media uploaded", "file_uuid", result.FileUUID, "ttl", result.TTL)
+	log.Debug("QQ media uploaded", "file_uuid", result.FileUUID, "ttl", result.TTL)
 	return &result, nil
 }
 
@@ -955,7 +955,7 @@ func (b *Bot) sendMedia(ctx context.Context, targetID, fileInfo string, isGroup 
 func (b *Bot) replyMedia(ctx context.Context, targetID, msgID, fileURL string, fileType int, fallbackText string, isGroup bool) {
 	uploadResp, err := b.uploadMedia(ctx, targetID, fileURL, fileType, isGroup)
 	if err != nil {
-		slog.Warn("media upload failed, fallback to text", "error", err)
+		log.Warn("media upload failed, fallback to text", "error", err)
 		msg := fallbackText + "\n\n> 上传失败: " + err.Error()
 		if isGroup {
 			b.replyGroup(ctx, targetID, msgID, msg, false)
@@ -966,7 +966,7 @@ func (b *Bot) replyMedia(ctx context.Context, targetID, msgID, fileURL string, f
 	}
 
 	if err := b.sendMedia(ctx, targetID, uploadResp.FileInfo, isGroup); err != nil {
-		slog.Warn("media send failed, fallback to text", "error", err)
+		log.Warn("media send failed, fallback to text", "error", err)
 		msg := fallbackText + "\n\n> 发送失败: " + err.Error()
 		if isGroup {
 			b.replyGroup(ctx, targetID, msgID, msg, false)

@@ -3,7 +3,7 @@ package skill
 import (
 	"context"
 	"fmt"
-	"log/slog"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 	"strings"
 	"sync"
 	"time"
@@ -58,7 +58,7 @@ func (r *Runner) Execute(ctx context.Context, skill *Manifest) *Execution {
 		}
 
 		if len(ready) == 0 {
-			slog.Warn("skill deadlock", "skill", skill.Name, "executed", len(executed), "remaining", len(skill.Steps)-len(executed))
+			log.Warn("skill deadlock", "skill", skill.Name, "executed", len(executed), "remaining", len(skill.Steps)-len(executed))
 			exec.Status = StepFailed
 			break
 		}
@@ -107,7 +107,7 @@ func (r *Runner) Execute(ctx context.Context, skill *Manifest) *Execution {
 		exec.Status = StepDone
 	}
 
-	slog.Info("skill executed",
+	log.Info("skill executed",
 		"skill", skill.Name,
 		"status", exec.Status,
 		"steps", exec.TotalSteps,
@@ -117,7 +117,7 @@ func (r *Runner) Execute(ctx context.Context, skill *Manifest) *Execution {
 }
 
 func (r *Runner) executeStep(ctx context.Context, step *StepDef, args map[string]any) *StepResult {
-	slog.Info("executing skill step", "id", step.ID, "tool", step.Tool, "purpose", step.Purpose)
+	log.Info("executing skill step", "id", step.ID, "tool", step.Tool, "purpose", step.Purpose)
 
 	// 将执行上下文传递到后续 executor 的 context 中
 	tool, ok := r.registry.Get(step.Tool)

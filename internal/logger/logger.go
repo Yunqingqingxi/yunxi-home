@@ -102,12 +102,24 @@ func Init(level, dir, format string) (*slog.Logger, error) {
 	currentLevel.Store(int32(logLevel))
 
 	opts := &slog.HandlerOptions{
-		Level: slog.LevelDebug, // allow everything through; levelGuard will filter
+		AddSource: true,
+		Level:     slog.LevelDebug, // allow everything through; levelGuard will filter
 		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
 			if a.Key == slog.TimeKey {
 				// 使用北京时间
 				t := a.Value.Time().In(time.FixedZone("CST", 8*60*60))
 				a.Value = slog.StringValue(t.Format("2006-01-02 15:04:05.000"))
+			}
+			// 裁剪 source 路径，只保留 internal/ 或 cmd/ 开头部分，可读性更好
+			if a.Key == slog.SourceKey {
+				if src, ok := a.Value.Any().(*slog.Source); ok {
+					for _, prefix := range []string{"internal/", "cmd/"} {
+						if idx := strings.Index(src.File, prefix); idx >= 0 {
+							src.File = src.File[idx:]
+							break
+						}
+					}
+				}
 			}
 			return a
 		},
@@ -136,8 +148,11 @@ func Init(level, dir, format string) (*slog.Logger, error) {
 		baseHandler = slog.NewTextHandler(multiWriter, opts)
 	}
 
-	// 用 levelGuard 包裹，支持运行时切换级别
-	handler := &levelGuardHandler{inner: baseHandler}
+	// Handler 链（由外到内）：
+	//   ctxLogHandler → 从 context 提取 trace_id/span_id 注入
+	//   levelGuardHandler → 运行时级别过滤
+	//   baseHandler → 实际格式化输出（text/json）
+	handler := &ctxLogHandler{inner: &levelGuardHandler{inner: baseHandler}}
 
 	logger := slog.New(handler)
 	slog.SetDefault(logger)

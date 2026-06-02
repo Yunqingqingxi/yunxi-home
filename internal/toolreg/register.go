@@ -45,7 +45,7 @@ func RegisterAll(r *register.Registry, dnsProvider dns.Provider, domainRepo data
 		},
 		Handler: func(ctx context.Context, args map[string]any) (string, error) {
 			keyword, _ := args["keyword"].(string)
-		result, err := dnsProvider.ListDomains(ctx, keyword, 1, 50)
+			result, err := dnsProvider.ListDomains(ctx, keyword, 1, 50)
 			if err != nil {
 				return "", fmt.Errorf("获取云端域名列表失败: %w", err)
 			}
@@ -76,7 +76,7 @@ func RegisterAll(r *register.Registry, dnsProvider dns.Provider, domainRepo data
 			rr, _ := args["rr"].(string)
 			recordType, _ := args["record_type"].(string)
 
-record, err := dnsProvider.FindRecord(ctx, domainName, rr, recordType)
+			record, err := dnsProvider.FindRecord(ctx, domainName, rr, recordType)
 			if err != nil {
 				return "", fmt.Errorf("查询 DNS 记录失败: %w", err)
 			}
@@ -384,7 +384,7 @@ record, err := dnsProvider.FindRecord(ctx, domainName, rr, recordType)
 			value, _ := args["value"].(string)
 			ttl := GetInt(args, "ttl", 600)
 
-	if err := dnsProvider.UpdateRecord(ctx, recordID, rr, recType, value, ttl); err != nil {
+			if err := dnsProvider.UpdateRecord(ctx, recordID, rr, recType, value, ttl); err != nil {
 				return "", fmt.Errorf("更新 DNS 记录失败: %w", err)
 			}
 			return fmt.Sprintf("DNS 记录 %s (%s) 已更新为 %s", rr, recType, value), nil
@@ -414,7 +414,7 @@ record, err := dnsProvider.FindRecord(ctx, domainName, rr, recordType)
 			value, _ := args["value"].(string)
 			ttl := GetInt(args, "ttl", 600)
 
-recordID, err := dnsProvider.AddRecord(ctx, domainName, rr, recType, value, ttl)
+			recordID, err := dnsProvider.AddRecord(ctx, domainName, rr, recType, value, ttl)
 			if err != nil {
 				return "", fmt.Errorf("添加云解析记录失败: %w", err)
 			}
@@ -437,7 +437,7 @@ recordID, err := dnsProvider.AddRecord(ctx, domainName, rr, recType, value, ttl)
 			if recordID == "" {
 				return "", fmt.Errorf("请输入云解析记录 ID")
 			}
-	if err := dnsProvider.DeleteRecord(ctx, recordID); err != nil {
+			if err := dnsProvider.DeleteRecord(ctx, recordID); err != nil {
 				return "", fmt.Errorf("删除云解析记录失败: %w", err)
 			}
 			return fmt.Sprintf("云解析记录 %s 已删除", recordID), nil
@@ -461,7 +461,7 @@ recordID, err := dnsProvider.AddRecord(ctx, domainName, rr, recType, value, ttl)
 			page := GetInt(args, "page", 1)
 			size := GetInt(args, "size", 50)
 
-records, total, err := dnsProvider.ListAllRecords(ctx, domainName, page, size)
+			records, total, err := dnsProvider.ListAllRecords(ctx, domainName, page, size)
 			if err != nil {
 				return "", fmt.Errorf("列出云解析记录失败: %w", err)
 			}
@@ -631,129 +631,129 @@ records, total, err := dnsProvider.ListAllRecords(ctx, domainName, page, size)
 				}
 			}
 			return ToJSON(result)
+		},
+	})
+
+	// ── 对外交互工具 ──────────────────────────────────
+
+	r.Register(&base.ToolDef{
+		Name:        "ping_host",
+		Description: "Ping 一个主机名或 IP 地址检测网络连通性。当用户问'能不能访问xxx'或'检查网络'时调用。",
+		Parameters: base.ToolParams{
+			Type: "object",
+			Properties: map[string]base.ParamProp{
+				"host":  {Type: "string", Description: "主机名或 IP 地址"},
+				"count": {Type: "integer", Description: "Ping 次数，默认 3"},
 			},
-})
-
-// ── 对外交互工具 ──────────────────────────────────
-
-r.Register(&base.ToolDef{
-	Name:        "ping_host",
-	Description: "Ping 一个主机名或 IP 地址检测网络连通性。当用户问'能不能访问xxx'或'检查网络'时调用。",
-	Parameters: base.ToolParams{
-		Type: "object",
-		Properties: map[string]base.ParamProp{
-			"host": {Type: "string", Description: "主机名或 IP 地址"},
-			"count": {Type: "integer", Description: "Ping 次数，默认 3"},
+			Required: []string{"host"},
 		},
-		Required: []string{"host"},
-	},
-	Handler: func(ctx context.Context, args map[string]any) (string, error) {
-		host, _ := args["host"].(string)
-		if host == "" {
-			return "", fmt.Errorf("请指定主机名")
-		}
-		count := GetInt(args, "count", 3)
-		if count < 1 {
-			count = 1
-		}
-		if count > 10 {
-			count = 10
-		}
-		// 使用 go-fastping 或系统 ping
-		cmd := exec.Command("ping", "-c", strconv.Itoa(count), "-W", "3", host)
-		output, err := cmd.CombinedOutput()
-		if err != nil {
-			return ToJSON(map[string]any{
-				"host":    host,
-				"reachable": false,
-				"output":  string(output),
-			})
-		}
-		return ToJSON(map[string]any{
-			"host":     host,
-			"reachable": true,
-			"output":   string(output),
-		})
-	},
-})
-
-r.Register(&base.ToolDef{
-	Name:        "read_app_log",
-	Description: "读取云兮应用自身的运行日志。当用户问'查看日志'、'有什么错误'时调用。默认返回最近 50 行。",
-		IsConcurrencySafe: true,
-	Parameters: base.ToolParams{
-		Type: "object",
-		Properties: map[string]base.ParamProp{
-			"lines": {Type: "integer", Description: "读取的行数，默认 50，最大 200"},
-			"level": {Type: "string", Description: "日志级别过滤: ERROR/WARN/INFO，默认不过滤"},
-		},
-	},
-	Handler: func(ctx context.Context, args map[string]any) (string, error) {
-		lines := GetInt(args, "lines", 50)
-		if lines < 1 {
-			lines = 50
-		}
-		if lines > 200 {
-			lines = 200
-		}
-		level, _ := args["level"].(string)
-		// 查找最近日志文件
-		logDir := cfg.Log.Dir
-		if logDir == "" {
-			logDir = "./log"
-		}
-		// 查找最新的日志文件
-		cmd := exec.Command("sh", "-c",
-			fmt.Sprintf("find %s -name '*.log' -type f | sort -r | head -1 | xargs tail -n %d", logDir, lines))
-		output, err := cmd.CombinedOutput()
-		if err != nil {
-			return "", fmt.Errorf("读取日志失败: %w", err)
-		}
-		result := string(output)
-		// 按级别过滤
-		if level != "" {
-			filtered := ""
-			for _, line := range strings.Split(result, "\n") {
-				if strings.Contains(line, "level="+strings.ToUpper(level)) {
-					filtered += line + "\n"
-				}
+		Handler: func(ctx context.Context, args map[string]any) (string, error) {
+			host, _ := args["host"].(string)
+			if host == "" {
+				return "", fmt.Errorf("请指定主机名")
 			}
-			result = filtered
-		}
-		return ToJSON(map[string]any{
-			"lines": len(strings.Split(result, "\n")),
-			"level": level,
-			"log":   result,
-		})
-	},
-})
+			count := GetInt(args, "count", 3)
+			if count < 1 {
+				count = 1
+			}
+			if count > 10 {
+				count = 10
+			}
+			// 使用 go-fastping 或系统 ping
+			cmd := exec.Command("ping", "-c", strconv.Itoa(count), "-W", "3", host)
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				return ToJSON(map[string]any{
+					"host":      host,
+					"reachable": false,
+					"output":    string(output),
+				})
+			}
+			return ToJSON(map[string]any{
+				"host":      host,
+				"reachable": true,
+				"output":    string(output),
+			})
+		},
+	})
 
-r.Register(&base.ToolDef{
-	Name:        "list_services",
-	Description: "列出云兮家庭服务器中配置的所有服务及其访问地址。当用户问'有哪些服务'或'怎么访问nextcloud'时调用。",
+	r.Register(&base.ToolDef{
+		Name:        "read_app_log",
+		Description: "读取云兮应用自身的运行日志。当用户问'查看日志'、'有什么错误'时调用。默认返回最近 50 行。",
 		IsConcurrencySafe: true,
-	Parameters: base.ToolParams{
-		Type:       "object",
-		Properties: map[string]base.ParamProp{},
-	},
-	Handler: func(ctx context.Context, args map[string]any) (string, error) {
-		domain := ""
-		if len(cfg.DynamicRecords) > 0 {
-			domain = cfg.DynamicRecords[0].DomainName
-		}
-		services := []map[string]any{
-			{"name": "文件管理", "url": "https://" + domain + "/files", "desc": "NAS 文件浏览和管理"},
-			{"name": "DNS 管理", "url": "https://" + domain + "/domains", "desc": "DDNS 域名和 DNS 记录管理"},
-			{"name": "AI 助手", "url": "https://" + domain + "/chat", "desc": "云兮智能助手"},
-			{"name": "系统监控", "url": "https://" + domain + "/system", "desc": "系统资源和进程监控"},
-			{"name": "终端", "url": "https://" + domain + "/terminal", "desc": "Web SSH 终端"},
-		}
-		return ToJSON(map[string]any{
-		"domain":   domain,
-		"services": services,
-		})
-	},
-})
+		Parameters: base.ToolParams{
+			Type: "object",
+			Properties: map[string]base.ParamProp{
+				"lines": {Type: "integer", Description: "读取的行数，默认 50，最大 200"},
+				"level": {Type: "string", Description: "日志级别过滤: ERROR/WARN/INFO，默认不过滤"},
+			},
+		},
+		Handler: func(ctx context.Context, args map[string]any) (string, error) {
+			lines := GetInt(args, "lines", 50)
+			if lines < 1 {
+				lines = 50
+			}
+			if lines > 200 {
+				lines = 200
+			}
+			level, _ := args["level"].(string)
+			// 查找最近日志文件
+			logDir := cfg.Log.Dir
+			if logDir == "" {
+				logDir = "./log"
+			}
+			// 查找最新的日志文件
+			cmd := exec.Command("sh", "-c",
+				fmt.Sprintf("find %s -name '*.log' -type f | sort -r | head -1 | xargs tail -n %d", logDir, lines))
+			output, err := cmd.CombinedOutput()
+			if err != nil {
+				return "", fmt.Errorf("读取日志失败: %w", err)
+			}
+			result := string(output)
+			// 按级别过滤
+			if level != "" {
+				filtered := ""
+				for _, line := range strings.Split(result, "\n") {
+					if strings.Contains(line, "level="+strings.ToUpper(level)) {
+						filtered += line + "\n"
+					}
+				}
+				result = filtered
+			}
+			return ToJSON(map[string]any{
+				"lines": len(strings.Split(result, "\n")),
+				"level": level,
+				"log":   result,
+			})
+		},
+	})
+
+	r.Register(&base.ToolDef{
+		Name:        "list_services",
+		Description: "列出云兮家庭服务器中配置的所有服务及其访问地址。当用户问'有哪些服务'或'怎么访问nextcloud'时调用。",
+		IsConcurrencySafe: true,
+		Parameters: base.ToolParams{
+			Type:       "object",
+			Properties: map[string]base.ParamProp{},
+		},
+		Handler: func(ctx context.Context, args map[string]any) (string, error) {
+			domain := ""
+			if len(cfg.DynamicRecords) > 0 {
+				domain = cfg.DynamicRecords[0].DomainName
+			}
+			services := []map[string]any{
+				{"name": "文件管理", "url": "https://" + domain + "/files", "desc": "NAS 文件浏览和管理"},
+				{"name": "DNS 管理", "url": "https://" + domain + "/domains", "desc": "DDNS 域名和 DNS 记录管理"},
+				{"name": "AI 助手", "url": "https://" + domain + "/chat", "desc": "云兮智能助手"},
+				{"name": "系统监控", "url": "https://" + domain + "/system", "desc": "系统资源和进程监控"},
+				{"name": "终端", "url": "https://" + domain + "/terminal", "desc": "Web SSH 终端"},
+			}
+			return ToJSON(map[string]any{
+				"domain":   domain,
+				"services": services,
+			})
+		},
+	})
 }
 
 func init() {} // placeholder

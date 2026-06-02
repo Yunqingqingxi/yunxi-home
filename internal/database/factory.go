@@ -3,12 +3,14 @@ package database
 import (
 	"context"
 	"fmt"
-	"log/slog"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/Yunqingqingxi/yunxi-home/internal/models"
 )
+
+var log = logger.ForComponent("database")
 
 // Backend bundles all repository instances created for a storage driver.
 type Backend struct {
@@ -167,5 +169,5 @@ func fileInitDefaultAdmin(repo UserRepository) {
 		PasswordHash: string(hash),
 		Role:         models.RoleAdmin,
 	})
-	slog.Info("file 后端已创建默认管理员用户")
+	log.Info("file 后端已创建默认管理员用户")
 }

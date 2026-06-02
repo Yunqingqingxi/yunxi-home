@@ -5,10 +5,13 @@ package fileio
 import (
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
+
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 )
+
+var log = logger.ForComponent("fileio")
 
 // AtomicWrite writes data to path atomically: write to temp file, then os.Rename.
 // This prevents corruption if the write is interrupted mid-stream.
@@ -29,7 +32,7 @@ func AtomicWrite(path string, data []byte) error {
 		return fmt.Errorf("fileio: rename %s → %s: %w", tmpPath, path, err)
 	}
 
-	slog.Debug("fileio: atomic write", "path", path, "bytes", len(data))
+	log.Debug("文件写入完成", logger.KeyEvent, logger.EventFileWrite, logger.KeyFilePath, path, "bytes", len(data))
 	return nil
 }
 
@@ -38,12 +41,12 @@ func AtomicWrite(path string, data []byte) error {
 func ReadJSON(path string, target any) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		slog.Warn("fileio: read failed", "path", path, "error", err)
+		log.Warn("文件读取失败", logger.KeyEvent, logger.EventFileRead, logger.KeyFilePath, path, logger.KeyError, err)
 		return fmt.Errorf("fileio: read %s: %w", path, err)
 	}
 
 	if err := json.Unmarshal(data, target); err != nil {
-		slog.Warn("fileio: invalid JSON", "path", path, "error", err)
+		log.Warn("JSON 解析失败", logger.KeyEvent, logger.EventFileRead, logger.KeyFilePath, path, logger.KeyError, err)
 		return fmt.Errorf("fileio: parse %s: %w", path, err)
 	}
 
@@ -72,18 +75,18 @@ func ReadOrCreate(path string, target any, defaults any) error {
 			if err := AtomicWrite(path, raw); err != nil {
 				return err
 			}
-			slog.Info("fileio: created default config", "path", path)
+			log.Info("创建默认配置", logger.KeyEvent, logger.EventFileWrite, logger.KeyFilePath, path)
 			return json.Unmarshal(raw, target)
 		}
 		return fmt.Errorf("fileio: %s not found and no defaults provided", path)
 	}
 	if err != nil {
-		slog.Warn("fileio: read failed", "path", path, "error", err)
+		log.Warn("文件读取失败", logger.KeyEvent, logger.EventFileRead, logger.KeyFilePath, path, logger.KeyError, err)
 		return fmt.Errorf("fileio: read %s: %w", path, err)
 	}
 
 	if err := json.Unmarshal(data, target); err != nil {
-		slog.Warn("fileio: invalid JSON", "path", path, "error", err)
+		log.Warn("JSON 解析失败", logger.KeyEvent, logger.EventFileRead, logger.KeyFilePath, path, logger.KeyError, err)
 		return fmt.Errorf("fileio: parse %s: %w", path, err)
 	}
 

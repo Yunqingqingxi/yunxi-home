@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 	"os"
 	"os/exec"
 	"strings"
@@ -79,7 +79,7 @@ func NewSubsystem(cfgPath string, registry ToolRegistry) *Subsystem {
 func (s *Subsystem) Load() error {
 	data, err := os.ReadFile(s.cfgPath)
 	if err != nil {
-		slog.Info("MCP config not found, skipping", "path", s.cfgPath)
+		log.Info("MCP config not found, skipping", "path", s.cfgPath)
 		return nil
 	}
 	return s.loadConfig(data)
@@ -134,7 +134,7 @@ func (s *Subsystem) loadConfig(data []byte) error {
 		}
 	}
 	RegisterTools(s.manager, s.registry)
-	slog.Info("MCP tools loaded", "servers", len(cfg.MCPServers))
+	log.Info("MCP tools loaded", "servers", len(cfg.MCPServers))
 	return nil
 }
 
@@ -241,7 +241,7 @@ func (s *Subsystem) Uninstall(name string) error {
 	// Remove from status
 	delete(s.status, name)
 
-	slog.Info("MCP server uninstalled", "name", name)
+	log.Info("MCP server uninstalled", "name", name)
 	return nil
 }
 

@@ -84,6 +84,8 @@ type ChatSessionRepository interface {
 	List(ctx context.Context) ([]models.ChatSession, error)
 	ListByType(ctx context.Context, sessionType string) ([]models.ChatSession, error)
 	Upsert(ctx context.Context, s *models.ChatSession) error
+	// UpdateSessionMeta updates only metadata fields (title, pinned) without touching messages.
+	UpdateSessionMeta(ctx context.Context, id string, title *string, pinned *bool) error
 	Delete(ctx context.Context, id string) error
 	DeleteByType(ctx context.Context, sessionType string) (int64, error)
 	DeleteStale(ctx context.Context, sessionType string, olderThan time.Duration) (int64, error)

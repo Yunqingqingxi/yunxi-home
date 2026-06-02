@@ -2,7 +2,7 @@
 
 import (
 	"fmt"
-	"log/slog"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 	"math"
 	"net"
 	"net/http"
@@ -17,6 +17,7 @@ import (
 
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai"
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/mcp"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai/observability"
 	"github.com/Yunqingqingxi/yunxi-home/internal/database"
 	"github.com/Yunqingqingxi/yunxi-home/internal/scheduler"
 	"github.com/Yunqingqingxi/yunxi-home/internal/sysctl"
@@ -29,6 +30,7 @@ type StatusHandler struct {
 	collector    *sysctl.SystemCollector
 	mcpSvc       mcp.MCPService
 	metrics      *ai.MetricsCollector
+	agentMetrics *observability.AgentMetrics
 	notifyCfg    func() map[string]any
 	provModels   func() []string
 	startTime    time.Time
@@ -49,6 +51,7 @@ func (h *StatusHandler) SetCollector(c *sysctl.SystemCollector) { h.collector = 
 func (h *StatusHandler) SetMCPService(svc mcp.MCPService)        { h.mcpSvc = svc }
 // SetMetricsCollector sets the AI metrics collector.
 func (h *StatusHandler) SetMetricsCollector(mc *ai.MetricsCollector) { h.metrics = mc }
+func (h *StatusHandler) SetAgentMetrics(am *observability.AgentMetrics) { h.agentMetrics = am }
 // SetNotifyConfigProvider sets a function that returns current notify config summary.
 func (h *StatusHandler) SetNotifyConfigProvider(fn func() map[string]any) { h.notifyCfg = fn }
 func (h *StatusHandler) SetProviderModelsProvider(fn func() []string)    { h.provModels = fn }
@@ -98,7 +101,7 @@ type SystemInfo struct {
 func (h *StatusHandler) Status(c echo.Context) error {
 	schedStatus, err := h.scheduler.GetStatus(c.Request().Context())
 	if err != nil {
-		slog.Warn("获取调度器状态失败", "error", err)
+		log.Warn("获取调度器状态失败", "error", err)
 		schedStatus = map[string]interface{}{"error": "获取状态失败"}
 	}
 	if raw, ok := schedStatus["interval"].(string); ok {
@@ -251,6 +254,21 @@ func (h *StatusHandler) buildAIOverview() map[string]any {
 	}
 	overview["top_tools"] = top5
 
+	// Agent system metrics (v2.0) — persisted + runtime
+	gm := observability.GlobalMetrics().Snapshot()
+	overview["sub_agent_spawned"] = snap.SubAgentSpawned + gm.SubAgentSpawned
+	overview["sub_agent_success"] = snap.SubAgentSuccess + gm.SubAgentSuccess
+	overview["sub_agent_failed"] = snap.SubAgentFailed + gm.SubAgentFailed
+	total := snap.SubAgentSpawned + gm.SubAgentSpawned
+	if total > 0 {
+		overview["sub_agent_success_rate"] = float64(snap.SubAgentSuccess+gm.SubAgentSuccess) / float64(total)
+	} else {
+		overview["sub_agent_success_rate"] = 0.0
+	}
+	overview["lock_conflicts"] = snap.LockConflicts + gm.LockConflicts
+	overview["role_promotions"] = snap.RolePromotions + gm.RolePromotions
+	overview["role_demotions"] = snap.RoleDemotions + gm.RoleDemotions
+
 	return overview
 }
 
@@ -397,7 +415,7 @@ type devBytesPair struct{ rx, tx int64 }
 // Trigger 手动触发检测更新
 func (h *StatusHandler) Trigger(c echo.Context) error {
 	if err := h.scheduler.TriggerUpdate(c.Request().Context()); err != nil {
-		slog.Warn("触发更新失败", "error", err)
+		log.Warn("触发更新失败", "error", err)
 		return c.JSON(http.StatusInternalServerError, errorResp("触发更新失败"))
 	}
 

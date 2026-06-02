@@ -2,7 +2,7 @@ package ai
 
 import (
 	"context"
-	"log/slog"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 	"math"
 	"sync"
 	"sync/atomic"
@@ -32,23 +32,34 @@ type CounterSnapshot struct {
 	Errors        int64            `json:"errors"`
 	ToolCalls     int64            `json:"tool_calls"`
 	ToolErrors    int64            `json:"tool_errors"`
-	TopTools      map[string]int64 `json:"top_tools"` // 工具名→调用次数，持久化Top工具调用
+	TopTools      map[string]int64 `json:"top_tools"`
+	// Agent v2.0 counters (persisted across restarts)
+	SubAgentSpawned int64 `json:"sub_agent_spawned"`
+	SubAgentSuccess int64 `json:"sub_agent_success"`
+	SubAgentFailed  int64 `json:"sub_agent_failed"`
+	LockConflicts   int64 `json:"lock_conflicts"`
+	RolePromotions  int64 `json:"role_promotions"`
+	RoleDemotions   int64 `json:"role_demotions"`
 }
 
 // ── ToolsSnapshot ───────────────────────────────────────
 
 // ToolsSnapshot 返回当前内存中聚合的工具指标快照，供分析引擎或 API 查询。
 type ToolsSnapshot struct {
-	// 按工具名索引
 	Tools map[string]ToolMetrics `json:"tools"`
-	// 全局计数
 	TotalLLMRequests int64 `json:"total_llm_requests"`
 	TotalLLMErrors   int64 `json:"total_llm_errors"`
 	TotalToolCalls   int64 `json:"total_tool_calls"`
 	TotalToolErrors  int64 `json:"total_tool_errors"`
 	LoopDetected     int64 `json:"loop_detected"`
-	// 时间窗口
-	Since time.Time `json:"since"`
+	Since            time.Time `json:"since"`
+	// Agent v2.0 counters
+	SubAgentSpawned int64 `json:"sub_agent_spawned"`
+	SubAgentSuccess int64 `json:"sub_agent_success"`
+	SubAgentFailed  int64 `json:"sub_agent_failed"`
+	LockConflicts   int64 `json:"lock_conflicts"`
+	RolePromotions  int64 `json:"role_promotions"`
+	RoleDemotions   int64 `json:"role_demotions"`
 }
 
 // ToolMetrics 单个工具的聚合指标
@@ -83,6 +94,13 @@ type MetricsCollector struct {
 	TotalInputTokens  atomic.Int64
 	TotalOutputTokens atomic.Int64
 	TotalCostMicros   atomic.Int64 // cost in micro-dollars (USD * 1e6)
+	// Agent v2.0
+	SubAgentSpawned atomic.Int64
+	SubAgentSuccess atomic.Int64
+	SubAgentFailed  atomic.Int64
+	LockConflicts   atomic.Int64
+	RolePromotions  atomic.Int64
+	RoleDemotions   atomic.Int64
 
 	// 工具延迟汇总（EWMA + 最近样本）
 	toolMu    sync.RWMutex
@@ -276,6 +294,12 @@ func (mc *MetricsCollector) Snapshot() ToolsSnapshot {
 		TotalToolErrors:  mc.TotalToolErrors.Load(),
 		LoopDetected:     mc.LoopDetected.Load(),
 		Since:            mc.startTime,
+		SubAgentSpawned:  mc.SubAgentSpawned.Load(),
+		SubAgentSuccess:  mc.SubAgentSuccess.Load(),
+		SubAgentFailed:   mc.SubAgentFailed.Load(),
+		LockConflicts:    mc.LockConflicts.Load(),
+		RolePromotions:   mc.RolePromotions.Load(),
+		RoleDemotions:    mc.RoleDemotions.Load(),
 	}
 
 	for name, ts := range mc.toolStats {
@@ -312,14 +336,20 @@ func (mc *MetricsCollector) SnapshotCounters() CounterSnapshot {
 	mc.toolMu.RUnlock()
 
 	return CounterSnapshot{
-		InputTokens:  mc.TotalInputTokens.Load(),
-		OutputTokens: mc.TotalOutputTokens.Load(),
-		CostMicros:   mc.TotalCostMicros.Load(),
-		Requests:     mc.TotalLLMRequests.Load(),
-		Errors:       mc.TotalLLMErrors.Load(),
-		ToolCalls:    mc.TotalToolCalls.Load(),
-		ToolErrors:   mc.TotalToolErrors.Load(),
-		TopTools:     topTools,
+		InputTokens:     mc.TotalInputTokens.Load(),
+		OutputTokens:    mc.TotalOutputTokens.Load(),
+		CostMicros:      mc.TotalCostMicros.Load(),
+		Requests:        mc.TotalLLMRequests.Load(),
+		Errors:          mc.TotalLLMErrors.Load(),
+		ToolCalls:       mc.TotalToolCalls.Load(),
+		ToolErrors:      mc.TotalToolErrors.Load(),
+		TopTools:        topTools,
+		SubAgentSpawned: mc.SubAgentSpawned.Load(),
+		SubAgentSuccess: mc.SubAgentSuccess.Load(),
+		SubAgentFailed:  mc.SubAgentFailed.Load(),
+		LockConflicts:   mc.LockConflicts.Load(),
+		RolePromotions:  mc.RolePromotions.Load(),
+		RoleDemotions:   mc.RoleDemotions.Load(),
 	}
 }
 
@@ -332,6 +362,12 @@ func (mc *MetricsCollector) LoadFromSnapshot(s CounterSnapshot) {
 	mc.TotalLLMErrors.Store(s.Errors)
 	mc.TotalToolCalls.Store(s.ToolCalls)
 	mc.TotalToolErrors.Store(s.ToolErrors)
+	mc.SubAgentSpawned.Store(s.SubAgentSpawned)
+	mc.SubAgentSuccess.Store(s.SubAgentSuccess)
+	mc.SubAgentFailed.Store(s.SubAgentFailed)
+	mc.LockConflicts.Store(s.LockConflicts)
+	mc.RolePromotions.Store(s.RolePromotions)
+	mc.RoleDemotions.Store(s.RoleDemotions)
 	// Restore per-tool call counts
 	mc.toolMu.Lock()
 	for name, count := range s.TopTools {
@@ -398,9 +434,9 @@ func (mc *MetricsCollector) doFlush() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := mc.flushFn(ctx, batch); err != nil {
-		slog.Warn("metrics flush failed", "count", len(batch), "error", err)
+		log.Warn("metrics flush failed", "count", len(batch), "error", err)
 	} else {
-		slog.Debug("metrics flushed", "count", len(batch))
+		log.Debug("metrics flushed", "count", len(batch))
 	}
 }
 

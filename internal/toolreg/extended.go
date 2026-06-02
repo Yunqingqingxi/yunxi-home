@@ -9,7 +9,10 @@ import (
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/register"
 	"github.com/Yunqingqingxi/yunxi-home/internal/config"
 	"github.com/Yunqingqingxi/yunxi-home/internal/docker"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 )
+
+var log = logger.ForComponent("toolreg")
 
 // RegisterExtended 注册扩展模块的 AI 工具 (NAS, Docker, Sysctl)
 func RegisterExtended(r *register.Registry, dockerMgr *docker.Manager, cfg *config.Config) {

@@ -41,6 +41,45 @@ export interface Conversation {
   createdAt: string
   updatedAt: string
   messageCount: number
+  pinned?: boolean
+  isActive?: boolean
+}
+
+// ── Agent State & Role (v2.0 state machine) ──
+
+export type AgentState = 'start' | 'reasoning' | 'executing' | 'waiting_lock'
+  | 'waiting_human' | 'delegate' | 'suspended' | 'timeout'
+  | 'retry' | 'done' | 'failed' | 'cancel'
+
+export type AgentRole = 'executor' | 'supervisor' | 'manager'
+
+export interface StateTransition {
+  from: AgentState
+  to: AgentState
+  event: string
+  reason?: string
+  ts: number
+}
+
+export interface LockConflict {
+  resource_id: string
+  agents: string[]
+  decision: string
+  winner?: string
+  reason: string
+}
+
+export interface MetaReport {
+  agent_id: string
+  success_rate: number
+  avg_latency_ms: number
+  conflict_count: number
+  task_completed: number
+  task_failed: number
+  current_load: number
+  role?: AgentRole
+  role_since?: string
+  role_ttl?: string
 }
 
 export interface SSEEvent {
@@ -49,7 +88,6 @@ export interface SSEEvent {
   tool?: string
   args?: string
   result?: string
-  // tool_progress
   tool_name?: string
   tool_progress?: string
   // agent
@@ -79,6 +117,22 @@ export interface SSEEvent {
     oscillation: boolean
     override: boolean
   }
+  // v2.0 events
+  state_change?: {
+    agent_id: string
+    from: AgentState
+    to: AgentState
+    event: string
+    reason?: string
+  }
+  role_change?: {
+    agent_id: string
+    old_role: AgentRole
+    new_role: AgentRole
+    reason: string
+  }
+  lock_conflict?: LockConflict
+  meta_report?: MetaReport
 }
 
 export interface AgentInfo {
@@ -90,4 +144,7 @@ export interface AgentInfo {
   goal?: string
   status?: string
   summary?: string
+  // v2.0
+  state?: AgentState
+  role?: AgentRole
 }

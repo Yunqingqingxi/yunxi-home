@@ -5,7 +5,7 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"fmt"
-	"log/slog"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 	"sort"
 	"strings"
 	"sync"
@@ -101,7 +101,7 @@ func (ps *PromptStore) LoadFromDB(ctx context.Context) error {
 			ps.cache[section] = data
 		}
 	}
-	slog.Info("PromptStore loaded from DB", "sections", len(ps.cache))
+	log.Info("PromptStore loaded from DB", "sections", len(ps.cache))
 	return nil
 }
 
@@ -167,7 +167,7 @@ func (ps *PromptStore) UpdateSection(ctx context.Context, section, data string) 
 	ps.cache[section] = data
 	ps.mu.Unlock()
 	ps.promptCache = sync.Map{} // Invalidate intent cache
-	slog.Info("PromptStore section updated", "section", section, "len", len(data))
+	log.Info("PromptStore section updated", "section", section, "len", len(data))
 	return nil
 }
 
@@ -186,7 +186,7 @@ func (ps *PromptStore) ResetSection(ctx context.Context, section string) error {
 	delete(ps.cache, section)
 	ps.mu.Unlock()
 	ps.promptCache = sync.Map{}
-	slog.Info("PromptStore section reset to default", "section", section)
+	log.Info("PromptStore section reset to default", "section", section)
 	return nil
 }
 
@@ -214,7 +214,7 @@ func (ps *PromptStore) InitDefaults(ctx context.Context) error {
 			return err
 		}
 	}
-	slog.Info("PromptStore defaults seeded to DB", "sections", len(ps.defaults))
+	log.Info("PromptStore defaults seeded to DB", "sections", len(ps.defaults))
 	return nil
 }
 

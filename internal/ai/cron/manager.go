@@ -2,7 +2,7 @@ package cron
 
 import (
 	"fmt"
-	"log/slog"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 	"strconv"
 	"strings"
 	"sync"
@@ -47,7 +47,7 @@ func NewManager(injectFn InjectFunc, repo TaskRepository) *Manager {
 			for _, t := range all {
 				m.tasks[t.ID] = t
 			}
-			slog.Info("cron tasks restored from DB", "count", len(all))
+			log.Info("cron tasks restored from DB", "count", len(all))
 		}
 	}
 	go m.runLoop()
@@ -85,7 +85,7 @@ func (m *Manager) Create(sessionID, cronExpr, prompt string, recurring bool) (*S
 		_ = m.repo.Save(task)
 	}
 
-	slog.Info("cron task created",
+	log.Info("cron task created",
 		"id", task.ID,
 		"session", sessionID,
 		"cron", cronExpr,
@@ -153,7 +153,7 @@ func (m *Manager) checkAndTrigger(now time.Time) {
 
 	for id, task := range m.tasks {
 		if now.After(task.NextRunAt) || now.Equal(task.NextRunAt) {
-			slog.Info("cron task triggered", "id", id, "session", task.SessionID)
+			log.Info("cron task triggered", "id", id, "session", task.SessionID)
 
 			// 注入消息到会话
 			if m.injectFn != nil {
@@ -165,7 +165,7 @@ func (m *Manager) checkAndTrigger(now time.Time) {
 			if task.Recurring {
 				next, err := NextRunTime(task.CronExpr, now)
 				if err != nil {
-					slog.Warn("cron task failed to calc next run, removing", "id", id, "error", err)
+					log.Warn("cron task failed to calc next run, removing", "id", id, "error", err)
 					delete(m.tasks, id)
 					if m.repo != nil {
 						_ = m.repo.Delete(id)

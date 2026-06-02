@@ -135,3 +135,54 @@ func GetAllRiskProfiles() []RiskProfile {
 	copy(cp, riskProfiles)
 	return cp
 }
+
+// EstimateProgressDelta 估算工具调用对应的 X 轴（进度）增量。
+// 用于 AI 未自报 <topology> 标签时的系统估算。
+func EstimateProgressDelta(toolName string) float64 {
+	switch {
+	case matchPattern("file_read", toolName),
+		matchPattern("file_list", toolName),
+		matchPattern("file_info", toolName),
+		matchPattern("file_search", toolName),
+		matchPattern("file_disk_info", toolName),
+		matchPattern("file_sandbox_info", toolName),
+		matchPattern("get_*", toolName),
+		matchPattern("list_*", toolName),
+		matchPattern("query_*", toolName),
+		matchPattern("ping_*", toolName):
+		return 1.0 // 查询/读取类：小幅推进
+
+	case matchPattern("file_write", toolName),
+		matchPattern("file_mkdir", toolName),
+		matchPattern("file_edit", toolName),
+		matchPattern("file_copy", toolName),
+		matchPattern("file_move", toolName),
+		matchPattern("add_*", toolName),
+		matchPattern("create_*", toolName),
+		matchPattern("update_*", toolName),
+		matchPattern("set_*", toolName):
+		return 2.0 // 写入/修改类：显著推进
+
+	case matchPattern("file_delete", toolName),
+		matchPattern("delete_*", toolName),
+		matchPattern("remove_*", toolName),
+		matchPattern("clean_*", toolName):
+		return 2.0 // 删除类：显著推进
+
+	case matchPattern("run_command", toolName),
+		matchPattern("docker_*", toolName),
+		matchPattern("ssh_*", toolName),
+		matchPattern("spawn_agent", toolName),
+		matchPattern("db_backup", toolName),
+		matchPattern("snapshot_*", toolName),
+		matchPattern("sync_*", toolName):
+		return 1.5 // 执行/运维类：中等推进
+
+	case matchPattern("mcp__*", toolName),
+		matchPattern("run_skill", toolName):
+		return 1.5 // MCP/技能类：中等推进
+
+	default:
+		return 1.0 // 未知工具：保守估算
+	}
+}

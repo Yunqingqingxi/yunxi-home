@@ -11,10 +11,12 @@ import (
 	"fmt"
 	"net/http"
 	"time"
-	"log/slog"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 
 	"github.com/Yunqingqingxi/yunxi-home/internal/notifier/base"
 )
+
+var log = logger.ForComponent("notifier")
 
 // Config Webhook 配置
 type Config struct {
@@ -54,7 +56,7 @@ func (n *Notifier) IsEnabled() bool {
 
 // Send 发送 Webhook 通知
 func (n *Notifier) Send(ctx context.Context, event base.ChangeEvent) error {
-	slog.Info("Webhook发送中", "URL", n.config.URL, "域名", event.FullDomain)
+	log.Info("Webhook发送中", "URL", n.config.URL, "域名", event.FullDomain)
 	if !n.config.Enabled {
 		return nil
 	}

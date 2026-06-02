@@ -1,399 +1,210 @@
 <template>
+  <!-- SVG defs 保留不变 -->
   <svg
     style="position:absolute;width:0;height:0"
     aria-hidden="true"
   >
     <defs>
-      <linearGradient
-        id="fg-md"
-        x1="1.5"
-        y1="-1"
-        x2="23.5"
-        y2="28"
-        gradientUnits="userSpaceOnUse"
-      ><stop stop-color="#6D93FF" /><stop
-        offset="1"
-        stop-color="#5A71F0"
-      /></linearGradient>
-      <linearGradient
-        id="fg-doc"
-        x1="1.5"
-        y1="-1"
-        x2="23.5"
-        y2="28"
-        gradientUnits="userSpaceOnUse"
-      ><stop stop-color="#2B7FFF" /><stop
-        offset="1"
-        stop-color="#1A5CD0"
-      /></linearGradient>
-      <linearGradient
-        id="fg-ppt"
-        x1="1.5"
-        y1="-1"
-        x2="23.5"
-        y2="28"
-        gradientUnits="userSpaceOnUse"
-      ><stop stop-color="#FF6B35" /><stop
-        offset="1"
-        stop-color="#D9441E"
-      /></linearGradient>
-      <linearGradient
-        id="fg-xls"
-        x1="1.5"
-        y1="-1"
-        x2="23.5"
-        y2="28"
-        gradientUnits="userSpaceOnUse"
-      ><stop stop-color="#21A366" /><stop
-        offset="1"
-        stop-color="#147A48"
-      /></linearGradient>
-      <linearGradient
-        id="fg-pdf"
-        x1="1.5"
-        y1="-1"
-        x2="23.5"
-        y2="28"
-        gradientUnits="userSpaceOnUse"
-      ><stop stop-color="#E53935" /><stop
-        offset="1"
-        stop-color="#B71C1C"
-      /></linearGradient>
-      <linearGradient
-        id="fg-txt"
-        x1="1.5"
-        y1="-1"
-        x2="23.5"
-        y2="28"
-        gradientUnits="userSpaceOnUse"
-      ><stop stop-color="#78909C" /><stop
-        offset="1"
-        stop-color="#546E7A"
-      /></linearGradient>
-      <linearGradient
-        id="fg-img"
-        x1="1.5"
-        y1="-1"
-        x2="23.5"
-        y2="28"
-        gradientUnits="userSpaceOnUse"
-      ><stop stop-color="#AB47BC" /><stop
-        offset="1"
-        stop-color="#8E24AA"
-      /></linearGradient>
-      <linearGradient
-        id="fg-zip"
-        x1="1.5"
-        y1="-1"
-        x2="23.5"
-        y2="28"
-        gradientUnits="userSpaceOnUse"
-      ><stop stop-color="#FFA726" /><stop
-        offset="1"
-        stop-color="#F57C00"
-      /></linearGradient>
-      <linearGradient
-        id="fg-default-0"
-        x1="1.5"
-        y1="-1"
-        x2="23.5"
-        y2="28"
-        gradientUnits="userSpaceOnUse"
-      ><stop stop-color="#6D93FF" /><stop
-        offset="1"
-        stop-color="#5A71F0"
-      /></linearGradient>
-      <linearGradient
-        id="fg-default-1"
-        x1="1.5"
-        y1="-1"
-        x2="23.5"
-        y2="28"
-        gradientUnits="userSpaceOnUse"
-      ><stop stop-color="#26C6DA" /><stop
-        offset="1"
-        stop-color="#0097A7"
-      /></linearGradient>
-      <linearGradient
-        id="fg-default-2"
-        x1="1.5"
-        y1="-1"
-        x2="23.5"
-        y2="28"
-        gradientUnits="userSpaceOnUse"
-      ><stop stop-color="#66BB6A" /><stop
-        offset="1"
-        stop-color="#388E3C"
-      /></linearGradient>
-      <linearGradient
-        id="fg-default-3"
-        x1="1.5"
-        y1="-1"
-        x2="23.5"
-        y2="28"
-        gradientUnits="userSpaceOnUse"
-      ><stop stop-color="#FF7043" /><stop
-        offset="1"
-        stop-color="#E64A19"
-      /></linearGradient>
+      <linearGradient id="fg-md" x1="1.5" y1="-1" x2="23.5" y2="28" gradientUnits="userSpaceOnUse">
+        <stop stop-color="#6D93FF" /><stop offset="1" stop-color="#5A71F0" />
+      </linearGradient>
+      <linearGradient id="fg-doc" x1="1.5" y1="-1" x2="23.5" y2="28" gradientUnits="userSpaceOnUse">
+        <stop stop-color="#2B7FFF" /><stop offset="1" stop-color="#1A5CD0" />
+      </linearGradient>
+      <linearGradient id="fg-ppt" x1="1.5" y1="-1" x2="23.5" y2="28" gradientUnits="userSpaceOnUse">
+        <stop stop-color="#FF6B35" /><stop offset="1" stop-color="#D9441E" />
+      </linearGradient>
+      <linearGradient id="fg-xls" x1="1.5" y1="-1" x2="23.5" y2="28" gradientUnits="userSpaceOnUse">
+        <stop stop-color="#21A366" /><stop offset="1" stop-color="#147A48" />
+      </linearGradient>
+      <linearGradient id="fg-pdf" x1="1.5" y1="-1" x2="23.5" y2="28" gradientUnits="userSpaceOnUse">
+        <stop stop-color="#E53935" /><stop offset="1" stop-color="#B71C1C" />
+      </linearGradient>
+      <linearGradient id="fg-txt" x1="1.5" y1="-1" x2="23.5" y2="28" gradientUnits="userSpaceOnUse">
+        <stop stop-color="#78909C" /><stop offset="1" stop-color="#546E7A" />
+      </linearGradient>
+      <linearGradient id="fg-img" x1="1.5" y1="-1" x2="23.5" y2="28" gradientUnits="userSpaceOnUse">
+        <stop stop-color="#AB47BC" /><stop offset="1" stop-color="#8E24AA" />
+      </linearGradient>
+      <linearGradient id="fg-zip" x1="1.5" y1="-1" x2="23.5" y2="28" gradientUnits="userSpaceOnUse">
+        <stop stop-color="#FFA726" /><stop offset="1" stop-color="#F57C00" />
+      </linearGradient>
+      <linearGradient id="fg-default-0" x1="1.5" y1="-1" x2="23.5" y2="28" gradientUnits="userSpaceOnUse">
+        <stop stop-color="#6D93FF" /><stop offset="1" stop-color="#5A71F0" />
+      </linearGradient>
+      <linearGradient id="fg-default-1" x1="1.5" y1="-1" x2="23.5" y2="28" gradientUnits="userSpaceOnUse">
+        <stop stop-color="#26C6DA" /><stop offset="1" stop-color="#0097A7" />
+      </linearGradient>
+      <linearGradient id="fg-default-2" x1="1.5" y1="-1" x2="23.5" y2="28" gradientUnits="userSpaceOnUse">
+        <stop stop-color="#66BB6A" /><stop offset="1" stop-color="#388E3C" />
+      </linearGradient>
+      <linearGradient id="fg-default-3" x1="1.5" y1="-1" x2="23.5" y2="28" gradientUnits="userSpaceOnUse">
+        <stop stop-color="#FF7043" /><stop offset="1" stop-color="#E64A19" />
+      </linearGradient>
     </defs>
   </svg>
-  <div :class="store.sessionId ? 'input-bar-floating' : 'input-bar-bottom'">
-    <!-- Attachments & hints -->
-    <div
-      v-if="attachedFiles.length"
-      class="attach-bar"
-    >
-      <div
-        v-for="(f, i) in attachedFiles"
-        :key="i"
-        class="file-card"
-        :class="{ uploading: f.uploading }"
-      >
-        <div class="file-card-icon">
-          <svg
-            width="24"
-            height="28"
-            viewBox="0 0 24 28"
-            fill="none"
-          >
-            <path
-              d="M16.5 0l7 7v15.6c0 2.25 0 3.375-.573 4.164a3 3 0 0 1-.663.663C21.475 28 20.349 28 18.1 28H5.9c-2.25 0-3.375 0-4.164-.573a3 3 0 0 1-.663-.663C.5 25.975.5 24.849.5 22.6V5.4c0-2.25 0-3.375.573-4.164a3 3 0 0 1 .663-.663C2.525 0 3.651 0 5.9 0h10.6z"
-              :fill="fileIconGradient(f.name, i)"
-            /><path
-              d="M16.5 0l7 7h-3.8c-1.12 0-1.68 0-2.108-.218a2 2 0 0 1-.874-.874C16.5 5.48 16.5 4.92 16.5 3.8V0z"
-              fill="#fff"
-              fill-opacity=".55"
-            /><path
-              d="M6 11.784c0-.433.351-.784.784-.784h10.432a.784.784 0 1 1 0 1.568H6.784A.784.784 0 0 1 6 11.784zM6 15.784c0-.433.351-.784.784-.784h10.432a.784.784 0 1 1 0 1.568H6.784A.784.784 0 0 1 6 15.784zM6.114 19.817c0-.433.35-.784.784-.784h6.318a.784.784 0 1 1 0 1.568H6.898a.784.784 0 0 1-.784-.784z"
-              fill="#fff"
-            />
-          </svg>
-        </div>
-        <div class="file-card-info">
-          <span class="file-card-name">{{ f.name }}</span>
-          <span class="file-card-meta">{{ fileExt(f.name).toUpperCase() }} {{ fmtFileSize(f.size) }}</span>
-        </div>
-        <span
-          v-if="f.uploading"
-          class="file-card-progress"
-        >{{ f.progress }}%</span>
-        <div
-          class="file-card-close"
-          tabindex="0"
-          @click.stop="removeFile(i)"
-        >
-          <svg
-            width="12"
-            height="12"
-            viewBox="0 0 14 14"
-            fill="none"
-          ><path
-            d="M10.6 4.4L7 8L3.4 4.4"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-          /><path
-            d="M10.6 10.6L7 7L3.4 10.6"
-            stroke="currentColor"
-            stroke-width="1.5"
-            stroke-linecap="round"
-          /></svg>
-        </div>
-      </div>
+
+  <!-- 单一容器 -->
+  <div
+    :class="['input-bar', store.sessionId ? 'floating' : 'bottom', { 'drag-over': dragOver }]"
+    @dragover.prevent="onDragOver"
+    @dragleave.prevent="onDragLeave"
+    @drop.prevent="onDrop"
+  >
+    <!-- 附件 chips -->
+    <div v-if="attachedFiles.length" class="attach-chips">
+      <span v-for="(f, i) in attachedFiles" :key="i" class="chip" :class="{ uploading: f.uploading }">
+        <span class="chip-name" @click="previewFile = f" title="点击预览">{{ f.name }}</span>
+        <span v-if="f.uploading" class="chip-pct">{{ f.progress }}%</span>
+        <button class="chip-close" @click="removeFile(i)">×</button>
+      </span>
     </div>
 
-    <!-- Main input row: textarea + actions inline -->
-    <div class="input-main">
-      <input
-        ref="fileInput"
-        type="file"
-        style="display:none"
-        multiple
-        @change="onFileAttach"
-      />
-      <button
-        class="act-btn"
-        title="附加文件"
-        @click="$refs.fileInput.click()"
-      >
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 16 16"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.5"
-          stroke-linecap="round"
-        ><path d="M10 4v7a3 3 0 01-6 0V5a2 2 0 014 0v5.5a1 1 0 01-2 0V5" /></svg>
+    <!-- Textarea 透明嵌入，自动撑高 -->
+    <textarea
+      ref="inputEl"
+      v-model="input"
+      class="input-field"
+      :class="{ 'cmd-mode': showCommands }"
+      :placeholder="inputPlaceholder"
+      rows="1"
+      maxlength="4000"
+      @keydown="onKeydown"
+      @input="onInputResize"
+    />
+
+    <!-- 底栏控件行 -->
+    <div class="input-toolbar">
+      <button class="tb-item model-btn" @click="modelMenuOpen = !modelMenuOpen">
+        <span class="tb-dot" :class="modelKey"></span>
+        <span>{{ currentModelLabel }}</span>
+        <svg width="8" height="8" viewBox="0 0 8 8"><path d="M2 3l2 2 2-2" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>
+      </button>
+
+      <div class="tb-spacer"></div>
+
+      <button class="tb-item" @click="$refs.fileInput.click()" title="附加文件">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+          <path d="M10 4v7a3 3 0 01-6 0V5a2 2 0 014 0v5.5a1 1 0 01-2 0V5"/>
+        </svg>
       </button>
 
       <button
-        class="act-btn"
-        :class="{ active: planMode }"
-        title="Plan 多步规划"
-        @click="planMode = !planMode"
+        class="tb-send"
+        :class="{
+          stop: isBusy && !hasInput,
+          active: !isBusy && (hasInput || attachedFiles.length)
+        }"
+        :disabled="!isBusy && !hasInput && !attachedFiles.length"
+        :title="isBusy && !hasInput ? '停止' : '发送'"
+        @click="handleSend"
       >
-        <svg
-          width="14"
-          height="14"
-          viewBox="0 0 13 13"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.3"
-        ><rect
-          x="1.5"
-          y="1.5"
-          width="4"
-          height="3"
-          rx="0.8"
-        /><rect
-          x="7.5"
-          y="1.5"
-          width="4"
-          height="3"
-          rx="0.8"
-        /><rect
-          x="1.5"
-          y="8.5"
-          width="4"
-          height="3"
-          rx="0.8"
-        /><rect
-          x="7.5"
-          y="8.5"
-          width="4"
-          height="3"
-          rx="0.8"
-        /></svg>
+        <svg v-if="isBusy && !hasInput" width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+          <rect x="2" y="2" width="8" height="8" rx="1.5"/>
+        </svg>
+        <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22 2L11 13"/><path d="M22 2L15 22l-4-9-9-4 20-7z"/>
+        </svg>
       </button>
+    </div>
 
-      <div class="input-wrapper">
-        <textarea
-          ref="inputEl"
-          v-model="input"
-          class="input-field"
-          :class="['model-'+modelKey, { focused: inputFocused, 'cmd-mode': showCommands }]"
-          :placeholder="inputPlaceholder"
-          :rows="1"
-          maxlength="4000"
-          @keydown="onKeydown"
-          @focus="inputFocused = true"
-          @blur="inputFocused = false"
-          @input="onInputResize"
-        ></textarea>
+    <!-- 模型下拉 -->
+    <div v-if="modelMenuOpen" class="model-dropdown" @click.stop>
+      <button
+        v-for="m in modelOptions" :key="m.key"
+        :class="['model-opt', { active: modelKey === m.key }]"
+        @click="onModelChange(m.key); modelMenuOpen = false"
+      >
+        <span class="tb-dot" :class="m.key"></span>
+        <div class="model-opt-info">
+          <span class="model-opt-label">{{ m.label }}</span>
+          <span class="model-opt-desc">{{ m.desc }}</span>
+        </div>
+      </button>
+      <div class="model-dropdown-div"></div>
+      <div class="model-reasoning-row">
+        <span class="model-reasoning-label">推理</span>
         <button
-          type="button"
-          class="model-dot"
-          :class="modelKey"
-          :title="currentModelName + ' ▼'"
-          @mousedown.prevent
-          @click.stop="modelMenuOpen = !modelMenuOpen"
-        ></button>
-        <div
-          v-if="modelMenuOpen"
-          class="model-dropdown"
-          @click.stop
+          v-for="r in reasoningLevels" :key="r.key"
+          :class="['seg-item', { active: reasoning === r.key }]"
+          @click="reasoning = r.key"
         >
-          <button
-            v-for="m in modelOptions"
-            :key="m.key"
-            :class="['model-opt', { active: modelKey === m.key }]"
-            @click="onModelChange(m.key); modelMenuOpen = false"
-          >
-            <span
-              class="seg-dot"
-              :class="m.key"
-            ></span>
-            <div class="model-opt-info">
-              <span class="model-opt-label">{{ m.label }}</span>
-              <span class="model-opt-desc">{{ m.desc }}</span>
-            </div>
-          </button>
-          <div class="model-dropdown-div"></div>
-          <div class="model-reasoning-row">
-            <span class="model-reasoning-label">推理</span>
-            <button
-              v-for="r in reasoningLevels"
-              :key="r.key"
-              :class="['seg-item', { active: reasoning === r.key }]"
-              @click="reasoning = r.key"
-            >
-              {{ r.label }}
-            </button>
-          </div>
-        </div>
+          {{ r.label }}
+        </button>
       </div>
-
-      <button
-        :class="['send-btn', isBusy && !input.trim() ? 'stop' : '', hasAgent ? 'agent-running' : '', input.trim() || attachedFiles.length ? 'active' : '']"
-        :disabled="!isBusy && !input.trim() && !attachedFiles.length"
-        :title="hasAgent ? 'Agent 执行中，输入消息将注入不中断' : isBusy ? '停止' : '发送'"
-        @click="isBusy && !input.trim() ? stopGeneration() : doSend()"
-      >
-        <svg
-          v-if="isBusy && !input.trim()"
-          width="14"
-          height="14"
-          viewBox="0 0 13 13"
-          fill="currentColor"
-        ><rect
-          x="2.5"
-          y="2.5"
-          width="8"
-          height="8"
-          rx="1.5"
-        /></svg>
-        <svg
-          v-else
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.6"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        ><path d="M22 2L11 13" /><path d="M22 2L15 22l-4-9-9-4 20-7z" /></svg>
-      </button>
     </div>
 
-    <!-- Command palette -->
-    <div
-      v-if="showCommands"
-      class="cmd-palette"
-    >
+    <!-- 命令面板 -->
+    <div v-if="showCommands" class="cmd-palette">
       <div
-        v-for="(cmd, i) in filteredCommands"
-        :key="cmd.name"
+        v-for="(cmd, i) in filteredCommands" :key="cmd.name"
         :class="['cmd-item', { active: i === cmdIndex }]"
         @mousedown.prevent
         @click="selectCommand(cmd)"
       >
         <span class="cmd-name">/{{ cmd.name }}</span>
-        <span
-          v-if="cmd.args"
-          class="cmd-args"
-        >{{ cmd.args }}</span>
+        <span v-if="cmd.args" class="cmd-args">{{ cmd.args }}</span>
         <span class="cmd-desc">{{ cmd.desc }}</span>
       </div>
-      <div
-        v-if="!filteredCommands.length"
-        class="cmd-empty"
-      >
-        无匹配指令
-      </div>
+      <div v-if="!filteredCommands.length" class="cmd-empty">无匹配指令</div>
     </div>
 
+    <!-- 拖拽上传遮罩 -->
+    <div v-if="dragOver" class="drop-overlay">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>
+      </svg>
+      <span>释放以上传文件</span>
+    </div>
+
+    <input ref="fileInput" type="file" hidden multiple @change="onFileAttach" />
+
     <CronPanel v-if="store.sessionId" />
+
+    <!-- 文件预览弹窗 -->
+    <Teleport to="body">
+      <div v-if="previewFile" class="preview-overlay" @click.self="previewFile = null" @keydown.escape="previewFile = null">
+        <div class="preview-modal">
+          <div class="preview-head">
+            <span class="preview-title">{{ previewFile.name }}</span>
+            <button class="preview-close" @click="previewFile = null">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 3l10 10M13 3L3 13"/></svg>
+            </button>
+          </div>
+          <div class="preview-body">
+            <!-- Image preview -->
+            <img v-if="isPreviewImage" :src="previewSrc" class="preview-img" :alt="previewFile.name" />
+            <!-- Text / Markdown preview -->
+            <div v-else-if="isPreviewText" class="preview-text-wrap">
+              <div v-if="isPreviewMd" class="preview-md" v-html="previewHtml"></div>
+              <pre v-else class="preview-text">{{ previewText }}</pre>
+            </div>
+            <!-- Unsupported binary format -->
+            <div v-else class="preview-file-info">
+              <div class="preview-file-icon">
+                <svg width="48" height="56" viewBox="0 0 24 28" fill="none">
+                  <path d="M16.5 0l7 7v15.6c0 2.25 0 3.375-.573 4.164a3 3 0 0 1-.663.663C21.475 28 20.349 28 18.1 28H5.9c-2.25 0-3.375 0-4.164-.573a3 3 0 0 1-.663-.663C.5 25.975.5 24.849.5 22.6V5.4c0-2.25 0-3.375.573-4.164a3 3 0 0 1 .663-.663C2.525 0 3.651 0 5.9 0h10.6z" :fill="fileIconGradient(previewFile.name, 0)"/>
+                  <path d="M16.5 0l7 7h-3.8c-1.12 0-1.68 0-2.108-.218a2 2 0 0 1-.874-.874C16.5 5.48 16.5 4.92 16.5 3.8V0z" fill="#fff" fill-opacity=".55"/>
+                </svg>
+              </div>
+              <div class="preview-file-meta">
+                <span class="preview-file-name">{{ previewFile.name }}</span>
+                <span class="preview-file-size">{{ fileExt(previewFile.name).toUpperCase() }} · {{ fmtFileSize(previewFile.size) }}</span>
+                <span class="preview-unsupported">此格式不支持预览</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
 <script setup lang="ts">
 // @ts-nocheck
-import { ref, computed, nextTick, onMounted } from 'vue'
+import { ref, computed, nextTick, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { useChatStore } from '../../stores/chat'
+import { useChatStore, renderMarkdown } from '../../stores/chat'
 import { useSettingsStore } from '../../stores/settings'
 import CronPanel from './CronPanel.vue'
 
@@ -403,18 +214,79 @@ const store = useChatStore()
 // ── 发送按钮状态计算 ──
 const isBusy = computed(() => store.isStreaming || store.hasRunningAgents)
 const hasAgent = computed(() => store.hasRunningAgents && !store.isStreaming)
+const hasInput = computed(() => !!input.value.trim())
 
 const input = ref('')
 const inputEl = ref(null)
 const fileInput = ref(null)
-const inputFocused = ref(false)
-const planMode = ref(false)
 
 // ── File attach ──
 const attachedFiles = ref([])
 
-// ── Hints ──
-const quickHints = computed(() => store.hintTexts?.slice(0, 3) || [])
+// ── Drag & drop ──
+const dragOver = ref(false)
+let dragCounter = 0
+function onDragOver(e: DragEvent) {
+  dragCounter++
+  dragOver.value = true
+}
+function onDragLeave(e: DragEvent) {
+  dragCounter--
+  if (dragCounter <= 0) { dragCounter = 0; dragOver.value = false }
+}
+function onDrop(e: DragEvent) {
+  dragCounter = 0
+  dragOver.value = false
+  const files = e.dataTransfer?.files
+  if (!files?.length) return
+  addFiles(files)
+}
+
+// ── File preview ──
+const previewFile = ref(null)
+const previewSrc = ref('')
+const previewText = ref('')
+const previewHtml = ref('')
+const imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico']
+const textExtensions = ['txt', 'md', 'json', 'xml', 'csv', 'log', 'yaml', 'yml', 'toml', 'ini', 'cfg', 'conf',
+  'js', 'ts', 'jsx', 'tsx', 'py', 'go', 'java', 'rs', 'rb', 'php', 'c', 'cpp', 'h', 'hpp',
+  'css', 'scss', 'less', 'html', 'vue', 'svelte', 'sh', 'bat', 'ps1', 'zsh', 'bash',
+  'env', 'gitignore', 'dockerfile', 'makefile', 'sql', 'graphql', 'proto']
+const isPreviewImage = computed(() => {
+  if (!previewFile.value) return false
+  return imageExtensions.includes(fileExt(previewFile.value.name).toLowerCase())
+})
+const isPreviewText = computed(() => {
+  if (!previewFile.value) return false
+  return textExtensions.includes(fileExt(previewFile.value.name).toLowerCase())
+})
+const isPreviewMd = computed(() => {
+  if (!previewFile.value) return false
+  return fileExt(previewFile.value.name).toLowerCase() === 'md'
+})
+
+// Read file content for preview
+watch(previewFile, (f) => {
+  // Cleanup previous
+  if (previewSrc.value) { URL.revokeObjectURL(previewSrc.value); previewSrc.value = '' }
+  previewText.value = ''
+  previewHtml.value = ''
+  if (!f || !f.file) return
+  if (isPreviewImage.value) {
+    previewSrc.value = URL.createObjectURL(f.file)
+  } else if (isPreviewText.value) {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const text = reader.result as string
+      // Truncate very large files
+      previewText.value = text.length > 50000 ? text.slice(0, 50000) + '\n\n... (文件过大，仅显示前 50000 字符)' : text
+      if (isPreviewMd.value) {
+        previewHtml.value = renderMarkdown(previewText.value)
+      }
+    }
+    reader.readAsText(f.file)
+  }
+})
 
 // ── Model & reasoning ──
 const settingsStore = useSettingsStore()
@@ -479,10 +351,9 @@ const currentModelName = computed(() => {
 
 // ── Commands ──
 const cmdIndex = ref(0)
-const commands = ref([])       // 动态从 API 加载
+const commands = ref([])
 const commandsLoaded = ref(false)
 
-// 页面加载时获取命令列表
 async function loadCommands() {
   try {
     const token = localStorage.getItem('token')
@@ -502,12 +373,10 @@ async function loadCommands() {
 }
 loadCommands()
 
-// 仅输入 / 时即展示面板（不需要额外字符）
 const showCommands = computed(() => input.value.startsWith('/') && !input.value.includes(' '))
 const filteredCommands = computed(() => {
   const q = input.value.slice(1).toLowerCase()
-  if (!q) return commands.value  // 只输入 / 显示全部
-  // 模糊搜索：名称 + 描述
+  if (!q) return commands.value
   return commands.value.filter(c =>
     c.name.toLowerCase().includes(q) ||
     c.desc.toLowerCase().includes(q)
@@ -554,7 +423,9 @@ function onInputResize() {
   const el = inputEl.value
   if (!el) return
   el.style.height = 'auto'
-  el.style.height = Math.min(el.scrollHeight, 140) + 'px'
+  const h = Math.min(Math.max(el.scrollHeight, 40), 320)
+  el.style.height = h + 'px'
+  el.style.overflowY = el.scrollHeight > 320 ? 'auto' : 'hidden'
 }
 
 // ── Key handler ──
@@ -565,8 +436,18 @@ function onKeydown(e) {
     if (e.key === 'Tab' || e.key === 'Enter') { e.preventDefault(); const cmd = filteredCommands.value[cmdIndex.value]; if (cmd) selectCommand(cmd); return }
     if (e.key === 'Escape') { input.value = ''; cmdIndex.value = 0; return }
   }
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); store.isStreaming && !input.value.trim() ? stopGeneration() : doSend() }
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
 }
+
+// ── Unified send/stop handler ──
+function handleSend() {
+  if (isBusy.value && !hasInput.value) {
+    stopGeneration()
+  } else {
+    doSend()
+  }
+}
+
 async function stopGeneration() {
   const sid = store.sessionId
   if (!sid) { store.resetStreaming(); return }
@@ -588,19 +469,17 @@ async function doSend() {
   const files = attachedFiles.value.filter(f => f.file)
   if (!t && !files.length) return
 
-  // / 指令通过 AI 处理（自然持久化到会话历史，AI 可调用工具执行）
   if (t.startsWith('/') && !files.length) {
     store.sendMessage(t, currentModelName.value, {
       reasoning_intensity: reasoning.value,
-      plan_mode: planMode.value
+      plan_mode: false
     })
     input.value = ''
-    inputEl.value && (inputEl.value.style.height = 'auto')
+    inputEl.value && (inputEl.value.style.height = 'auto', inputEl.value.style.overflowY = 'hidden')
     return
   }
 
   let msg = t
-  // Upload files first
   const token = localStorage.getItem('token')
   const uploadedPaths = []
   for (const f of files) {
@@ -622,35 +501,35 @@ async function doSend() {
     } catch (e) { /* skip failed */ }
     f.uploading = false
   }
-  // Build message with file references
   if (uploadedPaths.length) {
     const fileRefs = uploadedPaths.map(p => '[文件: ' + p.split('/').pop() + ' (' + p + ')]').join('\n')
     msg = t ? t + '\n\n' + fileRefs : fileRefs
   }
 
   input.value = ''
-  inputEl.value && (inputEl.value.style.height = 'auto')
+  inputEl.value && (inputEl.value.style.height = 'auto', inputEl.value.style.overflowY = 'hidden')
   attachedFiles.value = []
   store.sendMessage(msg, currentModelName.value, {
     reasoning_intensity: reasoning.value,
-    plan_mode: planMode.value
+    plan_mode: false
   })
 }
 
-function sendHint(t) { input.value = t; nextTick(() => inputEl.value?.focus()); doSend() }
-
 function removeFile(i) { attachedFiles.value.splice(i, 1) }
-function onFileAttach(e) {
-  const files = e.target.files
-  if (!files?.length) return
+function addFiles(files: FileList) {
   for (const f of files) {
     attachedFiles.value.push({ name: f.name, size: f.size, file: f, uploaded: false, progress: 0 })
   }
+}
+function onFileAttach(e) {
+  const files = e.target.files
+  if (!files?.length) return
+  addFiles(files)
   e.target.value = ''
 }
 
 function onDocClick(e) {
-  if (modelMenuOpen.value && !e.target.closest('.model-select')) modelMenuOpen.value = false
+  if (modelMenuOpen.value && !e.target.closest('.input-bar')) modelMenuOpen.value = false
 }
 onMounted(() => {
   nextTick(() => inputEl.value?.focus())
@@ -659,102 +538,160 @@ onMounted(() => {
 </script>
 
 <style scoped>
-/* ── Input bar container ── */
-.input-bar-bottom {
-  flex-shrink: 0; padding: 12px 20px 14px;
-  border-top: 1px solid var(--border-subtle);
-  background: transparent;
-}
-.input-bar-floating {
-  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
-  z-index: 200; max-width: 740px; width: calc(100% - 32px);
-  background: rgba(255,255,255,0.72);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
-  border: 1px solid rgba(0,0,0,0.06);
-  border-radius: 20px;
-  box-shadow:
-    0 0 0 1px rgba(0,0,0,0.03),
-    0 2px 8px rgba(0,0,0,0.04),
-    0 8px 32px rgba(0,0,0,0.06);
-  padding: 12px 14px 10px;
-  display: flex; flex-direction: column; gap: 8px;
+/* ── 单一容器 ── */
+.input-bar {
+  position: relative;
+  border: 1px solid var(--border-default);
+  border-radius: 12px;
+  padding: 10px 14px 8px;
+  display: flex; flex-direction: column; gap: 6px;
   transition: box-shadow 0.2s, border-color 0.2s;
 }
-[data-theme="dark"] .input-bar-floating {
-  background: rgba(15,23,42,0.78);
-  border-color: rgba(255,255,255,0.08);
-  box-shadow:
-    0 0 0 1px rgba(255,255,255,0.03),
-    0 2px 8px rgba(0,0,0,0.15),
-    0 8px 32px rgba(0,0,0,0.25);
+.input-bar.floating {
+  flex-shrink: 0; padding: 10px 14px;
+  border: 1px solid var(--border-subtle, #e2e8f0); border-bottom: none;
+  background: var(--surface-card, #fff); border-radius: 8px 8px 0 0;
+  margin: 0 12px;
+}
+.input-bar.bottom {
+  flex-shrink: 0; padding: 10px 14px;
+  border: 1px solid var(--border-subtle, #e2e8f0); border-bottom: none;
+  background: var(--surface-card, #fff); border-radius: 8px 8px 0 0;
+  margin: 0 12px;
 }
 
-/* ── Main input row ── */
-.input-main {
-  display: flex; align-items: flex-end; gap: 8px;
+/* ── 拖拽上传 ── */
+.input-bar.drag-over {
+  border-color: var(--brand-400);
+  box-shadow: 0 0 0 3px rgba(6,182,212,0.12), 0 4px 20px rgba(6,182,212,0.1);
 }
+.drop-overlay {
+  position: absolute; inset: 0; z-index: 10;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+  background: rgba(6,182,212,0.06);
+  border-radius: inherit;
+  color: var(--brand-500);
+  font-size: 13px; font-weight: 500;
+  pointer-events: none;
+  animation: dropPulse 0.2s ease;
+}
+@keyframes dropPulse { from { opacity: 0; } to { opacity: 1; } }
+
+/* ── Textarea 透明化，自动撑高 ── */
 .input-field {
-  flex: 1; border: 1px solid rgba(0,0,0,0.06); background: rgba(0,0,0,0.02); outline: none;
-  font-size: 14px; color: var(--text-primary); font-family: inherit;
-  line-height: 1.5; resize: none; padding: 8px 12px;
-  min-height: 38px; max-height: 140px; border-radius: 12px;
-  transition: border-color 0.15s, box-shadow 0.15s, height 0.15s ease;
+  width: 100%;
+  border: none;
+  background: transparent;
+  outline: none;
+  font-size: 14px;
+  color: var(--text-primary);
+  font-family: inherit;
+  line-height: 1.6;
+  resize: none;
+  padding: 6px 0;
+  min-height: 40px;
+  max-height: 320px;
+  overflow-y: auto;
+  transition: height 0.1s ease;
+  box-sizing: border-box;
 }
-.input-field.focused {
-  border-color: rgba(6,182,212,0.25);
-  box-shadow: 0 0 0 3px rgba(6,182,212,0.06);
-}
+.input-field:focus { min-height: 40px; }
 .input-field::placeholder { color: var(--text-muted); }
-[data-theme="dark"] .input-field { background: rgba(255,255,255,0.03); border-color: rgba(255,255,255,0.06); }
-[data-theme="dark"] .input-field.focused { border-color: rgba(34,211,238,0.2); }
+.input-field.cmd-mode { color: var(--brand-500); }
 
-/* ── Action buttons row ── */
-.input-actions {
-  display: flex; align-items: center; gap: 4px; flex-shrink: 0;
+/* ── 附件 Chips ── */
+.attach-chips {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  padding: 0 0 4px 0;
 }
-.act-btn {
-  width: 32px; height: 32px; border-radius: 8px; border: none;
+.chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle);
+  background: transparent;
+  max-width: 200px;
+}
+.chip.uploading { opacity: 0.6; }
+.chip-name {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  max-width: 120px; cursor: pointer;
+}
+.chip-name:hover { color: var(--brand-500); }
+.chip-pct { font-size: 10px; color: var(--brand-500); flex-shrink: 0; }
+.chip-close {
+  width: 14px; height: 14px; border: none; background: none;
+  color: var(--text-muted); cursor: pointer; font-size: 12px;
+  padding: 0; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+  border-radius: 3px;
+}
+.chip-close:hover { background: var(--surface-hover); color: var(--color-danger); }
+
+/* ── 底栏控件行 ── */
+.input-toolbar {
+  display: flex; align-items: center; gap: 2px;
+  height: 28px; padding: 0 2px;
+}
+.tb-item {
+  display: flex; align-items: center; gap: 4px;
+  height: 26px; padding: 0 8px;
+  border-radius: 6px; border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px; font-family: inherit;
+  cursor: pointer;
+  transition: all 0.12s;
+}
+.tb-item:hover { background: var(--surface-hover); color: var(--text-primary); }
+.tb-spacer { flex: 1; }
+
+/* 模型圆点 */
+.tb-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+}
+.tb-dot.flash { background: #6D93FF; }
+.tb-dot.pro   { background: #A78BFA; }
+.tb-dot.qwen-plus { background: #34d399; }
+.tb-dot.qwen-max  { background: #f472b6; }
+
+/* 发送按钮 */
+.tb-send {
+  width: 28px; height: 28px; border-radius: 8px; border: none;
   background: transparent; color: var(--text-muted); cursor: pointer;
   display: flex; align-items: center; justify-content: center;
-  transition: all 0.12s;
+  transition: all 0.15s; flex-shrink: 0;
 }
-.act-btn:hover { background: var(--surface-hover); color: var(--text-primary); }
-.act-btn.active { color: var(--brand-500); background: var(--brand-50); }
-
-/* ── Input wrapper (textarea + model dot) ── */
-.input-wrapper { flex: 1; position: relative; display: flex; }
-.input-wrapper .input-field { width: 100%; padding-left: 28px; }
-
-/* ── Model dot inside input ── */
-.model-dot {
-  position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
-  width: 10px; height: 10px; min-width: 10px; min-height: 10px; flex-shrink: 0;
-  border-radius: 50%; border: none; padding: 0;
-  cursor: pointer; z-index: 2; background: #6D93FF;
-  box-shadow: 0 0 0 2px rgba(0,0,0,0.04);
-  transition: transform 0.15s;
+.tb-send.active {
+  background: var(--brand-500); color: #fff;
+  box-shadow: 0 2px 8px rgba(6,182,212,0.25);
 }
-.model-dot:hover { transform: translateY(-50%) scale(1.3); }
-.model-dot.flash { background: #6D93FF; }
-.model-dot.pro { background: #A78BFA; }
-.model-dot.qwen-plus { background: #34d399; }
-.model-dot.qwen-max { background: #f472b6; }
+.tb-send.active:hover {
+  background: var(--brand-600);
+  box-shadow: 0 4px 12px rgba(6,182,212,0.35);
+}
+.tb-send.stop { background: var(--color-danger); color: #fff; }
+.tb-send:disabled { opacity: 0.3; cursor: default; }
 
-/* ── Model dropdown ── */
+/* ── 模型下拉 ── */
 .model-dropdown {
-  position: absolute; bottom: calc(100% + 8px); left: -4px;
-  min-width: 180px; background: var(--surface-raised);
-  border: 1px solid var(--border-default); border-radius: 12px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.12); z-index: 60;
-  padding: 6px; display: flex; flex-direction: column; gap: 2px;
+  position: absolute; bottom: calc(100% + 6px); left: 0;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+  padding: 4px; min-width: 170px; z-index: 60;
 }
 .model-opt {
+  padding: 6px 8px; border-radius: 6px; font-size: 12px;
+  background: transparent;
+  border: none; cursor: pointer;
   display: flex; align-items: center; gap: 8px;
-  padding: 7px 10px; border-radius: 8px; border: none;
-  background: transparent; cursor: pointer; font-family: inherit;
-  font-size: 12px; color: var(--text-primary); text-align: left;
-  transition: all 0.12s;
+  color: var(--text-primary);
+  font-family: inherit;
+  width: 100%; text-align: left;
+  transition: background 0.1s;
 }
 .model-opt:hover { background: var(--surface-hover); }
 .model-opt.active { background: var(--brand-50); color: var(--brand-600); font-weight: 600; }
@@ -770,55 +707,12 @@ onMounted(() => {
 .model-reasoning-row .seg-item {
   padding: 2px 6px; border-radius: 4px; border: none;
   background: transparent; color: var(--text-muted); cursor: pointer;
-  font-size: 10px; font-family: inherit;
+  font-size: 10px; font-family: inherit; transition: all 0.1s;
 }
 .model-reasoning-row .seg-item:hover { color: var(--text-primary); }
 .model-reasoning-row .seg-item.active { background: var(--brand-50); color: var(--brand-600); font-weight: 600; }
 
-/* ── Send button ── */
-.send-btn {
-  width: 36px; height: 36px; border-radius: 10px; border: none;
-  background: var(--brand-500); color: #fff; cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  transition: all 0.15s; flex-shrink: 0; margin-left: 2px;
-  box-shadow: 0 2px 8px rgba(6,182,212,0.25);
-}
-.send-btn:not(.active) { background: var(--surface-hover); color: var(--text-muted); box-shadow: none; }
-.send-btn:hover:not(:disabled) { background: var(--brand-600); color: #fff; box-shadow: 0 4px 12px rgba(6,182,212,0.35); }
-.send-btn:disabled { opacity: 0.3; cursor: default; }
-.send-btn.stop { background: var(--color-danger); color: #fff; }
-
-.model-opt-icon { font-size: 12px; width: 16px; text-align: center; flex-shrink: 0; }
-
-/* Command mode highlight */
-.input-field.cmd-mode {
-  border-color: rgba(6,182,212,0.4);
-  background: rgba(6,182,212,0.04);
-}
-
-/* ── Attach bar ── */
-.attach-bar { display: flex; flex-wrap: wrap; gap: 6px; }
-.file-card {
-  display: flex; align-items: center; gap: 8px;
-  padding: 8px 12px; border-radius: 10px;
-  background: var(--surface-card); border: 1px solid var(--border-default);
-  color: var(--text-primary); max-width: 260px;
-  transition: all 0.15s; cursor: default; position: relative;
-}
-.file-card:hover { border-color: var(--brand-300); box-shadow: 0 2px 8px rgba(6,182,212,0.06); }
-.file-card.uploading { opacity: 0.7; }
-.file-card-icon { width: 28px; height: 32px; flex-shrink: 0; }
-.file-card-info { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
-.file-card-name { font-size: 12px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.file-card-meta { font-size: 10px; color: var(--text-muted); }
-.file-card-progress { font-size: 10px; color: var(--brand-500); font-weight: 600; }
-.file-card-close { width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; border-radius: 4px; cursor: pointer; color: var(--text-muted); flex-shrink: 0; }
-.file-card-close:hover { background: var(--surface-hover); color: var(--color-danger); }
-.hint-chip { padding: 4px 11px; border-radius: 100px; font-size: 11px; font-family: inherit; border: 1px solid var(--border-default); background: transparent; color: var(--text-muted); cursor: pointer; transition: all 0.12s; }
-.hint-chip:hover { border-color: var(--brand-400); color: var(--brand-500); background: var(--brand-50); }
-[data-theme="dark"] .hint-chip:hover { background: rgba(6,182,212,0.08); color: #22d3ee; }
-
-/* ── Command palette ── */
+/* ── 命令面板 ── */
 .cmd-palette {
   position: absolute; bottom: 100%; left: 0; right: 0;
   margin-bottom: 4px; max-height: 200px; overflow-y: auto;
@@ -838,16 +732,79 @@ onMounted(() => {
 
 /* ── Mobile ── */
 @media (max-width: 767px) {
-  .input-bar-floating {
+  .input-bar.floating {
     max-width: calc(100% - 12px); width: calc(100% - 12px);
     border-radius: 14px; padding: 8px 10px 6px; bottom: 16px;
   }
-  .input-bar-bottom { padding: 6px 8px 8px; }
-  .input-field { font-size: 14px; padding: 8px 10px; min-height: 36px; }
-  .seg-item { padding: 3px 5px; font-size: 10px; }
-  .seg-item .seg-dot { display: none; }
-  .reasoning-seg .seg-item { padding: 3px 5px; font-size: 10px; }
-  .act-btn { width: 28px; height: 28px; }
-  .send-btn { width: 32px; height: 32px; }
+  .input-bar.bottom { padding: 10px 16px 12px; margin: 0 16px 0 0; border-radius: 14px 14px 0 0; }
+  .input-field { font-size: 14px; padding: 4px 0; min-height: 36px; }
+  .tb-item.model-btn { max-width: 80px; overflow: hidden; }
+  .tb-item.model-btn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}
+
+/* ── 预览弹窗 (unscoped — teleported to body) ── */
+</style>
+
+<style>
+.preview-overlay {
+  position: fixed; inset: 0; z-index: 10000;
+  background: rgba(0,0,0,0.45);
+  display: flex; align-items: center; justify-content: center;
+  animation: previewFadeIn 0.15s ease;
+  padding: 40px;
+}
+.preview-modal {
+  background: var(--surface-card);
+  border: 1px solid var(--border-default);
+  border-radius: 14px;
+  max-width: 640px; width: 100%;
+  max-height: 80vh;
+  display: flex; flex-direction: column;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.18);
+  overflow: hidden;
+  animation: previewSlideUp 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.preview-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.preview-title {
+  font-size: 13px; font-weight: 600; color: var(--text-primary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  flex: 1; margin-right: 12px;
+}
+.preview-close {
+  width: 30px; height: 30px; border-radius: 8px; border: none;
+  background: transparent; color: var(--text-muted); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; transition: all 0.12s;
+}
+.preview-close:hover { background: var(--surface-hover); color: var(--text-primary); }
+.preview-body {
+  flex: 1; overflow: auto; display: flex; align-items: center; justify-content: center;
+  padding: 24px; min-height: 200px;
+}
+.preview-img {
+  max-width: 100%; max-height: 60vh;
+  border-radius: 8px; object-fit: contain;
+}
+.preview-file-info {
+  display: flex; flex-direction: column; align-items: center; gap: 16px;
+  padding: 32px;
+}
+.preview-file-icon { width: 48px; height: 56px; }
+.preview-file-meta {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+}
+.preview-file-name { font-size: 14px; font-weight: 500; color: var(--text-primary); }
+.preview-file-size { font-size: 12px; color: var(--text-muted); }
+
+@keyframes previewFadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes previewSlideUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+
+@media (max-width: 767px) {
+  .preview-overlay { padding: 16px; }
+  .preview-modal { max-width: 100%; max-height: 90vh; }
 }
 </style>

@@ -4,7 +4,7 @@ package skill
 
 import (
 	"context"
-	"log/slog"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 	"net/http"
 	"time"
 )

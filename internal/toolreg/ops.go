@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,15 +20,16 @@ func RegisterOps(r *register.Registry, cfg *config.Config) {
 
 	r.Register(&base.ToolDef{
 		Name:        "run_command",
-		Description: "在宿主机上直接执行 Shell 命令（非 SSH，本地执行）。支持 systemctl、docker、ps、kill 等所有常用命令。默认超时 30s，最大 120s。输出截断至 8K 字符。危险命令（rm -rf /、curl|bash 等）会被拒绝。",
+		Description: "在宿主机上直接执行 Shell 命令。默认超时 30s，最大 120s。危险命令（rm -rf /、curl|bash 等）会被拒绝。预计耗时超过 5 秒的操作设置 background:true 避免阻塞对话。",
 		Category:    "ops",
 		RiskLevel:   "mutation",
 		Timeout:     30 * time.Second,
 		Parameters: base.ToolParams{
 			Type: "object",
 			Properties: map[string]base.ParamProp{
-				"command": {Type: "string", Description: "要执行的命令，例如 systemctl stop dns-updater-vue"},
-				"timeout": {Type: "integer", Description: "超时秒数，默认 30，最大 120"},
+				"command":    {Type: "string", Description: "要执行的 Shell 命令"},
+				"timeout":    {Type: "integer", Description: "超时秒数，默认 30，最大 120"},
+				"background": {Type: "boolean", Description: "设为 true 时后台执行。预计超过 5 秒的命令（如 find /、大文件复制、批量操作）应设为 true"},
 			},
 			Required: []string{"command"},
 		},
@@ -40,19 +42,26 @@ func RegisterOps(r *register.Registry, cfg *config.Config) {
 			if warnings := bashInjectionPatterns(command); len(warnings) > 0 {
 				return "", fmt.Errorf("命令被拒绝，检测到危险模式: %s", strings.Join(warnings, ", "))
 			}
-			// Respect the context timeout set by middleware — don't create our own
-			cmd := exec.CommandContext(ctx, "sh", "-c", command)
+			// 计算超时（秒）：AI传入 > 工具默认30s，最大120s
+			timeoutSecs := 30
+			if v, ok := args["timeout"]; ok {
+				if n, ok := toIntAny(v); ok && n >= 3 && n <= 120 {
+					timeoutSecs = n
+				}
+			}
+			// 用 timeout 命令包裹保证子进程组被正确杀死
+			// timeout 内部使用进程组，即使信号被 sh 忽略也能强制终止
+			cmd := exec.CommandContext(ctx, "timeout", "--signal=KILL", strconv.Itoa(timeoutSecs), "sh", "-c", command)
 			out, err := cmd.CombinedOutput()
 			if err != nil {
-				// Include stderr in error — use same trimmed string for data AND error to prevent middleware dedup
 				outStr := strings.TrimSpace(string(out))
 				if outStr == "" {
 					outStr = err.Error()
 				}
 				if ctx.Err() != nil {
-					return outStr, fmt.Errorf("命令超时: %s", outStr)
+					return outStr, fmt.Errorf("命令超时(%ds): %s", timeoutSecs, outStr)
 				}
-				return outStr, fmt.Errorf("命令失败: %s", outStr)
+				return outStr, fmt.Errorf("命令失败(%ds): %s", timeoutSecs, outStr)
 			}
 			result := string(out)
 			if result == "" {
@@ -333,4 +342,25 @@ func bashInjectionPatterns(cmd string) []string {
 		// 这些是合法的包管理操作，不阻止，但在提示词中要求 AI 先确认
 	}
 	return warnings
+}
+
+// toIntAny converts various numeric types to int.
+func toIntAny(v any) (int, bool) {
+	switch n := v.(type) {
+	case float64:
+		return int(n), true
+	case float32:
+		return int(n), true
+	case int:
+		return n, true
+	case int64:
+		return int(n), true
+	case int32:
+		return int(n), true
+	case string:
+		if i, err := strconv.Atoi(n); err == nil {
+			return i, true
+		}
+	}
+	return 0, false
 }

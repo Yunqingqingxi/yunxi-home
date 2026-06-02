@@ -19,7 +19,7 @@ func NewChatSessionRepo(db Executor) *ChatSessionRepo {
 
 func (r *ChatSessionRepo) List(ctx context.Context) ([]models.ChatSession, error) {
     rows, err := r.db.QueryContext(ctx,
-        "SELECT id, type, title, COALESCE(messages, '[]') as messages, created_at, updated_at FROM chat_sessions ORDER BY updated_at DESC")
+        "SELECT id, type, title, COALESCE(messages, '[]') as messages, COALESCE(pinned, 0), created_at, updated_at FROM chat_sessions ORDER BY pinned DESC, updated_at DESC")
     if err != nil {
         return nil, fmt.Errorf("list chat_sessions: %w", err)
     }
@@ -28,7 +28,7 @@ func (r *ChatSessionRepo) List(ctx context.Context) ([]models.ChatSession, error
     var result []models.ChatSession
     for rows.Next() {
         var s models.ChatSession
-        if err := rows.Scan(&s.ID, &s.Type, &s.Title, &s.MessagesJSON, &s.CreatedAt, &s.UpdatedAt); err != nil {
+        if err := rows.Scan(&s.ID, &s.Type, &s.Title, &s.MessagesJSON, &s.Pinned, &s.CreatedAt, &s.UpdatedAt); err != nil {
             return nil, fmt.Errorf("scan chat_session: %w", err)
         }
         result = append(result, s)
@@ -38,7 +38,7 @@ func (r *ChatSessionRepo) List(ctx context.Context) ([]models.ChatSession, error
 
 func (r *ChatSessionRepo) ListByType(ctx context.Context, sessionType string) ([]models.ChatSession, error) {
     rows, err := r.db.QueryContext(ctx,
-        "SELECT id, type, title, COALESCE(messages, '[]') as messages, created_at, updated_at FROM chat_sessions WHERE type=? ORDER BY updated_at DESC", sessionType)
+        "SELECT id, type, title, COALESCE(messages, '[]') as messages, COALESCE(pinned, 0), created_at, updated_at FROM chat_sessions WHERE type=? ORDER BY pinned DESC, updated_at DESC", sessionType)
     if err != nil {
         return nil, fmt.Errorf("list chat_sessions by type: %w", err)
     }
@@ -47,7 +47,7 @@ func (r *ChatSessionRepo) ListByType(ctx context.Context, sessionType string) ([
     var result []models.ChatSession
     for rows.Next() {
         var s models.ChatSession
-        if err := rows.Scan(&s.ID, &s.Type, &s.Title, &s.MessagesJSON, &s.CreatedAt, &s.UpdatedAt); err != nil {
+        if err := rows.Scan(&s.ID, &s.Type, &s.Title, &s.MessagesJSON, &s.Pinned, &s.CreatedAt, &s.UpdatedAt); err != nil {
             return nil, fmt.Errorf("scan chat_session: %w", err)
         }
         result = append(result, s)
@@ -65,13 +65,32 @@ func (r *ChatSessionRepo) Upsert(ctx context.Context, s *models.ChatSession) err
         s.Type = "chat"
     }
     _, err := r.db.ExecContext(ctx,
-        `INSERT INTO chat_sessions (id, type, title, messages, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET type=excluded.type, title=excluded.title, messages=excluded.messages, updated_at=excluded.updated_at`,
-        s.ID, s.Type, s.Title, s.MessagesJSON, s.CreatedAt, s.UpdatedAt,
+        `INSERT INTO chat_sessions (id, type, title, messages, pinned, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET type=excluded.type, title=excluded.title, messages=excluded.messages, pinned=excluded.pinned, updated_at=excluded.updated_at`,
+        s.ID, s.Type, s.Title, s.MessagesJSON, s.Pinned, s.CreatedAt, s.UpdatedAt,
     )
     if err != nil {
         return fmt.Errorf("upsert chat_session: %w", err)
+    }
+    return nil
+}
+
+func (r *ChatSessionRepo) UpdateSessionMeta(ctx context.Context, id string, title *string, pinned *bool) error {
+    if title != nil && pinned != nil {
+        _, err := r.db.ExecContext(ctx, "UPDATE chat_sessions SET title=?, pinned=?, updated_at=? WHERE id=?",
+            *title, *pinned, time.Now(), id)
+        return err
+    }
+    if title != nil {
+        _, err := r.db.ExecContext(ctx, "UPDATE chat_sessions SET title=?, updated_at=? WHERE id=?",
+            *title, time.Now(), id)
+        return err
+    }
+    if pinned != nil {
+        _, err := r.db.ExecContext(ctx, "UPDATE chat_sessions SET pinned=?, updated_at=? WHERE id=?",
+            *pinned, time.Now(), id)
+        return err
     }
     return nil
 }
@@ -115,7 +134,7 @@ func NewMySQLChatSessionRepo(db Executor) *MySQLChatSessionRepo {
 
 func (r *MySQLChatSessionRepo) List(ctx context.Context) ([]models.ChatSession, error) {
     rows, err := r.db.QueryContext(ctx,
-        "SELECT id, type, title, COALESCE(messages, '[]') as messages, created_at, updated_at FROM chat_sessions ORDER BY updated_at DESC")
+        "SELECT id, type, title, COALESCE(messages, '[]') as messages, COALESCE(pinned, 0), created_at, updated_at FROM chat_sessions ORDER BY pinned DESC, updated_at DESC")
     if err != nil {
         return nil, fmt.Errorf("list chat_sessions: %w", err)
     }
@@ -124,7 +143,7 @@ func (r *MySQLChatSessionRepo) List(ctx context.Context) ([]models.ChatSession, 
     var result []models.ChatSession
     for rows.Next() {
         var s models.ChatSession
-        if err := rows.Scan(&s.ID, &s.Type, &s.Title, &s.MessagesJSON, &s.CreatedAt, &s.UpdatedAt); err != nil {
+        if err := rows.Scan(&s.ID, &s.Type, &s.Title, &s.MessagesJSON, &s.Pinned, &s.CreatedAt, &s.UpdatedAt); err != nil {
             return nil, fmt.Errorf("scan chat_session: %w", err)
         }
         result = append(result, s)
@@ -134,7 +153,7 @@ func (r *MySQLChatSessionRepo) List(ctx context.Context) ([]models.ChatSession, 
 
 func (r *MySQLChatSessionRepo) ListByType(ctx context.Context, sessionType string) ([]models.ChatSession, error) {
     rows, err := r.db.QueryContext(ctx,
-        "SELECT id, type, title, COALESCE(messages, '[]') as messages, created_at, updated_at FROM chat_sessions WHERE type=? ORDER BY updated_at DESC", sessionType)
+        "SELECT id, type, title, COALESCE(messages, '[]') as messages, COALESCE(pinned, 0), created_at, updated_at FROM chat_sessions WHERE type=? ORDER BY pinned DESC, updated_at DESC", sessionType)
     if err != nil {
         return nil, fmt.Errorf("list chat_sessions by type: %w", err)
     }
@@ -143,7 +162,7 @@ func (r *MySQLChatSessionRepo) ListByType(ctx context.Context, sessionType strin
     var result []models.ChatSession
     for rows.Next() {
         var s models.ChatSession
-        if err := rows.Scan(&s.ID, &s.Type, &s.Title, &s.MessagesJSON, &s.CreatedAt, &s.UpdatedAt); err != nil {
+        if err := rows.Scan(&s.ID, &s.Type, &s.Title, &s.MessagesJSON, &s.Pinned, &s.CreatedAt, &s.UpdatedAt); err != nil {
             return nil, fmt.Errorf("scan chat_session: %w", err)
         }
         result = append(result, s)
@@ -161,13 +180,32 @@ func (r *MySQLChatSessionRepo) Upsert(ctx context.Context, s *models.ChatSession
         s.Type = "chat"
     }
     _, err := r.db.ExecContext(ctx,
-        `INSERT INTO chat_sessions (id, type, title, messages, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE type=VALUES(type), title=VALUES(title), messages=VALUES(messages), updated_at=VALUES(updated_at)`,
-        s.ID, s.Type, s.Title, s.MessagesJSON, s.CreatedAt, s.UpdatedAt,
+        `INSERT INTO chat_sessions (id, type, title, messages, pinned, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE type=VALUES(type), title=VALUES(title), messages=VALUES(messages), pinned=VALUES(pinned), updated_at=VALUES(updated_at)`,
+        s.ID, s.Type, s.Title, s.MessagesJSON, s.Pinned, s.CreatedAt, s.UpdatedAt,
     )
     if err != nil {
         return fmt.Errorf("upsert chat_session: %w", err)
+    }
+    return nil
+}
+
+func (r *MySQLChatSessionRepo) UpdateSessionMeta(ctx context.Context, id string, title *string, pinned *bool) error {
+    if title != nil && pinned != nil {
+        _, err := r.db.ExecContext(ctx, "UPDATE chat_sessions SET title=?, pinned=?, updated_at=? WHERE id=?",
+            *title, *pinned, time.Now(), id)
+        return err
+    }
+    if title != nil {
+        _, err := r.db.ExecContext(ctx, "UPDATE chat_sessions SET title=?, updated_at=? WHERE id=?",
+            *title, time.Now(), id)
+        return err
+    }
+    if pinned != nil {
+        _, err := r.db.ExecContext(ctx, "UPDATE chat_sessions SET pinned=?, updated_at=? WHERE id=?",
+            *pinned, time.Now(), id)
+        return err
     }
     return nil
 }

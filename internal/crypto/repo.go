@@ -3,10 +3,12 @@ package crypto
 import (
         "context"
         "fmt"
-        "log/slog"
 
         "github.com/Yunqingqingxi/yunxi-home/internal/database"
+        "github.com/Yunqingqingxi/yunxi-home/internal/logger"
 )
+
+var log = logger.ForComponent("crypto")
 
 type EncryptedConfigRepo struct {
         inner database.ConfigRepository
@@ -24,7 +26,7 @@ func (r *EncryptedConfigRepo) GetSection(ctx context.Context, section string) (s
         }
         decrypted, err := Decrypt(data, r.key)
         if err != nil {
-                slog.Debug("config section appears unencrypted, treating as plaintext", "section", section)
+                log.Debug("配置段未加密，作为明文处理", logger.KeyEvent, logger.EventConfig, "section", section)
                 return data, nil
         }
         return decrypted, nil

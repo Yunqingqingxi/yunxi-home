@@ -91,6 +91,7 @@ id         VARCHAR(128) PRIMARY KEY,
 type       VARCHAR(16) NOT NULL DEFAULT 'chat',
 title      VARCHAR(255) NOT NULL DEFAULT '',
 messages   MEDIUMTEXT NOT NULL,
+pinned     TINYINT(1) NOT NULL DEFAULT 0,
 created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
@@ -184,6 +185,8 @@ FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 			`ALTER TABLE chat_sessions MODIFY COLUMN messages MEDIUMTEXT NOT NULL`,
 			// 添加 type 列 + 数据迁移
 			`ALTER TABLE chat_sessions ADD COLUMN type VARCHAR(16) NOT NULL DEFAULT 'chat'`,
+		// v4 — sidebar pin support
+		`ALTER TABLE chat_sessions ADD COLUMN pinned TINYINT(1) NOT NULL DEFAULT 0`,
 			`UPDATE chat_sessions SET type='qqbot' WHERE id LIKE 'qqbot_%'`,
 			`UPDATE chat_sessions SET id=CONCAT('chat_', UNIX_TIMESTAMP(created_at)*1000), type='chat' WHERE id='default'`,
 		}

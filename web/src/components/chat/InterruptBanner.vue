@@ -1,16 +1,23 @@
 <template>
   <div v-if="visible" class="interrupt-banner">
-    <div class="banner-icon">⏸</div>
+    <div class="banner-accent"></div>
+    <div class="banner-icon">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+        <rect x="4" y="2" width="3" height="12" rx="1"/>
+        <rect x="9" y="2" width="3" height="12" rx="1"/>
+      </svg>
+    </div>
     <div class="banner-body">
-      <span class="banner-text">对话已中断</span>
-      <span v-if="progress > 0" class="banner-detail">
-        — 进度 {{ progress }}%<span v-if="lastTask">，最后执行：{{ lastTask }}</span>
+      <span class="banner-title">对话已中断</span>
+      <span v-if="progress > 0 || lastTask" class="banner-detail">
+        <template v-if="progress > 0">进度 {{ progress }}%</template>
+        <template v-if="lastTask">{{ progress > 0 ? '，' : '' }}最后执行：{{ lastTask }}</template>
       </span>
     </div>
     <div class="banner-actions">
-      <button class="banner-btn primary" @click="$emit('continue')" title="从断点继续执行">继续</button>
-      <button class="banner-btn" @click="$emit('retry')" title="修改做法重新执行">修改做法</button>
-      <button class="banner-btn" @click="$emit('dismiss')" title="放弃当前任务开始新对话">新任务</button>
+      <button class="bn-btn primary" @click="$emit('continue')">继续</button>
+      <button class="bn-btn" @click="$emit('retry')">修改做法</button>
+      <button class="bn-btn" @click="$emit('dismiss')">新任务</button>
     </div>
   </div>
 </template>
@@ -33,37 +40,50 @@ defineEmits<{
 .interrupt-banner {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 16px;
-  margin: 0 16px 8px;
-  background: linear-gradient(135deg, rgba(251,191,36,0.08), rgba(245,158,11,0.06));
-  border: 1px solid rgba(251,191,36,0.3);
-  border-radius: 12px;
+  gap: 10px;
+  padding: 10px 14px;
+  margin: 0 4px 8px;
+  background: var(--surface-card);
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
   font-size: 13px;
-  animation: bannerIn 0.3s ease;
+  overflow: hidden;
+  position: relative;
+  animation: bannerSlideIn 0.25s var(--ease-out-expo, ease-out);
+  box-shadow: var(--shadow-xs, 0 1px 2px rgba(0,0,0,0.04));
 }
-@keyframes bannerIn {
-  from { opacity: 0; transform: translateY(-6px); }
-  to { opacity: 1; transform: translateY(0); }
+.banner-accent {
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 3px;
+  background: var(--color-warning, #d2991d);
+  border-radius: 3px 0 0 3px;
+}
+@keyframes bannerSlideIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 .banner-icon {
-  font-size: 18px;
+  color: var(--color-warning, #d2991d);
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
 }
 .banner-body {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 1px;
 }
-.banner-text {
+.banner-title {
   font-weight: 600;
-  color: #b45309;
+  color: var(--text-primary);
+  font-size: 13px;
 }
 .banner-detail {
   font-size: 12px;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -73,35 +93,31 @@ defineEmits<{
   gap: 6px;
   flex-shrink: 0;
 }
-.banner-btn {
+.bn-btn {
   padding: 5px 12px;
   border-radius: 6px;
   border: 1px solid var(--border-default);
-  background: var(--surface-card);
-  color: var(--text-primary);
+  background: transparent;
+  color: var(--text-secondary);
   font-size: 12px;
   font-family: inherit;
   cursor: pointer;
-  transition: all 0.12s;
+  transition: all 0.15s;
   white-space: nowrap;
+  line-height: 1.4;
 }
-.banner-btn:hover {
+.bn-btn:hover {
   background: var(--surface-hover);
-  border-color: var(--brand-300);
+  color: var(--text-primary);
+  border-color: var(--border-strong);
 }
-.banner-btn.primary {
+.bn-btn.primary {
   background: var(--brand-500);
   color: #fff;
   border-color: transparent;
+  font-weight: 500;
 }
-.banner-btn.primary:hover {
+.bn-btn.primary:hover {
   background: var(--brand-600);
-}
-[data-theme="dark"] .interrupt-banner {
-  background: linear-gradient(135deg, rgba(251,191,36,0.1), rgba(245,158,11,0.04));
-  border-color: rgba(251,191,36,0.2);
-}
-[data-theme="dark"] .banner-text {
-  color: #fbbf24;
 }
 </style>

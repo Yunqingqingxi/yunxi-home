@@ -10,10 +10,12 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"log/slog"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 
 	"github.com/Yunqingqingxi/yunxi-home/internal/ipdetect/base"
 )
+
+var log = logger.ForComponent("ipdetect")
 
 // Source IP 数据源配置
 type Source struct {
@@ -102,7 +104,7 @@ func New(cfg *Config) *Detector {
 
 // GetCurrentIPv6 并发获取公网 IPv6 地址
 func (d *Detector) GetCurrentIPv6(ctx context.Context) (string, error) {
-	slog.Info("开始检测IPv6", "数据源数", len(d.sources))
+	log.Info("开始检测IPv6", "数据源数", len(d.sources))
 	type result struct {
 		ip     string
 		source string
@@ -149,7 +151,7 @@ func (d *Detector) GetCurrentIPv6(ctx context.Context) (string, error) {
 
 // GetCurrentIPv4 并发获取公网 IPv4 地址
 func (d *Detector) GetCurrentIPv4(ctx context.Context) (string, error) {
-	slog.Info("开始检测IPv4", "数据源数", len(d.sources))
+	log.Info("开始检测IPv4", "数据源数", len(d.sources))
 	resultCh := make(chan string, len(d.sources))
 	var wg sync.WaitGroup
 

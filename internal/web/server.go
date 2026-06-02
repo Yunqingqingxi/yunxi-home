@@ -10,7 +10,7 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
-	"log/slog"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 	"net/http"
 	"time"
 
@@ -20,6 +20,7 @@ import (
 
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai"
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/mcp"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai/observability"
 	"github.com/Yunqingqingxi/yunxi-home/internal/dns"
 	"github.com/Yunqingqingxi/yunxi-home/internal/config"
 	"github.com/Yunqingqingxi/yunxi-home/internal/database"
@@ -106,7 +107,7 @@ func New(cfg *config.Config, configRepo database.ConfigRepository, domainRepo da
 				return err
 			}
 			latency := time.Since(start)
-			slog.Info("request",
+			log.Info("request",
 				"method", c.Request().Method,
 				"uri", c.Request().RequestURI,
 				"status", c.Response().Status,
@@ -237,10 +238,11 @@ func New(cfg *config.Config, configRepo database.ConfigRepository, domainRepo da
 		aiSvc.SetMCPSubsystem(mcpSub)
 		statusH.SetMCPService(mcpSub)
 		statusH.SetMetricsCollector(aiSvc.GetMetrics())
+		statusH.SetAgentMetrics(observability.GlobalMetrics())
 		// 异步加载 MCP 配置，避免阻塞 server 启动
 		go func() {
 			if err := mcpSub.Load(); err != nil {
-				slog.Warn("MCP subsystem load failed", "error", err)
+				log.Warn("MCP subsystem load failed", "error", err)
 			}
 		}()
 	}
@@ -255,6 +257,7 @@ func New(cfg *config.Config, configRepo database.ConfigRepository, domainRepo da
 	api.GET("/chat/sessions", chatH.ListSessions)
 	api.GET("/chat/stream/:id", chatH.StreamSession)
 	api.GET("/chat/sessions/:id", chatH.GetSessionDetail)
+	api.PATCH("/chat/sessions/:id", chatH.UpdateSessionMeta)
 	api.DELETE("/chat/sessions/:id", chatH.DeleteSession)
 	api.GET("/chat/tools", chatH.Tools)
 	api.GET("/chat/hints", chatH.Hints)

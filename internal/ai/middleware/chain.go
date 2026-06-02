@@ -4,7 +4,7 @@ package middleware
 import (
 	"context"
 	"fmt"
-	"log/slog"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 	"strings"
 	"time"
 
@@ -34,7 +34,7 @@ func (c *Chain) Execute(ctx context.Context, toolName string, args map[string]an
 	// 0. Deny check — 硬边界：不可绕过的安全规则（Deny > Allow > Ask）
 	if denied := c.deny.Check(toolName, args); denied != nil {
 		denied.Metadata.DurationMs = time.Since(start).Milliseconds()
-		slog.Warn("tool denied by security rule", "tool", toolName, "reason", denied.Error.Message)
+		log.Warn("tool denied by security rule", "tool", toolName, "reason", denied.Error.Message)
 		return denied
 	}
 
@@ -61,7 +61,7 @@ func (c *Chain) Execute(ctx context.Context, toolName string, args map[string]an
 	}
 
 	// 2. 执行（优先用 V2 处理器）
-	slog.Info("tool execute start", "tool", toolName, "has_v2", tool.HandlerV2 != nil)
+	log.Info("tool execute start", "tool", toolName, "has_v2", tool.HandlerV2 != nil)
 	var result *base.ToolResult
 	if tool.HandlerV2 != nil {
 		result = tool.HandlerV2(ctx, args)
@@ -110,7 +110,7 @@ func (c *Chain) Execute(ctx context.Context, toolName string, args map[string]an
 		}
 		for retry := 0; retry < policy.MaxRetries; retry++ {
 			if result.Error.RetryHint != "" {
-				slog.Info("retrying tool with hint", "tool", toolName, "hint", result.Error.RetryHint)
+				log.Info("retrying tool with hint", "tool", toolName, "hint", result.Error.RetryHint)
 			}
 			select {
 			case <-ctx.Done():
@@ -130,7 +130,7 @@ func (c *Chain) Execute(ctx context.Context, toolName string, args map[string]an
 		}
 	}
 
-	slog.Info("tool executed via middleware",
+	log.Info("tool executed via middleware",
 		"tool", toolName,
 		"status", string(result.Status),
 		"duration_ms", result.Metadata.DurationMs,

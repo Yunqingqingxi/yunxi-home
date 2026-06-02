@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
-	"log/slog"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 	"strings"
 	"time"
 )
+
+var log = logger.ForComponent("docker")
 
 // ContainerInfo 容器信息
 type ContainerInfo struct {
@@ -63,7 +65,7 @@ func (m *Manager) IsAvailable() bool {
 
 // ListContainers 列出所有容器
 func (m *Manager) ListContainers(ctx context.Context, all bool) ([]ContainerInfo, error) {
-	slog.Info("查询Docker容器", "显示全部", all)
+	log.Info("查询Docker容器", "显示全部", all)
 	if !m.IsAvailable() {
 		return nil, fmt.Errorf("Docker 不可用")
 	}

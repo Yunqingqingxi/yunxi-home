@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"net/smtp"
 	"strings"
-	"log/slog"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 
 	"github.com/Yunqingqingxi/yunxi-home/internal/notifier/base"
 )
+
+var log = logger.ForComponent("notifier")
 
 // Config 邮件配置
 type Config struct {
@@ -46,7 +48,7 @@ func (n *Notifier) IsEnabled() bool {
 
 // Send 发送邮件通知
 func (n *Notifier) Send(ctx context.Context, event base.ChangeEvent) error {
-	slog.Info("邮件发送中", "收件人", n.config.To, "域名", event.FullDomain)
+	log.Info("邮件发送中", "收件人", n.config.To, "域名", event.FullDomain)
 	if !n.config.Enabled {
 		return nil
 	}

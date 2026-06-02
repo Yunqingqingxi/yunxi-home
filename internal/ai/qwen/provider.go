@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 	"net/http"
 	"strings"
 	"time"
@@ -304,7 +304,7 @@ func (p *Provider) readStream(ctx context.Context, resp *http.Response, ch chan<
 		emit(base.ChatStreamEvent{Type: "error", Content: "Qwen 模型未返回有效响应"})
 		return
 	}
-	slog.Info("Qwen 流式响应完成", "模型", p.model, "内容长度", contentBuf.Len(), "工具调用数", len(toolCallMap))
+	log.Info("Qwen 流式响应完成", "模型", p.model, "内容长度", contentBuf.Len(), "工具调用数", len(toolCallMap))
 
 	for _, tc := range toolCallMap {
 		args := tc.args.String()

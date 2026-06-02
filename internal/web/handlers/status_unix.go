@@ -9,7 +9,7 @@ import (
 	"strings"
 	"syscall"
 
-	"log/slog"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 )
 
 // ── /proc readers (Linux) ──────────────────────────────────────
@@ -17,7 +17,7 @@ import (
 func readProcNetDev() map[string]devBytesPair {
 	f, err := os.Open("/proc/net/dev")
 	if err != nil {
-		slog.Warn("无法读取/proc/net/dev", "error", err)
+		log.Warn("无法读取/proc/net/dev", "error", err)
 		return nil
 	}
 	defer f.Close()

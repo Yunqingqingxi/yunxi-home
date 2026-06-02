@@ -3,11 +3,12 @@ package agent
 import (
 	"context"
 	"fmt"
-	"log/slog"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 	"sync"
 	"time"
 
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/base"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai/observability"
 )
 
 // Manager 管理子 Agent 的创建、执行和清理
@@ -52,20 +53,77 @@ func (m *Manager) Spawn(goal string, toolFilter []string, parentID string) *SubA
 	m.mu.Lock()
 	m.nextID++
 	id := fmt.Sprintf("agent_%d", m.nextID)
+	sm := NewSubAgentStateMachine()
 	agent := &SubAgent{
 		ID:         id,
 		Goal:       goal,
 		ToolFilter: toolFilter,
+		ParentID:   parentID,
 		Status:     StatusPending,
 		StartedAt:  time.Now(),
 		progressFn: m.config.ProgressFn, // capture at spawn time
+		State:      sm,
 	}
 	m.agents[id] = agent
 	m.mu.Unlock()
 
+	// 记录指标
+	observability.GlobalMetrics().RecordSubAgentSpawn()
+
 	// 异步启动
 	go m.runAgent(agent, parentID)
 	return agent
+}
+
+// CancelAgent 级联取消子 Agent 及其后代
+func (m *Manager) CancelAgent(id string) {
+	m.mu.RLock()
+	agent := m.agents[id]
+	m.mu.RUnlock()
+	if agent == nil {
+		return
+	}
+	if agent.State != nil {
+		agent.State.Transition(EvCancel, "manager cancel")
+	}
+	m.updateStatus(agent, StatusError, "已取消")
+}
+
+// CancelAll 取消所有活跃子 Agent（用于主 Agent 取消时级联）
+func (m *Manager) CancelAll(reason string) {
+	m.mu.RLock()
+	agents := make([]*SubAgent, 0, len(m.agents))
+	for _, a := range m.agents {
+		agents = append(agents, a)
+	}
+	m.mu.RUnlock()
+	for _, a := range agents {
+		if a.State != nil && !a.State.CurrentState().IsTerminal() {
+			a.State.Transition(EvCancel, reason)
+		}
+		if a.Status == StatusPending || a.Status == StatusRunning {
+			m.updateStatus(a, StatusError, "已取消: "+reason)
+		}
+	}
+}
+
+// WaitAll 等待所有子 Agent 完成（用于优雅关闭）
+func (m *Manager) WaitAll() {
+	for {
+		m.mu.RLock()
+		allDone := true
+		for _, a := range m.agents {
+			if a.Status == StatusPending || a.Status == StatusRunning {
+				allDone = false
+				break
+			}
+		}
+		m.mu.RUnlock()
+		if allDone {
+			return
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
 }
 
 // SpawnParallel 批量并行派生多个子 Agent，等待全部完成。
@@ -82,7 +140,6 @@ func (m *Manager) SpawnParallel(tasks []SpawnTask, parentID string) []*Result {
 		go func(idx int, t SpawnTask) {
 			defer wg.Done()
 			agent := m.Spawn(t.Goal, t.ToolFilter, parentID)
-			// 等待这个 agent 完成
 			m.waitFor(agent)
 			results[idx] = &Result{
 				AgentID: agent.ID,
@@ -107,7 +164,7 @@ func (m *Manager) SpawnAsync(tasks []SpawnTask, sessionID string) []string {
 
 	ids := make([]string, len(tasks))
 	for i, task := range tasks {
-		agent := m.Spawn(task.Goal, task.ToolFilter, "")
+		agent := m.Spawn(task.Goal, task.ToolFilter, sessionID)
 		ids[i] = agent.ID
 	}
 
@@ -203,20 +260,25 @@ func (m *Manager) waitFor(agent *SubAgent) {
 		case <-ticker.C:
 			// continue polling
 		case <-deadline:
-			slog.Warn("waitFor timed out waiting for agent", "agent", agent.ID, "status", agent.Status)
+			log.Warn("waitFor timed out waiting for agent", "agent", agent.ID, "status", agent.Status)
 			return
 		}
 	}
 }
 
-// runAgent 执行子 Agent 的独立 ReAct 循环
+// runAgent 执行子 Agent 的独立 ReAct 循环（v2.0 集成状态机）
 func (m *Manager) runAgent(agent *SubAgent, parentID string) {
 	// 获取信号量（并发控制）
 	m.sem <- struct{}{}
 	defer func() { <-m.sem }()
 
+	// 状态机：INIT → REASONING
+	if agent.State != nil {
+		agent.State.Transition(EvTaskAssigned, "spawned by manager")
+	}
+
 	m.updateStatus(agent, StatusRunning, "")
-	slog.Info("agent started", "id", agent.ID, "goal", agent.Goal, "tools", len(agent.ToolFilter))
+	log.Info("子Agent启动", "id", agent.ID, "goal", agent.Goal, "tools", len(agent.ToolFilter), "parent", parentID)
 
 	// 构建独立上下文（带超时）
 	agentTimeout := m.config.AgentTimeout
@@ -228,40 +290,53 @@ func (m *Manager) runAgent(agent *SubAgent, parentID string) {
 	messages := []base.Message{
 		{Role: "system", Content: fmt.Sprintf(
 			"你是一个子任务执行 Agent。你的唯一目标是完成以下任务:\n%s\n\n"+
-			"规则:\n- 只使用已分配的工具\n- 保持简洁高效\n- 完成后用一句话总结结果\n"+
-			"- 最多执行 %d 轮", agent.Goal, m.config.MaxRounds,
+				"规则:\n- 只使用已分配的工具\n- 保持简洁高效\n- 完成后用一句话总结结果\n"+
+				"- 最多执行 %d 轮", agent.Goal, m.config.MaxRounds,
 		)},
 	}
 
 	// 过滤工具
 	tools := m.filterTools(agent.ToolFilter)
 
-	success := false
 	var lastToolSig string
 	loopCount := 0
 	for round := 1; round <= m.config.MaxRounds; round++ {
 		agent.Round = round
 		m.updateProgress(agent, fmt.Sprintf("第 %d/%d 轮", round, m.config.MaxRounds))
 
+		// 状态机：进入推理阶段
+		if agent.State != nil {
+			agent.State.TransitionIfValid(EvPlanReady, fmt.Sprintf("round %d reasoning", round))
+		}
+
 		stream, err := m.config.Provider.ChatStream(ctx, messages, tools)
 		if err != nil {
+			if agent.State != nil {
+				agent.State.Transition(EvError, "LLM call failed: "+err.Error())
+			}
 			m.updateStatus(agent, StatusError, "LLM 调用失败: "+err.Error())
 			return
 		}
 
-		var contentBuf string
+		var contentBuf, reasoningBuf string
 		var toolCalls []base.ToolCall
 
 		for ev := range stream {
 			switch ev.Type {
+			case "thinking":
+				reasoningBuf += ev.Content
 			case "content":
 				contentBuf += ev.Content
 			case "tool_call":
 				toolCalls = append(toolCalls, base.ToolCall{
-					ID: fmt.Sprintf("ca_%d", len(toolCalls)),
+					ID:       fmt.Sprintf("ca_%d", len(toolCalls)),
+					Type:     "function",
 					Function: base.FunctionCall{Name: ev.Tool, Arguments: ev.Args},
 				})
 			case "error":
+				if agent.State != nil {
+					agent.State.Transition(EvError, "LLM error: "+ev.Content)
+				}
 				m.updateStatus(agent, StatusError, "LLM 错误: "+ev.Content)
 				return
 			}
@@ -269,68 +344,78 @@ func (m *Manager) runAgent(agent *SubAgent, parentID string) {
 
 		// 无工具调用 → Agent 完成
 		if len(toolCalls) == 0 {
+			if agent.State != nil {
+				agent.State.Transition(EvTaskComplete, "no more tool calls needed")
+			}
 			m.updateStatus(agent, StatusDone, contentBuf)
-			success = true
-			_ = success
 			return
+		}
+
+		// 状态机：进入执行阶段
+		if agent.State != nil {
+			agent.State.TransitionIfValid(EvPlanReady, fmt.Sprintf("round %d executing %d tools", round, len(toolCalls)))
 		}
 
 		// 有工具调用 → 执行然后继续下一轮
 		messages = append(messages, base.Message{
 			Role: "assistant", Content: contentBuf,
+			ReasoningContent: reasoningBuf,
 			ToolCalls: toolCalls, HasToolCalls: true,
 		})
 
 		for _, tc := range toolCalls {
-		toolName := tc.Function.Name
-		args := ParseArgsString(tc.Function.Arguments)
+			toolName := tc.Function.Name
+			args := ParseArgsString(tc.Function.Arguments)
 
-		m.updateProgress(agent, fmt.Sprintf("执行: %s", toolName))
+			m.updateProgress(agent, fmt.Sprintf("执行: %s", toolName))
 
-		// Check context timeout before executing
-		if ctx.Err() != nil {
-		 toolResult := fmt.Sprintf("[%s 执行超时] 错误码: TIMEOUT 详情: Agent 上下文已过期", toolName)
-		 messages = append(messages, base.Message{
-		 Role: "tool", Content: toolResult, ToolCallID: tc.ID,
-		})
-		 m.updateStatus(agent, StatusError, "Agent 超时")
-		return
-		}
-
-		tool, ok := m.config.Registry.Get(toolName)
-		var toolResult string
-		if !ok {
-		toolResult = fmt.Sprintf("[%s 执行失败] 错误码: UNKNOWN_ERROR 详情: 未知工具 %s", toolName, toolName)
-		slog.Warn("子Agent未知工具", "agent", agent.ID, "工具", toolName)
-		} else if tool.HandlerV2 != nil {
-		res := tool.HandlerV2(ctx, args)
-		if res.Status == base.StatusError && res.Error != nil {
-		toolResult = fmt.Sprintf("[%s 执行失败] 错误码: %s 详情: %s", toolName, res.Error.Code, res.Error.Message)
-		 if res.Error.Retryable {
-		   toolResult += fmt.Sprintf(" (可重试: %s)", res.Error.RetryHint)
-						}
-		  if res.Error.Fallback != "" {
-		  toolResult += fmt.Sprintf(" 建议降级: %s", res.Error.Fallback)
-		  }
-						slog.Warn("子Agent工具失败", "agent", agent.ID, "工具", toolName, "错误", res.Error.Message)
-		 } else {
-		  toolResult = res.Summary
-		  if toolResult == "" {
-		   toolResult = fmt.Sprintf("[%s 执行成功]", toolName)
-						}
-					}
-				} else {
-					data, err := tool.Handler(ctx, args)
-					if err != nil {
-						toolResult = fmt.Sprintf("[%s 执行失败] 错误码: EXEC_FAILED 详情: %v", toolName, err)
-					} else {
-						toolResult = data
-					}
+			// Check context timeout before executing
+			if ctx.Err() != nil {
+				if agent.State != nil {
+					agent.State.Transition(EvTimeout, "context expired")
 				}
-
+				toolResult := fmt.Sprintf("[%s 执行超时] 错误码: TIMEOUT 详情: Agent 上下文已过期", toolName)
 				messages = append(messages, base.Message{
 					Role: "tool", Content: toolResult, ToolCallID: tc.ID,
 				})
+				m.updateStatus(agent, StatusError, "Agent 超时")
+				return
+			}
+
+			tool, ok := m.config.Registry.Get(toolName)
+			var toolResult string
+			if !ok {
+				toolResult = fmt.Sprintf("[%s 执行失败] 错误码: UNKNOWN_ERROR 详情: 未知工具 %s", toolName, toolName)
+				log.Warn("子Agent未知工具", "agent", agent.ID, "工具", toolName)
+			} else if tool.HandlerV2 != nil {
+				res := tool.HandlerV2(ctx, args)
+				if res.Status == base.StatusError && res.Error != nil {
+					toolResult = fmt.Sprintf("[%s 执行失败] 错误码: %s 详情: %s", toolName, res.Error.Code, res.Error.Message)
+					if res.Error.Retryable {
+						toolResult += fmt.Sprintf(" (可重试: %s)", res.Error.RetryHint)
+					}
+					if res.Error.Fallback != "" {
+						toolResult += fmt.Sprintf(" 建议降级: %s", res.Error.Fallback)
+					}
+					log.Warn("子Agent工具失败", "agent", agent.ID, "工具", toolName, "错误", res.Error.Message)
+				} else {
+					toolResult = res.Summary
+					if toolResult == "" {
+						toolResult = fmt.Sprintf("[%s 执行成功]", toolName)
+					}
+				}
+			} else {
+				data, err := tool.Handler(ctx, args)
+				if err != nil {
+					toolResult = fmt.Sprintf("[%s 执行失败] 错误码: EXEC_FAILED 详情: %v", toolName, err)
+				} else {
+					toolResult = data
+				}
+			}
+
+			messages = append(messages, base.Message{
+				Role: "tool", Content: toolResult, ToolCallID: tc.ID,
+			})
 		}
 
 		// Loop detection: same tool signature 3 consecutive rounds
@@ -341,8 +426,11 @@ func (m *Manager) runAgent(agent *SubAgent, parentID string) {
 		if sig == lastToolSig {
 			loopCount++
 			if loopCount >= 3 {
+				if agent.State != nil {
+					agent.State.Transition(EvError, "loop detected: "+sig)
+				}
 				m.updateStatus(agent, StatusError, "检测到工具调用循环: "+sig)
-				slog.Warn("sub-agent loop detected", "agent", agent.ID, "sig", sig)
+				log.Warn("sub-agent loop detected", "agent", agent.ID, "sig", sig)
 				return
 			}
 		} else {
@@ -351,6 +439,9 @@ func (m *Manager) runAgent(agent *SubAgent, parentID string) {
 		}
 	}
 
+	if agent.State != nil {
+		agent.State.Transition(EvError, fmt.Sprintf("exceeded max rounds %d", m.config.MaxRounds))
+	}
 	m.updateStatus(agent, StatusError, fmt.Sprintf("超过最大轮次 %d", m.config.MaxRounds))
 }
 
@@ -384,15 +475,20 @@ func (m *Manager) updateStatus(agent *SubAgent, status Status, summary string) {
 	}
 	if status == StatusDone || status == StatusError {
 		agent.FinishedAt = time.Now()
+		observability.GlobalMetrics().RecordSubAgentResult(status == StatusDone)
 	}
 	m.mu.Unlock()
 
-	eventType := "agent_result"
+	// Only send agent_result for terminal states; use agent_progress for intermediate
+	eventType := "agent_progress"
+	if status == StatusDone || status == StatusError {
+		eventType = "agent_result"
+	}
 	if agent != nil && agent.progressFn != nil {
 		agent.progressFn(agent, eventType)
 	}
 
-	slog.Info("agent finished", "id", agent.ID, "status", status, "rounds", agent.Round)
+	log.Info("子Agent完成", "id", agent.ID, "status", status, "rounds", agent.Round, "summary", summary)
 }
 
 func (m *Manager) updateProgress(agent *SubAgent, progress string) {
@@ -404,4 +500,3 @@ func (m *Manager) updateProgress(agent *SubAgent, progress string) {
 		agent.progressFn(agent, "agent_progress")
 	}
 }
-

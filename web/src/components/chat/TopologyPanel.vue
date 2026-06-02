@@ -1,92 +1,63 @@
 <template>
-  <div class="topology-panel" :class="{ collapsed: !expanded }">
-    <div class="panel-header" @click="expanded = !expanded">
-      <span class="panel-title">
-        📐 拓扑约束
-        <span v-if="topology?.active" class="badge active">活跃</span>
-        <span v-else class="badge inactive">未激活</span>
+  <div class="topo-panel" :class="{ collapsed: !expanded }">
+    <div class="tp-head" @click="expanded = !expanded">
+      <span class="tp-title">
+        任务进度
+        <span v-if="topology?.active" class="badge on">进行中</span>
+        <span v-else class="badge off">未启用</span>
       </span>
-      <span class="collapse-icon">{{ expanded ? '▼' : '▶' }}</span>
+      <svg :class="{ rotated: expanded }" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4,6 8,10 12,6"/></svg>
     </div>
-
-    <div v-if="expanded" class="panel-body">
-      <!-- Warning banner -->
-      <div v-if="topology?.warning" class="warning-banner" :class="warningLevel">
-        ⚠️ {{ topology?.warning }}
-        <button v-if="topology && topology.reject_count >= 5" class="rescue-btn" @click="overrideNode">
-          放行一次
-        </button>
+    <div v-if="expanded && topology" class="tp-body">
+      <!-- Warning banner — top priority, always visible first -->
+      <div v-if="topology.warning || topology.reject_count >= 2" class="tp-warn" :class="topology.trust_locked ? 'd' : 'w'">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 22h20L12 2z"/><line x1="12" y1="10" x2="12" y2="16"/><circle cx="12" cy="19" r="1" fill="currentColor"/></svg>
+        <span>{{ topology.warning || `最近 ${topology.reject_count} 次操作失败` }}</span>
+        <button v-if="topology.reject_count >= 2" class="tp-btn" @click="overrideNode">放行一次</button>
       </div>
 
-      <!-- Trust status -->
-      <div v-if="topology" class="trust-status">
-        <span :class="trustClass">
-          {{ topology.trust_locked ? '🔒 信任已锁定' : `🔓 信任度: ${3 - topology.trust_lies}/3` }}
+      <!-- Progress + Trust -->
+      <div class="tp-progress">
+        <span class="tp-label">完成度</span>
+        <span class="tp-val" :class="progressColor">{{ progressPct }}%</span>
+        <span class="bar"><i :style="{ width: progressPct + '%', backgroundColor: progressBarColor }" /></span>
+      </div>
+      <div class="tp-meta">
+        <span>偏离 <b :class="deviationLevel">{{ deviationLabel }}</b></span>
+        <span>信任 <b :class="trustColor">{{ trustLabel }}</b></span>
+        <span v-if="successCount !== null" class="tp-stats">
+          <span class="ok">✓ {{ successCount }}</span>
+          <span v-if="failCount" class="ng"> ✗ {{ failCount }}</span>
         </span>
-        <span v-if="topology.closed_loop" class="closed-badge" :class="{ closed: topology.closed_loop }">
-          {{ topology.closed_loop ? '✅ 闭环' : '❌ 未闭合' }}
-        </span>
       </div>
 
-      <!-- Charts row -->
-      <div v-if="topology?.active" class="charts-row">
-        <div class="chart-container">
-          <canvas ref="xyCanvas"></canvas>
-          <div class="chart-label">X-Y 振幅 (A={{ topology?.constraint?.a || 0.8 }})</div>
-        </div>
-        <div class="chart-container">
-          <canvas ref="xzCanvas"></canvas>
-          <div class="chart-label">X-Z 偏离 (R={{ topology?.constraint?.r || 3.0 }})</div>
+      <!-- Lock competition -->
+      <div v-if="lockLeases.length" class="tp-locks">
+        <div class="tp-section-title">正在使用的资源</div>
+        <div v-for="lk in lockLeases" :key="lk.resource" class="lock-row">
+          <span class="lock-res">{{ lk.resource }}</span>
+          <span class="lock-type">{{ lk.type }}</span>
+          <span class="lock-ttl">剩 {{ lk.ttl }}s</span>
         </div>
       </div>
 
-      <!-- Current coordinates -->
-      <div v-if="topology?.active" class="coord-display">
-        <span>X: {{ topology?.current_coord?.x?.toFixed(1) || '0.0' }}</span>
-        <span>Y: {{ topology?.current_coord?.y?.toFixed(2) || '0.00' }}</span>
-        <span>Z: {{ topology?.current_coord?.z?.toFixed(2) || '0.00' }}</span>
-      </div>
-
-      <!-- Constraint sliders -->
-      <div v-if="topology?.active" class="constraint-sliders">
-        <label>
-          振幅上限 A: {{ constraintA.toFixed(1) }}
-          <input type="range" min="0.1" max="1.0" step="0.1" v-model.number="constraintA" @change="updateConstraint" />
-        </label>
-        <label>
-          半径上限 R: {{ constraintR.toFixed(1) }}
-          <input type="range" min="0.5" max="5.0" step="0.1" v-model.number="constraintR" @change="updateConstraint" />
-        </label>
-        <label class="checkbox-label">
-          <input type="checkbox" v-model="constraintT" @change="updateConstraint" />
-          闭环要求 (T)
-        </label>
-      </div>
-
-      <!-- Closed loop indicator -->
-      <div v-if="topology?.closed_loop !== undefined" class="loop-indicator" :class="{ closed: topology.closed_loop, open: !topology.closed_loop }">
-        <svg width="80" height="40" viewBox="0 0 80 40">
-          <path d="M10,35 Q40,-5 70,35" :stroke="topology.closed_loop ? '#22c55e' : '#ef4444'" stroke-width="2" fill="none" />
-          <circle cx="10" cy="35" r="4" fill="#6366f1" />
-          <circle cx="70" cy="35" r="4" :fill="topology.closed_loop ? '#22c55e' : '#ef4444'" />
-          <text x="35" y="15" text-anchor="middle" :fill="topology.closed_loop ? '#22c55e' : '#ef4444'" font-size="10">
-            {{ topology.closed_loop ? '✓ 闭合' : `✗ ${topology.closed_distance?.toFixed(1) || '?'}` }}
-          </text>
-        </svg>
-      </div>
-
-      <!-- Trajectory table -->
-      <div v-if="topology?.trajectory?.length" class="trajectory-table">
-        <div class="table-header">
-          <span>轮</span><span>X</span><span>Y</span><span>Z</span><span>工具</span><span>状态</span>
+      <!-- Recent steps table — no "谁" column, full-width tool name, background tints -->
+      <div v-if="topology.trajectory?.length" class="tp-table">
+        <div class="tp-section-title">最近操作</div>
+        <div v-for="n in displayNodes.slice(-10).reverse()" :key="n.round" class="tbl-row" :class="n.status">
+          <span class="col-step">{{ n.round }}</span>
+          <code class="col-tool">{{ n.tool_call || '思考' }}</code>
+          <span class="col-result">{{ resultBadge(n.status) }}</span>
         </div>
-        <div v-for="node in topology.trajectory.slice(-20)" :key="node.round" class="table-row" :class="node.status">
-          <span>{{ node.round }}</span>
-          <span>{{ node.x.toFixed(1) }}</span>
-          <span>{{ node.y.toFixed(2) }}</span>
-          <span>{{ node.z.toFixed(2) }}</span>
-          <span class="tool-name">{{ node.tool_call || '-' }}</span>
-          <span>{{ statusIcon(node.status) }}</span>
+      </div>
+
+      <!-- Expert mode (collapsed) -->
+      <div class="tp-expert">
+        <div class="tp-section-title" @click="showExpert = !showExpert">专家模式 {{ showExpert ? '▼' : '▶' }}</div>
+        <div v-if="showExpert" class="tp-constraints">
+          <label>振幅 A: {{ constraintA.toFixed(1) }}<input type="range" min="0.1" max="1.0" step="0.1" v-model.number="constraintA" @change="updateConstraint" /></label>
+          <label>半径 R: {{ constraintR.toFixed(1) }}<input type="range" min="0.5" max="5.0" step="0.1" v-model.number="constraintR" @change="updateConstraint" /></label>
+          <label class="chk"><input type="checkbox" v-model="constraintT" @change="updateConstraint" />要求闭环</label>
         </div>
       </div>
     </div>
@@ -94,394 +65,116 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useChatStore } from '../../stores/chat'
 import type { TopologyState } from '../../types/topology'
 
 const chatStore = useChatStore()
 const expanded = ref(false)
-const xyCanvas = ref<HTMLCanvasElement | null>(null)
-const xzCanvas = ref<HTMLCanvasElement | null>(null)
-
+const showExpert = ref(false)
 const constraintA = ref(0.8)
 const constraintR = ref(3.0)
 const constraintT = ref(false)
 
-let xyChart: any = null
-let xzChart: any = null
-
-// 本地 topology 状态：优先用 store，fallback 到直接 HTTP fetch
 const localTopology = ref<TopologyState | null>(null)
-const topology = computed<TopologyState | null>(() => (chatStore.topology as any) || localTopology.value)
+const topology = computed(() => (chatStore.topology as any) || localTopology.value)
+const lockLeases = ref<any[]>([])
 
-async function fetchTopologyState() {
-  const sessionId = chatStore.sessionId
-  if (!sessionId) return
-  const token = localStorage.getItem('token')
-  try {
-    const res = await fetch(`/api/chat/sessions/${sessionId}/topology`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-    const data = await res.json()
-    if (data.code === 200 && data.data) {
-      localTopology.value = data.data as TopologyState
-    }
-  } catch (e) { /* ignore */ }
-}
-
-onMounted(() => {
-  fetchTopologyState()
+const progressPct = computed(() => Math.round(((topology.value?.current_coord?.x || 0) / 10) * 100))
+const progressColor = computed(() => topology.value?.reject_count >= 3 ? 'warn' : topology.value?.trust_locked ? 'ng' : 'ok')
+const progressBarColor = computed(() => topology.value?.reject_count >= 3 ? '#f59e0b' : topology.value?.trust_locked ? '#ef4444' : '#22c55e')
+const trustLabel = computed(() => {
+  const lies = topology.value?.trust_lies || 0
+  if (topology.value?.trust_locked) return '已锁定'
+  if (lies >= 2) return '需注意'; if (lies >= 1) return '有疑虑'; return '良好'
 })
+const trustColor = computed(() => topology.value?.trust_locked || (topology.value?.trust_lies || 0) >= 2 ? 'ng' : 'ok')
+const deviationLabel = computed(() => { const z = topology.value?.current_coord?.z || 0; const r = topology.value?.constraint?.r || 3; if (z > r * 0.8) return '偏高'; if (z > r * 0.5) return '正常'; return '低' })
+const deviationLevel = computed(() => { const z = topology.value?.current_coord?.z || 0; const r = topology.value?.constraint?.r || 3; return z > r * 0.8 ? 'warn' : 'ok' })
+const displayNodes = computed(() => (topology.value?.trajectory || []).slice(-30))
+const successCount = computed(() => (topology.value?.trajectory || []).filter((n: any) => n.status === 'committed').length)
+const failCount = computed(() => (topology.value?.trajectory || []).filter((n: any) => n.status === 'rejected').length)
 
-const warningLevel = computed(() => {
-  if (!topology.value?.warning) return ''
-  if (topology.value.warning.includes('锁定')) return 'danger'
-  if (topology.value.warning.includes('拒绝')) return 'warning'
-  return 'info'
-})
+function resultBadge(s: string): string { switch (s) { case 'committed': return '✓'; case 'rejected': return '✗'; case 'overridden': return '⊡'; default: return s } }
 
-const trustClass = computed(() => {
-  if (!topology.value) return ''
-  if (topology.value.trust_locked) return 'trust-locked'
-  if (topology.value.trust_lies >= 2) return 'trust-low'
-  if (topology.value.trust_lies >= 1) return 'trust-warn'
-  return 'trust-ok'
-})
+async function fetchTopo() { const sid = chatStore.sessionId; if (!sid) return; try { const r = await fetch(`/api/chat/sessions/${sid}/topology`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }); const d = await r.json(); if (d.code === 200) localTopology.value = d.data } catch {} }
+async function updateConstraint() { const sid = chatStore.sessionId; if (!sid) return; await fetch(`/api/chat/sessions/${sid}/topology/constraint`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` }, body: JSON.stringify({ a: constraintA.value, r: constraintR.value, t: constraintT.value, force_tools: [] }) }) }
+async function overrideNode() { const sid = chatStore.sessionId; if (!sid) return; await fetch(`/api/chat/sessions/${sid}/topology/override`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` }, body: JSON.stringify({}) }) }
 
-function statusIcon(status: string): string {
-  switch (status) {
-    case 'committed': return '✅'
-    case 'rejected': return '❌'
-    case 'pending': return '⏳'
-    case 'overridden': return '🔧'
-    default: return status
-  }
-}
-
-function drawCharts() {
-  if (!topology.value?.trajectory?.length) return
-
-  const traj = topology.value.trajectory
-  const a = topology.value.constraint?.a || 0.8
-  const r = topology.value.constraint?.r || 3.0
-
-  // X-Y chart
-  if (xyCanvas.value) {
-    const ctx = xyCanvas.value.getContext('2d')
-    if (ctx) {
-      const W = xyCanvas.value.width = xyCanvas.value.clientWidth * 2 || 400
-      const H = xyCanvas.value.height = 160
-      ctx.scale(2, 2)
-      ctx.clearRect(0, 0, W, H)
-
-      const pad = { l: 40, r: 10, t: 10, b: 20 }
-      const pw = W / 2 - pad.l - pad.r
-      const ph = H - pad.t - pad.b
-
-      // Draw A band
-      ctx.fillStyle = 'rgba(99, 102, 241, 0.1)'
-      ctx.fillRect(pad.l, pad.t, pw, ph / 2 - (a / 2) * ph)
-
-      // Draw trajectory
-      ctx.strokeStyle = '#6366f1'
-      ctx.lineWidth = 2
-      ctx.beginPath()
-      for (let i = 0; i < traj.length; i++) {
-        const x = pad.l + (traj[i].x / 10) * pw
-        const y = pad.t + ((1 - (traj[i].y + 1) / 2)) * ph
-        if (i === 0) ctx.moveTo(x, y)
-        else ctx.lineTo(x, y)
-      }
-      ctx.stroke()
-
-      // Rejected nodes in red
-      for (const n of traj) {
-        if (n.status === 'rejected') {
-          const x = pad.l + (n.x / 10) * pw
-          const y = pad.t + ((1 - (n.y + 1) / 2)) * ph
-          ctx.fillStyle = '#ef4444'
-          ctx.beginPath()
-          ctx.arc(x, y, 3, 0, Math.PI * 2)
-          ctx.fill()
-        }
-      }
-    }
-  }
-
-  // X-Z chart
-  if (xzCanvas.value) {
-    const ctx = xzCanvas.value.getContext('2d')
-    if (ctx) {
-      const W = xzCanvas.value.width = xzCanvas.value.clientWidth * 2 || 400
-      const H = xzCanvas.value.height = 160
-      ctx.scale(2, 2)
-      ctx.clearRect(0, 0, W, H)
-
-      const pad = { l: 40, r: 10, t: 10, b: 20 }
-      const pw = W / 2 - pad.l - pad.r
-      const ph = H - pad.t - pad.b
-
-      // Draw R red line
-      const rY = pad.t + (1 - r / 5) * ph
-      ctx.strokeStyle = 'rgba(239, 68, 68, 0.5)'
-      ctx.setLineDash([4, 4])
-      ctx.beginPath()
-      ctx.moveTo(pad.l, rY)
-      ctx.lineTo(pad.l + pw, rY)
-      ctx.stroke()
-      ctx.setLineDash([])
-
-      // Draw trajectory
-      ctx.strokeStyle = '#22c55e'
-      ctx.lineWidth = 2
-      ctx.beginPath()
-      for (let i = 0; i < traj.length; i++) {
-        const x = pad.l + (traj[i].x / 10) * pw
-        const y = pad.t + ((1 - traj[i].z / 5)) * ph
-        if (i === 0) ctx.moveTo(x, y)
-        else ctx.lineTo(x, y)
-      }
-      ctx.stroke()
-    }
-  }
-}
-
-async function updateConstraint() {
-  const sessionId = chatStore.sessionId
-  if (!sessionId) return
-  const token = localStorage.getItem('token')
-  try {
-    await fetch(`/api/chat/sessions/${sessionId}/topology/constraint`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ a: constraintA.value, r: constraintR.value, t: constraintT.value, force_tools: [] }),
-    })
-  } catch (e) {
-    console.error('Failed to update constraint:', e)
-  }
-}
-
-async function overrideNode() {
-  const sessionId = chatStore.sessionId
-  if (!sessionId) return
-  const token = localStorage.getItem('token')
-  try {
-    await fetch(`/api/chat/sessions/${sessionId}/topology/override`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({}),
-    })
-  } catch (e) {
-    console.error('Failed to override:', e)
-  }
-}
-
-watch(() => chatStore.topology, (newVal) => {
-  if (newVal) {
-    constraintA.value = (newVal as any)?.constraint?.a || 0.8
-    constraintR.value = (newVal as any)?.constraint?.r || 3.0
-    constraintT.value = (newVal as any)?.constraint?.t || false
-    if (expanded.value) {
-      requestAnimationFrame(() => drawCharts())
-    }
-  }
-}, { deep: true })
-
-watch(expanded, (val) => {
-  if (val) {
-    requestAnimationFrame(() => drawCharts())
-  }
-})
-
-onMounted(() => {
-  if (expanded.value) drawCharts()
-})
-
-onUnmounted(() => {
-  xyChart = null
-  xzChart = null
-})
+watch(() => chatStore.topology, (v: any) => { if (v) { constraintA.value = v.constraint?.a || 0.8; constraintR.value = v.constraint?.r || 3.0; constraintT.value = v.constraint?.t || false } }, { deep: true })
+onMounted(() => { fetchTopo() })
 </script>
 
 <style scoped>
-.topology-panel {
-  background: var(--color-bg-2);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  margin: 8px 0;
-  font-size: 12px;
-  overflow: hidden;
+.topo-panel { border: 1px solid var(--border-subtle, #e2e8f0); border-radius: 8px; font-size: 11px; overflow: hidden; }
+.topo-panel.collapsed .tp-body { display: none; }
+.tp-head { padding: 8px 10px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; user-select: none; }
+.tp-head svg { transition: transform 0.2s; }
+.tp-head svg.rotated { transform: rotate(180deg); }
+.tp-title { font-weight: 600; display: flex; align-items: center; gap: 8px; }
+.badge { font-size: 10px; padding: 2px 6px; border-radius: 10px; }
+.badge.on { background: #22c55e22; color: #22c55e; }
+.badge.off { background: #64748b22; color: #64748b; }
+.tp-body { padding: 8px 10px; display: flex; flex-direction: column; gap: 8px; }
+
+/* Warning — prominent at top */
+.tp-warn { padding: 8px 10px; border-radius: 6px; display: flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 500; }
+.tp-warn.w { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
+.tp-warn.d { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+.tp-btn { margin-left: auto; padding: 3px 12px; border-radius: 4px; border: 1px solid; background: #fff; cursor: pointer; font-size: 10px; font-weight: 500; }
+
+/* Progress */
+.tp-progress { display: flex; align-items: center; gap: 8px; }
+.tp-progress .bar { flex: 1; height: 4px; background: var(--surface-hover); border-radius: 2px; overflow: hidden; }
+.tp-progress .bar i { display: block; height: 100%; border-radius: 2px; transition: width 0.5s, background-color 0.3s; }
+.tp-label { color: var(--text-muted); }
+.tp-val { font-weight: 700; font-size: 13px; min-width: 36px; font-variant-numeric: tabular-nums; }
+.tp-val.ok { color: #22c55e; }
+.tp-val.warn { color: #f59e0b; }
+.tp-val.ng { color: #ef4444; }
+
+/* Meta row */
+.tp-meta { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+.tp-meta .ok { color: #22c55e; }
+.tp-meta .warn { color: #f59e0b; }
+.tp-meta .ng { color: #ef4444; font-weight: 600; }
+.tp-stats { margin-left: auto; font-variant-numeric: tabular-nums; }
+.tp-stats .ok { color: #22c55e; }
+.tp-stats .ng { color: #ef4444; }
+
+/* Locks */
+.tp-section-title { font-weight: 600; font-size: 10px; color: var(--text-muted); margin-bottom: 4px; cursor: pointer; }
+.lock-row { display: flex; gap: 8px; padding: 3px 0; font-size: 10px; font-family: monospace; }
+.lock-res { color: var(--text-primary); flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.lock-type { color: #f59e0b; }
+.lock-ttl { color: var(--text-muted); }
+
+/* Table — redesigned: no "谁" column, full-width tool, row-level tints */
+.tp-table { }
+.tbl-row { display: grid; grid-template-columns: 24px 1fr 32px; gap: 8px; align-items: center; padding: 4px 6px; border-radius: 4px; margin-bottom: 1px; font-size: 11px; }
+.tbl-row.committed { background: rgba(34,197,94,0.06); }
+.tbl-row.rejected { background: rgba(239,68,68,0.08); }
+.tbl-row.overridden { background: rgba(245,158,11,0.08); }
+.col-step { color: var(--text-muted); text-align: right; font-variant-numeric: tabular-nums; }
+.col-tool { font-family: monospace; font-size: 10.5px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.col-result { text-align: center; font-weight: 700; font-size: 12px; }
+.tbl-row.committed .col-result { color: #22c55e; }
+.tbl-row.rejected .col-result { color: #ef4444; }
+.tbl-row.overridden .col-result { color: #f59e0b; }
+
+/* Expert */
+.tp-expert { border-top: 1px solid var(--border-subtle); padding-top: 6px; }
+.tp-constraints { display: flex; flex-direction: column; gap: 4px; }
+.tp-constraints label { display: flex; align-items: center; gap: 6px; font-size: 10px; }
+.tp-constraints input[type="range"] { flex: 1; accent-color: #6366f1; }
+
+@media (prefers-color-scheme: dark) {
+  .topo-panel { border-color: #334155; }
+  .tbl-row.committed { background: rgba(34,197,94,0.08); }
+  .tbl-row.rejected { background: rgba(239,68,68,0.10); }
+  .tbl-row.overridden { background: rgba(245,158,11,0.10); }
+  .tp-warn.w { background: #422006; color: #fbbf24; border-color: #78350f; }
+  .tp-warn.d { background: #450a0a; color: #fca5a5; border-color: #7f1d1d; }
+  .tp-btn { background: transparent; }
 }
-
-.topology-panel.collapsed .panel-body {
-  display: none;
-}
-
-.panel-header {
-  padding: 8px 12px;
-  cursor: pointer;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background: var(--color-bg-3);
-  user-select: none;
-}
-
-.panel-title {
-  font-weight: 600;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.badge {
-  font-size: 10px;
-  padding: 2px 6px;
-  border-radius: 10px;
-}
-
-.badge.active { background: #22c55e22; color: #22c55e; }
-.badge.inactive { background: #64748b22; color: #64748b; }
-
-.panel-body {
-  padding: 12px;
-}
-
-.warning-banner {
-  padding: 8px 12px;
-  border-radius: 6px;
-  margin-bottom: 8px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.warning-banner.warning { background: #f59e0b22; color: #f59e0b; }
-.warning-banner.danger { background: #ef444422; color: #ef4444; }
-.warning-banner.info { background: #3b82f622; color: #3b82f6; }
-
-.rescue-btn {
-  margin-left: auto;
-  padding: 4px 12px;
-  border-radius: 4px;
-  border: 1px solid currentColor;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  font-size: 11px;
-}
-
-.charts-row {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.chart-container {
-  flex: 1;
-  min-width: 0;
-}
-
-.chart-container canvas {
-  width: 100%;
-  height: 80px;
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-  background: var(--color-bg-1);
-}
-
-.chart-label {
-  text-align: center;
-  font-size: 10px;
-  color: var(--color-text-3);
-  margin-top: 2px;
-}
-
-.coord-display {
-  display: flex;
-  gap: 16px;
-  padding: 6px 0;
-  font-family: monospace;
-  font-size: 11px;
-  color: var(--color-text-2);
-}
-
-.trust-status {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 4px 0;
-  margin-bottom: 8px;
-}
-
-.trust-ok { color: #22c55e; }
-.trust-warn { color: #f59e0b; }
-.trust-low { color: #ef4444; }
-.trust-locked { color: #ef4444; font-weight: bold; }
-
-.closed-badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; }
-.closed-badge.closed { background: #22c55e22; color: #22c55e; }
-
-.constraint-sliders {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 8px 0;
-}
-
-.constraint-sliders label {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11px;
-  color: var(--color-text-2);
-}
-
-.constraint-sliders input[type="range"] {
-  flex: 1;
-  accent-color: #6366f1;
-}
-
-.checkbox-label {
-  cursor: pointer;
-}
-
-.loop-indicator {
-  text-align: center;
-  margin: 8px 0;
-}
-
-.trajectory-table {
-  margin-top: 8px;
-  max-height: 200px;
-  overflow-y: auto;
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-}
-
-.table-header, .table-row {
-  display: grid;
-  grid-template-columns: 30px 40px 45px 45px 1fr 30px;
-  gap: 4px;
-  padding: 4px 8px;
-  font-size: 11px;
-}
-
-.table-header {
-  font-weight: 600;
-  background: var(--color-bg-3);
-  position: sticky;
-  top: 0;
-}
-
-.table-row.rejected { background: #ef444411; }
-.table-row.overridden { background: #f59e0b11; }
-
-.tool-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.collapse-icon { font-size: 10px; color: var(--color-text-3); }
 </style>

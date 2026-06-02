@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 	"net"
 	"net/http"
 	"strings"
@@ -370,11 +370,11 @@ func (p *Provider) readStream(ctx context.Context, resp *http.Response, ch chan<
 		if total > 0 {
 			rate = float64(lastChunk.Usage.PromptCacheHitTokens) / float64(total) * 100
 		}
-		slog.Info("DeepSeek", "model", p.model, "hit", lastChunk.Usage.PromptCacheHitTokens,
+		log.Info("DeepSeek", "model", p.model, "hit", lastChunk.Usage.PromptCacheHitTokens,
 			"miss", lastChunk.Usage.PromptCacheMissTokens, "out", lastChunk.Usage.CompletionTokens,
 			"rate", fmt.Sprintf("%.1f%%", rate), "cost", fmt.Sprintf("%.6f元", cost))
 	}
-	slog.Info("流式响应完成", "模型", p.model, "内容长度", contentBuf.Len(), "思考长度", reasoningBuf.Len(), "工具调用数", len(toolCallMap))
+	log.Info("流式响应完成", "模型", p.model, "内容长度", contentBuf.Len(), "思考长度", reasoningBuf.Len(), "工具调用数", len(toolCallMap))
 
 	for _, tc := range toolCallMap {
 		args := tc.args.String()

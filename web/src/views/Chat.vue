@@ -6,6 +6,9 @@
       :sub-agents="store.subAgents"
       @select="onSidebarSelect"
       @new-chat="onNewChat"
+      @rename="onSidebarRename"
+      @delete="onSidebarDelete"
+      @toggle-pin="onSidebarTogglePin"
     />
     <div class="chat-page">
       <!-- Error boundary -->
@@ -39,31 +42,31 @@
           @wheel.passive="onPanelWheel"
           @touchmove.passive="onPanelTouchMove"
         >
-          <InterruptBanner
-            :visible="interruptBannerVisible && !!store.interruptSnapshot"
-            :progress="store.interruptSnapshot?.progress || 0"
-            :last-task="store.interruptSnapshot?.last_task || ''"
-            @continue="onInterruptContinue"
-            @retry="onInterruptRetry"
-            @dismiss="onInterruptNewTask"
-          />
-          <AgentStatusBar
-            v-if="store.currentToolName"
-            :visible="store.isStreaming || store.hasRunningAgents"
-            :is-running="store.isStreaming"
-            :tool-name="store.currentToolName"
-            :progress="store.currentToolProgress"
-          />
-          <TopologyPanel />
+          <div class="sticky-panels">
+            <InterruptBanner
+              :visible="interruptBannerVisible && !!store.interruptSnapshot"
+              :progress="store.interruptSnapshot?.progress || 0"
+              :last-task="store.interruptSnapshot?.last_task || ''"
+              @continue="onInterruptContinue"
+              @retry="onInterruptRetry"
+              @dismiss="onInterruptNewTask"
+            />
+            <AgentStatusBar
+              :visible="store.isStreaming || store.hasRunningAgents"
+              :agents="store.agents"
+              :tool-name="store.currentToolName"
+            />
+          </div>
+          <LockConflictNotice :conflicts="store.lockConflicts" />
           <TodoPanel :items="store.todoList" />
           <AgentPanel :agents="store.agents" />
           <template
-            v-for="(msg, i) in store.messages"
-            :key="msg.id"
+            v-for="(msg, i) in safeMessages"
+            :key="msg?.id || ('_null_' + i)"
           >
             <!-- Insert button between messages -->
             <div
-              v-if="i > 0 && msg.role === 'user'"
+              v-if="msg && i > 0 && msg.role === 'user'"
               class="insert-between"
               @click="startInsert(i)"
               title="在此插入消息"
@@ -72,13 +75,14 @@
               <span class="insert-plus">+</span>
             </div>
             <div
-              v-if="i > 0 && timeGap(store.messages[i-1], msg) > 5"
+              v-if="msg && i > 0 && timeGap(safeMessages[i-1], msg) > 5"
               class="time-divider"
             >
-              <span>{{ fmtMsgTime(msg.createdAt) }}</span>
+              <span>{{ msg.createdAt ? fmtMsgTime(msg.createdAt) : '' }}</span>
             </div>
             <!-- Message wrapper with edit controls -->
             <div
+              v-if="msg"
               class="msg-wrapper"
               :class="{ 'msg-editing': editingIndex === i, 'msg-fading': fadingNodes && fadingNodes > 0 && i >= editRebaseIndex }"
               @mouseenter="hoveredMsg = i"
@@ -86,8 +90,8 @@
             >
               <ChatMessage
                 :msg="editingIndex === i ? editDraftMsg : msg"
-                :show-avatar="i === 0 || store.messages[i-1]?.role !== msg.role"
-                :class="{ 'msg-grouped': i > 0 && store.messages[i-1]?.role === msg.role }"
+                :show-avatar="i === 0 || safeMessages[i-1]?.role !== msg.role"
+                :class="{ 'msg-grouped': i > 0 && safeMessages[i-1]?.role === msg.role }"
               />
               <!-- Edit pencil on user messages -->
               <button
@@ -143,6 +147,13 @@
         </button>
       </template>
 
+      <!-- MOBILE TOP BAR -->
+      <div class="mobile-topbar" v-if="store.sessionId">
+        <button class="mtb-btn" @click="mobileSidebar = !mobileSidebar">☰</button>
+        <span class="mtb-title">{{ currentTitle }}</span>
+        <button class="mtb-btn" @click="mobileInfo = !mobileInfo">ⓘ</button>
+      </div>
+
       <!-- INPUT BAR -->
       <ChatInputBar ref="inputBarRef" />
 
@@ -160,12 +171,50 @@
         @close="store.interactiveRequest = null"
       />
     </div>
+
+    <!-- Right info panel (desktop) -->
+    <aside v-if="store.sessionId" class="info-panel" :class="{ collapsed: infoCollapsed }">
+      <button class="ip-toggle" @click="infoCollapsed = !infoCollapsed" :title="infoCollapsed ? '展开面板' : '收起面板'">
+        <svg :class="{ rotated: !infoCollapsed }" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6,4 10,8 6,12"/></svg>
+      </button>
+      <div v-if="!infoCollapsed" class="ip-body">
+        <TopologyPanel />
+        <MetaReportCard :report="store.metaReport" :visible="store.agents.some((a: any) => a.role === 'supervisor' || a.role === 'manager')" />
+        <div class="ip-section">
+          <div class="ip-section-title">活跃助手</div>
+          <AgentPanel :agents="store.agents" />
+        </div>
+      </div>
+    </aside>
+
+    <!-- Mobile sidebar drawer -->
+    <div v-if="mobileSidebar" class="mobile-overlay" @click="mobileSidebar = false" />
+    <aside v-if="mobileSidebar" class="mobile-drawer">
+      <Sidebar
+        :conversations="store.conversations"
+        :active-id="store.sessionId"
+        :sub-agents="store.subAgents"
+        @select="onSidebarSelect; mobileSidebar = false"
+        @new-chat="onNewChat; mobileSidebar = false"
+        @rename="onSidebarRename"
+        @delete="onSidebarDelete"
+        @toggle-pin="onSidebarTogglePin"
+      />
+    </aside>
+
+    <!-- Mobile info panel (bottom sheet) -->
+    <div v-if="mobileInfo" class="mobile-overlay" @click="mobileInfo = false" />
+    <div v-if="mobileInfo" class="mobile-sheet">
+      <div class="sheet-handle" @click="mobileInfo = false" />
+      <TopologyPanel />
+      <MetaReportCard :report="store.metaReport" :visible="store.agents.some((a: any) => a.role === 'supervisor' || a.role === 'manager')" />
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 // @ts-nocheck
-import { ref, watch, onMounted, onUnmounted, onErrorCaptured, nextTick, getCurrentInstance } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted, onErrorCaptured, nextTick, getCurrentInstance } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '../stores/chat'
 import ChatMessage from '../components/chat/ChatMessage.vue'
@@ -179,10 +228,19 @@ import ChatInputBar from '../components/chat/ChatInputBar.vue'
 import TopologyPanel from '../components/chat/TopologyPanel.vue'
 import InterruptBanner from '../components/chat/InterruptBanner.vue'
 import AgentStatusBar from '../components/chat/AgentStatusBar.vue'
+import LockConflictNotice from '../components/chat/LockConflictNotice.vue'
+import MetaReportCard from '../components/chat/MetaReportCard.vue'
 
 const route = useRoute()
 const router = useRouter()
 const store = useChatStore()
+const mobileSidebar = ref(false)
+const mobileInfo = ref(false)
+const infoCollapsed = ref(false)
+const currentTitle = computed(() => store.conversations.find(c => c.id === store.sessionId)?.title || '云兮')
+
+// ── Safer message list: filters null entries that can arise from race conditions ──
+const safeMessages = computed(() => store.messages.filter(m => m != null))
 
 // ── Interrupt banner state ──
 const interruptBannerVisible = ref(false)
@@ -199,16 +257,22 @@ watch(() => store.interruptSnapshot, (snap) => {
 
 function dismissBanner() {
   interruptBannerVisible.value = false
+  store.interruptSnapshot = null
   if (_interruptTimer) { clearTimeout(_interruptTimer); _interruptTimer = null }
 }
 
 function onInterruptContinue() {
   dismissBanner()
+  // 清理重连流 + streaming 状态，避免 sendMessage 误走注入路径
+  store.disconnectStream()
+  store.streamingSessions[store.sessionId] = false
   store.sendMessage('继续', '', {})
 }
 
 function onInterruptRetry() {
   dismissBanner()
+  store.disconnectStream()
+  store.streamingSessions[store.sessionId] = false
   store.sendMessage('换个方式重新执行刚才的任务', '', {})
 }
 
@@ -273,6 +337,13 @@ async function saveEdit(i: number) {
   const isInsert = !editDraftMsg.value
   const msgIndex = i + 1 // +1 for system prompt
 
+  console.log('[chat] saveEdit: start',
+    '| sid:', sid,
+    '| msgIndex:', msgIndex,
+    '| isInsert:', isInsert,
+    '| streaming:', store.isStreaming,
+    '| msgs before:', store.messages.length)
+
   try {
     const resp = await fetch(`/api/chat/sessions/${sid}/messages/${msgIndex}`, {
       method: 'PUT',
@@ -280,6 +351,7 @@ async function saveEdit(i: number) {
       body: JSON.stringify({ content: editContent.value, insert_mode: isInsert }),
     })
     const data = await resp.json()
+    console.log('[chat] saveEdit: PUT response', data)
     const deletedNodes = data?.data?.deleted_nodes || 0
 
     if (deletedNodes > 0) {
@@ -287,10 +359,14 @@ async function saveEdit(i: number) {
       fadingNodes.value = deletedNodes
       if (_fadeTimer) clearTimeout(_fadeTimer)
       _fadeTimer = setTimeout(() => { fadingNodes.value = 0; editRebaseIndex.value = -1 }, 1500)
+      console.log('[chat] saveEdit: fading', deletedNodes, 'nodes from index', i)
     }
 
     // ④ 编辑后中断（fire-and-forget，仅当 Agent 活跃时）
     if (store.isStreaming || store.hasRunningAgents) {
+      console.log('[chat] saveEdit: interrupting active session')
+      store.streamingSessions[sid] = false
+      store.sessionAgents[sid] = []
       fetch(`/api/chat/sessions/${sid}/interrupt`, {
         method: 'POST',
         headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
@@ -299,12 +375,15 @@ async function saveEdit(i: number) {
     }
 
     // Reload the session
-    store.fetchSessionMessages(sid)
+    console.log('[chat] saveEdit: reloading session messages')
+    await store.fetchSessionMessages(sid)
+    console.log('[chat] saveEdit: reload done, msgs:', store.messages.length)
   } catch (e) {
-    console.error('Edit failed:', e)
+    console.error('[chat] saveEdit: failed', e)
   }
 
   cancelEdit()
+  console.log('[chat] saveEdit: done, editingIndex:', editingIndex.value)
 }
 
 async function deleteMessage(i: number) {
@@ -449,9 +528,11 @@ onMounted(() => { if (store.sessionId && store.messages.length) { nextTick(() =>
 // ── Route / session ──
 function loadSessionFromRoute(sid) {
   if (!sid || sid === 'default') { store.clearCurrent(); router.replace('/chat'); return }
-  if (store.sessionId === sid && store.isStreaming && store.messages.length > 0) return
+  // If we already have messages for this session, don't overwrite (cache may be newer than DB)
+  if (store.sessionId === sid && store.messages.length > 0) return
   store.disconnectStream()
   store.resetStreaming(); store.sessionId = sid
+  store.activeConversationId = sid  // keep in sync with sessionId
   store.fetchSessionMessages(sid).then(ok => {
     if (!ok) { store.clearCurrent(); return }
     _userScrolled = false; scrolledUp.value = false; showScrollBtn.value = false
@@ -478,8 +559,52 @@ function onSidebarSelect(id) {
 }
 function onNewChat() { store.clearCurrent(); router.replace('/chat') }
 
-onMounted(() => { store.loadConversations() })
-onUnmounted(() => { _observer?.disconnect(); store.disconnectStream() })
+async function onSidebarRename(id: string, title: string) {
+  await store.renameConversation(id, title)
+}
+
+async function onSidebarDelete(id: string) {
+  await store.deleteConversation(id)
+  // If deleted the current conversation, go home
+  if (id === store.sessionId || !store.sessionId) {
+    router.replace('/chat')
+  }
+}
+
+async function onSidebarTogglePin(id: string, pinned: boolean) {
+  await store.togglePin(id, pinned)
+}
+
+// Bug 1-3 fix: beforeunload handler — best-effort abort on tab close
+let _beforeUnload: (() => void) | null = null
+
+onMounted(() => {
+  store.loadConversations()
+  _beforeUnload = () => { store.cleanupAllStreams() }
+  window.addEventListener('beforeunload', _beforeUnload)
+})
+
+onUnmounted(() => {
+  _observer?.disconnect()
+  if (_beforeUnload) {
+    window.removeEventListener('beforeunload', _beforeUnload)
+    _beforeUnload = null
+  }
+  // Bug 1-3 fix: aggressive cleanup on unmount — all streams + all send flags
+  store.disconnectStream()
+  store.cleanupAllStreams()
+  store.forceClearSending()
+})
+
+// Bug 3 fix: watch route path — when leaving /chat/*, clean up all streams
+watch(() => route.path, (newPath, oldPath) => {
+  if (oldPath && oldPath.startsWith('/chat') && !newPath.startsWith('/chat')) {
+    console.log('[Chat] leaving chat route, cleaning up all streams')
+    store.disconnectStream()
+    store.cleanupAllStreams()
+    store.forceClearSending()
+  }
+})
 </script>
 
 <style scoped>
@@ -493,6 +618,13 @@ onUnmounted(() => { _observer?.disconnect(); store.disconnectStream() })
   flex: 1; display: flex; flex-direction: column;
   min-height: 0; overflow: hidden; position: relative;
   margin: 0 24px 24px 0;
+}
+
+/* Sticky wrapper for interrupt banner + agent status bar */
+.sticky-panels {
+  position: sticky;
+  top: 0;
+  z-index: 10;
 }
 
 .panel-body {
@@ -646,10 +778,11 @@ onUnmounted(() => { _observer?.disconnect(); store.disconnectStream() })
 .edit-bar {
   margin: 4px 0 8px 48px;
   padding: 12px;
-  border-radius: 8px;
-  background: var(--color-bg-2);
-  border: 1px solid var(--color-primary, #6366f1);
-  animation: editBarIn 0.15s ease;
+  border-radius: 10px;
+  background: var(--surface-card);
+  border: 1px solid var(--border-default);
+  box-shadow: var(--shadow-xs, 0 1px 2px rgba(0,0,0,0.04));
+  animation: editBarIn 0.2s var(--ease-out-expo, ease-out);
 }
 
 @keyframes editBarIn {
@@ -659,19 +792,22 @@ onUnmounted(() => { _observer?.disconnect(); store.disconnectStream() })
 
 .edit-textarea {
   width: 100%;
-  padding: 10px;
-  border-radius: 6px;
-  border: 1px solid var(--color-border);
-  background: var(--color-bg-1);
-  color: var(--color-text-1);
-  font-size: 14px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-default);
+  background: var(--surface-input, var(--surface-card));
+  color: var(--text-primary);
+  font-size: 13px;
   font-family: inherit;
+  line-height: 1.5;
   resize: vertical;
   outline: none;
+  transition: border-color 0.15s;
 }
 
 .edit-textarea:focus {
-  border-color: var(--color-primary, #6366f1);
+  border-color: var(--brand-400, #22d3ee);
+  box-shadow: 0 0 0 3px rgba(6, 182, 212, 0.08);
 }
 
 .edit-actions {
@@ -683,42 +819,52 @@ onUnmounted(() => { _observer?.disconnect(); store.disconnectStream() })
 
 .edit-hint {
   font-size: 11px;
-  color: var(--color-text-3);
+  color: var(--text-muted);
   flex: 1;
 }
 
 .edit-save-btn,
 .edit-cancel-btn,
 .edit-delete-btn {
-  padding: 6px 14px;
+  padding: 5px 14px;
   border-radius: 6px;
-  border: none;
-  font-size: 13px;
+  border: 1px solid var(--border-default);
+  font-size: 12px;
+  font-family: inherit;
   cursor: pointer;
-  transition: background 0.15s;
+  transition: all 0.15s;
+  line-height: 1.4;
 }
 
 .edit-save-btn {
-  background: var(--color-primary, #6366f1);
+  background: var(--brand-500);
   color: #fff;
+  border-color: transparent;
+  font-weight: 500;
 }
 
-.edit-save-btn:hover { filter: brightness(1.1); }
+.edit-save-btn:hover { background: var(--brand-600); }
 
 .edit-cancel-btn {
-  background: var(--color-bg-3);
-  color: var(--color-text-2);
+  background: transparent;
+  color: var(--text-secondary);
 }
 
-.edit-cancel-btn:hover { background: var(--color-bg-4); }
+.edit-cancel-btn:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+}
 
 .edit-delete-btn {
-  background: #ef444422;
-  color: #ef4444;
+  background: transparent;
+  color: var(--color-danger, #f85149);
+  border-color: transparent;
   margin-left: auto;
 }
 
-.edit-delete-btn:hover { background: #ef444433; }
+.edit-delete-btn:hover {
+  background: rgba(248, 81, 73, 0.1);
+}
 
 /* ── v3.1 Topology fade-out animation ── */
 .msg-fading {
@@ -731,10 +877,67 @@ onUnmounted(() => { _observer?.disconnect(); store.disconnectStream() })
   100% { opacity: 1; filter: blur(0); }
 }
 
+/* ── Three-column layout ── */
+.chat-layout { display: flex; height: 100vh; overflow: hidden; }
+
+/* ── Right info panel ── */
+.info-panel {
+  width: 320px; min-width: 320px; border-left: 1px solid var(--border-subtle, #e2e8f0);
+  background: var(--surface-card, #fff); display: flex; flex-direction: column;
+  transition: width 0.25s ease, min-width 0.25s ease;
+}
+.info-panel.collapsed { width: 40px; min-width: 40px; }
+.ip-toggle {
+  width: 100%; padding: 10px 0; border: none; background: transparent; cursor: pointer;
+  color: var(--text-muted); display: flex; justify-content: center;
+}
+.ip-toggle svg { transition: transform 0.2s; }
+.ip-toggle svg.rotated { transform: rotate(180deg); }
+.ip-body {
+  flex: 1; overflow-y: auto; padding: 0 12px 12px; display: flex; flex-direction: column; gap: 8px;
+}
+.ip-section { margin-top: 4px; }
+.ip-section-title { font-size: 10px; font-weight: 600; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+/* Hide right panel on tablet/mobile */
+@media (max-width: 1279px) {
+  .info-panel { display: none; }
+}
+
+/* ── Mobile: top bar ── */
+.mobile-topbar { display: none; }
 @media (max-width: 767px) {
-  .chat-layout { padding-top: 78px; }
+  .mobile-topbar {
+    display: flex; align-items: center; gap: 4px;
+    padding: 3px 6px; background: var(--surface-card);
+    border-bottom: 1px solid var(--border-subtle);
+    position: sticky; top: 0; z-index: 20;
+  }
+  .mtb-btn { background: none; border: none; font-size: 15px; cursor: pointer; padding: 3px 6px; color: var(--text-primary); }
+  .mtb-title { flex: 1; font-size: 12px; font-weight: 600; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .chat-layout .sidebar { display: none; }
   .chat-page { margin: 0; border-radius: 0; }
-  .panel-body { padding: 10px 8px 110px; gap: 10px; }
-  .edit-bar { margin-left: 12px; }
+  .panel-body { padding: 6px 6px 96px; }
+}
+
+/* ── Mobile: sidebar drawer ── */
+.mobile-overlay { display: none; }
+@media (max-width: 767px) {
+  .mobile-overlay { display: block; position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 50; }
+  .mobile-drawer {
+    position: fixed; top: 0; left: 0; bottom: 0; width: 72vw; max-width: 260px;
+    z-index: 55; background: var(--surface-card); box-shadow: 2px 0 10px rgba(0,0,0,0.08);
+    overflow-y: auto; animation: slideIn 0.2s ease;
+  }
+  @keyframes slideIn { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+
+  .mobile-sheet {
+    position: fixed; bottom: 0; left: 0; right: 0; max-height: 50vh;
+    z-index: 55; background: var(--surface-card); border-radius: 12px 12px 0 0;
+    box-shadow: 0 -2px 10px rgba(0,0,0,0.06); overflow-y: auto; padding: 10px 8px;
+    animation: sheetUp 0.25s ease;
+  }
+  @keyframes sheetUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+  .sheet-handle { width: 28px; height: 3px; background: var(--border-default); border-radius: 2px; margin: 0 auto 8px; cursor: pointer; }
 }
 </style>

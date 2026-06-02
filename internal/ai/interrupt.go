@@ -2,8 +2,9 @@ package ai
 
 import (
 	"fmt"
-	"log/slog"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai/agent"
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/base"
 	"github.com/Yunqingqingxi/yunxi-home/internal/models"
 )
@@ -47,7 +48,7 @@ type InterruptSnapshot struct {
 //   - hard: immediately cancels the LLM stream context
 //   - snapshot: flushes state to DB without interrupting
 func (s *Service) CancelSession(sessionID string, mode string) (any, error) {
-	slog.Info("CancelSession 收到请求", "session", sessionID, "mode", mode)
+	log.Info("CancelSession 收到请求", "session", sessionID, "mode", mode)
 
 	s.activeStreamsMu.Lock()
 	streamCancel, hasStream := s.activeStreams[sessionID]
@@ -57,12 +58,12 @@ func (s *Service) CancelSession(sessionID string, mode string) (any, error) {
 	if !hasStream {
 		// Check if session exists at all
 		if sess := s.sessions.Get(sessionID); sess == nil {
-			slog.Warn("CancelSession: 会话不存在", "session", sessionID)
+			log.Warn("CancelSession: 会话不存在", "session", sessionID)
 			return nil, fmt.Errorf("session not found: %s", sessionID)
 		}
 		// Session exists but no active stream — mark as interrupted anyway
 		s.sessions.SetState(sessionID, models.SessionStateInterrupted, "", "")
-		slog.Info("CancelSession: 无活跃流，标记为已中断", "session", sessionID)
+		log.Info("CancelSession: 无活跃流，标记为已中断", "session", sessionID)
 		return &InterruptSnapshot{
 			Status: "idle",
 			Mode:   mode,
@@ -73,7 +74,7 @@ func (s *Service) CancelSession(sessionID string, mode string) (any, error) {
 	snapshot := s.buildSnapshot(sessionID)
 	cancelMode := CancelMode(mode)
 
-	slog.Info("CancelSession: 开始执行中断",
+	log.Info("CancelSession: 开始执行中断",
 		"session", sessionID,
 		"cancel_mode", mode,
 		"progress", snapshot.Progress,
@@ -86,7 +87,7 @@ func (s *Service) CancelSession(sessionID string, mode string) (any, error) {
 		// Immediately cancel the stream context → LLM stream + tool heartbeat both stop
 		if streamCancel != nil {
 			streamCancel()
-			slog.Info("CancelSession: hard cancel 已触发 streamCancel", "session", sessionID)
+			log.Info("CancelSession: hard cancel 已触发 streamCancel", "session", sessionID)
 		}
 		snapshot.Mode = "hard"
 		snapshot.Status = "interrupted"
@@ -96,14 +97,14 @@ func (s *Service) CancelSession(sessionID string, mode string) (any, error) {
 		s.saveSnapshot(sessionID)
 		snapshot.Mode = "snapshot"
 		snapshot.Status = "saved"
-		slog.Info("CancelSession: snapshot 已保存", "session", sessionID)
+		log.Info("CancelSession: snapshot 已保存", "session", sessionID)
 
 	default: // CancelSoft
 		// Send interrupt signal through injectCh — the loop picks it up at next iteration
 		msg := fmt.Sprintf("[中断] 用户请求停止，进度 %d%%，最后执行：%s",
 			snapshot.Progress, snapshot.LastTask)
 		s.InjectWithPriority(sessionID, msg, "interrupt", "cancel_session")
-		slog.Info("CancelSession: soft interrupt 已注入 injectCh", "session", sessionID, "msg", msg)
+		log.Info("CancelSession: soft interrupt 已注入 injectCh", "session", sessionID, "msg", msg)
 		snapshot.Mode = "soft"
 		snapshot.Status = "interrupting"
 	}
@@ -116,16 +117,16 @@ func (s *Service) CancelSession(sessionID string, mode string) (any, error) {
 		}
 		select {
 		case streamCh <- ev:
-			slog.Debug("CancelSession: interrupted SSE 已发送到主通道", "session", sessionID)
+			log.Debug("CancelSession: interrupted SSE 已发送到主通道", "session", sessionID)
 		default:
-			slog.Warn("CancelSession: 主 SSE 通道已满，仅发送到 eventBus", "session", sessionID)
+			log.Warn("CancelSession: 主 SSE 通道已满，仅发送到 eventBus", "session", sessionID)
 		}
 		// Also publish to event bus for reconnecting clients
 		eb := s.eventBus.getOrCreate(sessionID)
 		eb.publish(ev)
 	}
 
-	slog.Info("CancelSession: 完成",
+	log.Info("CancelSession: 完成",
 		"session", sessionID,
 		"mode", mode,
 		"snapshot_status", snapshot.Status,
@@ -185,7 +186,7 @@ func (s *Service) saveSnapshot(sessionID string) {
 	// Persist session state
 	s.sessions.SetState(sessionID, models.SessionStateInterrupted, "", "")
 
-	slog.Info("snapshot 已持久化",
+	log.Info("snapshot 已持久化",
 		"session", sessionID,
 		"state", models.SessionStateInterrupted,
 	)
@@ -216,7 +217,7 @@ func (s *Service) drainInjectChNonBlocking(sessionID string) (msgs []InjectedMes
 			// Sort by priority: interrupt < user < system < info
 			sortInjectMessages(msgs)
 			if len(msgs) > 0 {
-				slog.Debug("injectCh 批量消费",
+				log.Debug("injectCh 批量消费",
 					"session", sessionID,
 					"count", len(msgs),
 					"has_interrupt", hasInterrupt,
@@ -269,14 +270,25 @@ func (s *Service) HasActiveStream(sessionID string) bool {
 	return ok
 }
 
-// HasRunningAgents checks if any sub-agents are currently running.
+// HasRunningAgents checks if any sub-agents are currently running for the given session.
 func (s *Service) HasRunningAgents(sessionID string) bool {
 	for _, a := range s.agentMgr.ListAll() {
-		if a.Status == "running" {
+		if a.ParentID == sessionID && (a.Status == "running" || a.Status == "pending") {
 			return true
 		}
 	}
 	return false
+}
+
+// GetSessionAgents returns all sub-agents for the given session.
+func (s *Service) GetSessionAgents(sessionID string) []*agent.SubAgent {
+	var result []*agent.SubAgent
+	for _, a := range s.agentMgr.ListAll() {
+		if a.ParentID == sessionID {
+			result = append(result, a)
+		}
+	}
+	return result
 }
 
 // ── RebaseTopology ──────────────────────────────────────────────

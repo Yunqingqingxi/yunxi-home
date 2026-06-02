@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/url"
 	"os/exec"
@@ -396,7 +395,7 @@ func truncateStr(s string, max int) string {
 func readMCPConfig(path string) map[string]any {
 	var config map[string]any
 	if err := fileio.ReadJSON(path, &config); err != nil {
-		slog.Warn("读取 mcp.json 失败，返回空配置", "path", path, "error", err)
+		log.Warn("读取 mcp.json 失败，返回空配置", "path", path, "error", err)
 		return map[string]any{}
 	}
 	return config

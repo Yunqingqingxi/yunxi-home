@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 )
 
 // ── ChatLogger: 完整会话追踪日志 ────────────────────────────────
@@ -174,8 +176,60 @@ func (cl *ChatLogger) write(ev LogEvent) {
 		f.WriteString(humanLine + "\n")
 	}
 
+	// 将关键事件同步到主日志，保持 ChatLogger 自身输出不变
+	cl.bridgeToSlog(ev)
+
 	// Broadcast to subscribers
 	cl.broadcast(ev)
+}
+
+// bridgeToSlog 将关键事件同步到主 slog 日志，便于在主日志中追踪会话生命周期。
+// 高频事件（thinking、content、tool_progress）不桥接，避免日志噪音。
+func (cl *ChatLogger) bridgeToSlog(ev LogEvent) {
+	base := []any{
+		slog.String(logger.KeyComponent, "ai"),
+		slog.String(logger.KeySessionID, ev.SessionID),
+		slog.Int(logger.KeyRound, ev.Round),
+	}
+
+	switch ev.Type {
+	case "session_start":
+		slog.Info("会话开始", append(base, slog.String(logger.KeyEvent, logger.EventSessionStart))...)
+	case "session_end":
+		slog.Info("会话结束", append(base, slog.String(logger.KeyEvent, logger.EventSessionEnd))...)
+	case "error":
+		slog.Error("会话错误", append(base,
+			slog.String(logger.KeyEvent, "error"),
+			slog.String(logger.KeyError, ev.Error),
+		)...)
+	case "tool_call":
+		slog.Info("工具调用", append(base,
+			slog.String(logger.KeyEvent, logger.EventToolCall),
+			slog.String(logger.KeyTool, ev.ToolName),
+			slog.String(logger.KeyToolRisk, ev.RiskLevel),
+		)...)
+	case "tool_result":
+		slog.Info("工具完成", append(base,
+			slog.String(logger.KeyEvent, logger.EventToolResult),
+			slog.String(logger.KeyTool, ev.ToolName),
+			slog.String(logger.KeyToolStatus, ev.ToolStatus),
+			slog.Int64("tool_dur_ms", ev.ToolDurMs),
+		)...)
+	case "llm_call_done":
+		slog.Debug("LLM 调用完成", append(base,
+			slog.String(logger.KeyEvent, logger.EventLLMCall),
+			slog.String(logger.KeyModel, ev.Model),
+			slog.Int(logger.KeyTokensIn, ev.PromptTokens),
+			slog.Int(logger.KeyTokensOut, ev.OutputTokens),
+			slog.Bool(logger.KeyCacheHit, ev.CacheHit),
+			slog.Float64("cost_usd", ev.Cost),
+		)...)
+	case "compaction":
+		slog.Info("会话压缩", append(base,
+			slog.String(logger.KeyEvent, logger.EventCompaction),
+			slog.String("summary", ev.Content),
+		)...)
+	}
 }
 
 // broadcast sends the event to all subscribers for this session.

@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 	"sync"
 	"time"
 )
@@ -105,7 +105,7 @@ func (c *Client) Connect() error {
 	}
 
 	c.connected = true
-	slog.Info("MCP server connected", "name", c.cfg.Name, "tools", len(c.tools))
+	log.Info("MCP server connected", "name", c.cfg.Name, "tools", len(c.tools))
 	return nil
 }
 
@@ -226,14 +226,14 @@ func (m *Manager) ConnectAll() error {
 			select {
 			case err := <-done:
 				if err != nil {
-					slog.Warn("MCP server connection failed, retrying in background", "name", client.Name(), "error", err)
+					log.Warn("MCP server connection failed, retrying in background", "name", client.Name(), "error", err)
 					// 后台重试 2 次
 					go m.retryConnect(client, 2)
 				} else {
-					slog.Info("MCP server connected", "name", client.Name(), "tools", len(client.Tools()))
+					log.Info("MCP server connected", "name", client.Name(), "tools", len(client.Tools()))
 				}
 			case <-time.After(30 * time.Second):
-				slog.Warn("MCP server connection timeout, will retry in background", "name", client.Name())
+				log.Warn("MCP server connection timeout, will retry in background", "name", client.Name())
 				go m.retryConnect(client, 2)
 			}
 		}(c)
@@ -250,16 +250,16 @@ func (m *Manager) retryConnect(client *Client, maxRetries int) {
 		select {
 		case err := <-done:
 			if err == nil {
-				slog.Info("MCP server reconnected successfully", "name", client.Name(), "tools", len(client.Tools()))
+				log.Info("MCP server reconnected successfully", "name", client.Name(), "tools", len(client.Tools()))
 				// 重连成功后需要重新注册工具（通过回调）
 				return
 			}
-			slog.Warn("MCP server retry failed", "name", client.Name(), "attempt", i+1, "error", err)
+			log.Warn("MCP server retry failed", "name", client.Name(), "attempt", i+1, "error", err)
 		case <-time.After(25 * time.Second):
-			slog.Warn("MCP server retry timeout", "name", client.Name(), "attempt", i+1)
+			log.Warn("MCP server retry timeout", "name", client.Name(), "attempt", i+1)
 		}
 	}
-	slog.Error("MCP server connection failed after all retries", "name", client.Name())
+	log.Error("MCP server connection failed after all retries", "name", client.Name())
 }
 
 // AllTools 返回所有已连接服务器的全部工具
@@ -302,7 +302,7 @@ func (m *Manager) RemoveServer(name string) {
 		select {
 		case <-done:
 		case <-time.After(5 * time.Second):
-			slog.Warn("MCP close timeout during remove", "name", name)
+			log.Warn("MCP close timeout during remove", "name", name)
 		}
 		delete(m.clients, name)
 	}
@@ -327,7 +327,7 @@ func (m *Manager) CloseAll() {
 			select {
 			case <-done:
 			case <-time.After(5 * time.Second):
-				slog.Warn("MCP close timeout, forced", "name", client.Name())
+				log.Warn("MCP close timeout, forced", "name", client.Name())
 			}
 		}(c)
 	}

@@ -5,13 +5,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 	"net"
+
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 	"net/http"
 	"time"
 
 	"github.com/Yunqingqingxi/yunxi-home/internal/dns/base"
 )
+
+var log = logger.ForComponent("dns")
 
 // Client 阿里云 DNS 客户端，实现 base.Provider 接口。
 type Client struct {
@@ -59,7 +62,7 @@ func NewClient(accessKeyID, accessKeySecret, endpoint string, dnsServers []strin
 
 // doRequest 执行阿里云 API 请求
 func (c *Client) doRequest(ctx context.Context, action string, bizParams map[string]string) (map[string]interface{}, error) {
-	slog.Info("阿里云DNS请求", "操作", action)
+	log.Info("阿里云DNS请求", "操作", action)
 	baseParams := buildParams(c.accessKeyID, action)
 	baseParams["Timestamp"] = time.Now().UTC().Format("2006-01-02T15:04:05Z")
 	allParams := MergeParams(baseParams, bizParams)
@@ -69,8 +72,8 @@ func (c *Client) doRequest(ctx context.Context, action string, bizParams map[str
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, urlStr, nil)
 	if err != nil {
-		slog.Error("DNS请求创建失败", "操作", action, "错误", err)
-		slog.Error("DNS请求创建失败", "错误", err)
+		log.Error("DNS请求创建失败", "操作", action, "错误", err)
+		log.Error("DNS请求创建失败", "错误", err)
 		return nil, fmt.Errorf("创建请求失败: %w", err)
 	}
 	req.Header.Set("User-Agent", "Yunxi-Home/3.0")

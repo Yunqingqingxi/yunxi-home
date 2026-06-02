@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 	"net/http"
 	"sync"
 	"time"
@@ -12,6 +12,8 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
 )
+
+var log = logger.ForComponent("terminal")
 
 const (
 	// writeWait is the timeout for writing a message to the peer.
@@ -84,7 +86,7 @@ func (h *TerminalHandler) Handle(c echo.Context) error {
 
 	conn, err := upgrader.Upgrade(c.Response(), c.Request(), nil)
 	if err != nil {
-		slog.Error("WebSocket 升级失败", "error", err)
+		log.Error("WebSocket 升级失败", "error", err)
 		return err
 	}
 
@@ -117,7 +119,7 @@ type Session struct {
 func (s *Session) start() {
 	pty, err := startShell()
 	if err != nil {
-		slog.Error("启动 Shell 失败", "error", err)
+		log.Error("启动 Shell 失败", "error", err)
 		s.conn.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("\r\n启动 Shell 失败: %v\r\n", err)))
 		s.conn.Close()
 		return
@@ -145,13 +147,13 @@ func (s *Session) readLoop() {
 			// Set write deadline before writing to detect client that stopped reading.
 			s.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if writeErr := s.conn.WriteMessage(websocket.TextMessage, buf[:n]); writeErr != nil {
-				slog.Debug("写入 WebSocket 失败", "error", writeErr)
+				log.Debug("写入 WebSocket 失败", "error", writeErr)
 				return
 			}
 		}
 		if err != nil {
 			if err != io.EOF {
-				slog.Debug("读取 Shell 输出错误", "error", err)
+				log.Debug("读取 Shell 输出错误", "error", err)
 			}
 			return
 		}
@@ -166,7 +168,7 @@ func (s *Session) writeLoop() {
 		_, msg, err := s.conn.ReadMessage()
 		if err != nil {
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseNormalClosure) {
-				slog.Debug("WebSocket 读取错误", "error", err)
+				log.Debug("WebSocket 读取错误", "error", err)
 			}
 			return
 		}
@@ -216,7 +218,7 @@ func (s *Session) keepAlive() {
 			}
 			s.conn.SetWriteDeadline(time.Now().Add(writeWait))
 			if err := s.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				slog.Debug("发送 ping 失败，关闭会话", "error", err)
+				log.Debug("发送 ping 失败，关闭会话", "error", err)
 				s.cleanup()
 				return
 			}

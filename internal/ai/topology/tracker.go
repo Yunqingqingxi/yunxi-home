@@ -3,7 +3,7 @@ package topology
 import (
 	"context"
 	"fmt"
-	"log/slog"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 	"sync"
 	"time"
 )
@@ -251,7 +251,7 @@ func (t *Tracker) ValidateStep(sessionID string, proposed ParseResult, actualToo
 
 				if st.Trust.Lies >= MaxLiesBeforeLock {
 					st.Trust.Locked = true
-					slog.Warn("信任已锁定", "session", sessionID, "lies", st.Trust.Lies)
+					log.Warn("信任已锁定", "session", sessionID, "lies", st.Trust.Lies)
 				}
 				return false, truthResult.Reason
 			}
@@ -323,7 +323,7 @@ func (t *Tracker) UpdateConstraint(sessionID string, a, r float64, tFlag bool, f
 		st.Constraint.ForceTools = forceTools
 	}
 
-	slog.Info("约束参数已更新", "session", sessionID, "a", st.Constraint.A, "r", st.Constraint.R, "t", st.Constraint.T)
+	log.Info("约束参数已更新", "session", sessionID, "a", st.Constraint.A, "r", st.Constraint.R, "t", st.Constraint.T)
 	return nil
 }
 
@@ -340,7 +340,7 @@ func (t *Tracker) ResetTrust(sessionID string) {
 	st.Trust.Lies = 0
 	st.Trust.Locked = false
 	st.Warning = ""
-	slog.Info("信任状态已重置", "session", sessionID)
+	log.Info("信任状态已重置", "session", sessionID)
 }
 
 // ── Override ──────────────────────────────────────────────────
@@ -362,7 +362,7 @@ func (t *Tracker) OverrideNextNode(sessionID string, targetCoord *Coordinate) {
 	}
 	st.RejectCount = 0
 	st.Warning = ""
-	slog.Info("节点已放行", "session", sessionID)
+	log.Info("节点已放行", "session", sessionID)
 }
 
 // ── Rebase ────────────────────────────────────────────────────
@@ -401,12 +401,12 @@ func (t *Tracker) Rebase(sessionID string, atRound int) (int, error) {
 	if t.repo != nil {
 		n, err := t.repo.DeleteNodesFrom(context.Background(), sessionID, atRound)
 		if err != nil {
-			slog.Warn("Rebase DB sync failed", "session", sessionID, "error", err)
+			log.Warn("Rebase DB sync failed", "session", sessionID, "error", err)
 		}
 		deleted = n
 	}
 
-	slog.Info("轨迹已rebase", "session", sessionID, "at_round", atRound, "deleted", deleted)
+	log.Info("轨迹已rebase", "session", sessionID, "at_round", atRound, "deleted", deleted)
 	return deleted, nil
 }
 
@@ -485,10 +485,10 @@ func (t *Tracker) checkpointMaybe(sessionID string, st *sessionTracker, node *No
 		time.Since(st.lastCheckpoint) >= CheckpointInterval) {
 		go func() {
 			if err := t.repo.SaveNode(context.Background(), sessionID, node); err != nil {
-				slog.Warn("保存拓扑节点失败", "session", sessionID, "error", err)
+				log.Warn("保存拓扑节点失败", "session", sessionID, "error", err)
 			}
 			if err := t.repo.SaveSession(context.Background(), st.toRecord()); err != nil {
-				slog.Warn("保存拓扑会话失败", "session", sessionID, "error", err)
+				log.Warn("保存拓扑会话失败", "session", sessionID, "error", err)
 			}
 		}()
 		st.checkpointCount = 0
@@ -512,7 +512,7 @@ func (t *Tracker) RecoverActiveSessions(ctx context.Context) error {
 	for _, rec := range records {
 		nodes, err := t.repo.LoadNodes(ctx, rec.SessionID, RecoveryLoadNodes)
 		if err != nil {
-			slog.Warn("加载拓扑节点失败", "session", rec.SessionID, "error", err)
+			log.Warn("加载拓扑节点失败", "session", rec.SessionID, "error", err)
 		}
 
 		st := &sessionTracker{
@@ -534,11 +534,11 @@ func (t *Tracker) RecoverActiveSessions(ctx context.Context) error {
 		t.states[rec.SessionID] = st
 		t.mu.Unlock()
 
-		slog.Info("恢复拓扑会话", "session", rec.SessionID, "nodes", len(nodes),
+		log.Info("恢复拓扑会话", "session", rec.SessionID, "nodes", len(nodes),
 			"coord", rec.CurrentCoord, "lies", rec.TrustLies)
 	}
 
-	slog.Info("拓扑会话恢复完成", "count", len(records))
+	log.Info("拓扑会话恢复完成", "count", len(records))
 	return nil
 }
 
@@ -572,9 +572,9 @@ func (t *Tracker) Shutdown(ctx context.Context) {
 		}
 		if t.repo != nil {
 			if err := t.repo.SaveSession(ctx, st.toRecord()); err != nil {
-				slog.Warn("shutdown save session failed", "session", sessionID, "error", err)
+				log.Warn("shutdown save session failed", "session", sessionID, "error", err)
 			}
 		}
 	}
-	slog.Info("拓扑追踪器已关闭", "sessions", len(t.states))
+	log.Info("拓扑追踪器已关闭", "sessions", len(t.states))
 }

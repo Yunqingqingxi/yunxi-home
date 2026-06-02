@@ -2,7 +2,7 @@ package skill
 
 import (
 	"fmt"
-	"log/slog"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 	"os"
 	"path/filepath"
 	"strings"
@@ -82,7 +82,7 @@ func (l *Loader) reload() error {
 	l.skills = newSkills
 	l.mu.Unlock()
 
-	slog.Info("skills loaded", "count", len(newSkills), "dir", l.dirPath)
+	log.Info("skills loaded", "count", len(newSkills), "dir", l.dirPath)
 	return nil
 }
 
@@ -101,13 +101,13 @@ func (l *Loader) loadSkillDir(dirName string, skills map[string]*Manifest) {
 		}
 	}
 	if skillFile == "" {
-		slog.Debug("no SKILL.md found in skill dir", "dir", dirPath)
+		log.Debug("no SKILL.md found in skill dir", "dir", dirPath)
 		return
 	}
 
 	data, err := os.ReadFile(skillFile)
 	if err != nil {
-		slog.Warn("failed to read skill file", "path", skillFile, "error", err)
+		log.Warn("failed to read skill file", "path", skillFile, "error", err)
 		return
 	}
 
@@ -115,7 +115,7 @@ func (l *Loader) loadSkillDir(dirName string, skills map[string]*Manifest) {
 	m := parseSkill(content, dirName)
 
 	if m.Name == "" {
-		slog.Warn("skill missing name", "dir", dirPath)
+		log.Warn("skill missing name", "dir", dirPath)
 		return
 	}
 
@@ -132,14 +132,14 @@ func (l *Loader) loadFlatFile(filename string, skills map[string]*Manifest) {
 	fullPath := filepath.Join(l.dirPath, filename)
 	data, err := os.ReadFile(fullPath)
 	if err != nil {
-		slog.Warn("failed to read skill file", "path", fullPath, "error", err)
+		log.Warn("failed to read skill file", "path", fullPath, "error", err)
 		return
 	}
 
 	m := parseSkill(string(data), strings.TrimSuffix(filename, ext))
 
 	if m.Name == "" {
-		slog.Warn("skill missing name", "path", fullPath)
+		log.Warn("skill missing name", "path", fullPath)
 		return
 	}
 

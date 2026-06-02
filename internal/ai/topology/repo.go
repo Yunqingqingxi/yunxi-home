@@ -119,7 +119,7 @@ func (r *SQLiteRepo) SaveSession(ctx context.Context, s *SessionRecord) error {
 
 func (r *SQLiteRepo) LoadSession(ctx context.Context, sessionID string) (*SessionRecord, error) {
 	var rec SessionRecord
-	var startJSON, currentJSON string
+	var startJSON, currentJSON, lastActiveStr string
 	var trustLocked, forceTriggered, closedLoop int
 
 	err := r.db.QueryRowContext(ctx,
@@ -130,8 +130,16 @@ func (r *SQLiteRepo) LoadSession(ctx context.Context, sessionID string) (*Sessio
 		 FROM agent_sessions WHERE id = ?`, sessionID,
 	).Scan(&rec.SessionID, &rec.Status, &startJSON, &currentJSON,
 		&rec.TrustLies, &trustLocked, &rec.RejectCount, &forceTriggered,
-		&rec.CreatedAt, &rec.UpdatedAt, &rec.LastActiveAt,
+		&rec.CreatedAt, &rec.UpdatedAt, &lastActiveStr,
 		&closedLoop, &rec.ClosedDist)
+
+	if lastActiveStr != "" {
+		if t, err := time.Parse("2006-01-02T15:04:05Z", lastActiveStr); err == nil {
+			rec.LastActiveAt = t
+		} else if t, err := time.Parse("2006-01-02 15:04:05", lastActiveStr); err == nil {
+			rec.LastActiveAt = t
+		}
+	}
 
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -165,16 +173,23 @@ func (r *SQLiteRepo) LoadActiveSessions(ctx context.Context) ([]*SessionRecord, 
 	var records []*SessionRecord
 	for rows.Next() {
 		var rec SessionRecord
-		var startJSON, currentJSON string
+		var startJSON, currentJSON, lastActiveStr string
 		var trustLocked, forceTriggered, closedLoop int
 
 		if err := rows.Scan(&rec.SessionID, &rec.Status, &startJSON, &currentJSON,
 			&rec.TrustLies, &trustLocked, &rec.RejectCount, &forceTriggered,
-			&rec.CreatedAt, &rec.UpdatedAt, &rec.LastActiveAt,
+			&rec.CreatedAt, &rec.UpdatedAt, &lastActiveStr,
 			&closedLoop, &rec.ClosedDist); err != nil {
 			return nil, fmt.Errorf("scan agent_session: %w", err)
 		}
 
+		if lastActiveStr != "" {
+			if t, err := time.Parse("2006-01-02T15:04:05Z", lastActiveStr); err == nil {
+				rec.LastActiveAt = t
+			} else if t, err := time.Parse("2006-01-02 15:04:05", lastActiveStr); err == nil {
+				rec.LastActiveAt = t
+			}
+		}
 		json.Unmarshal([]byte(startJSON), &rec.StartCoord)
 		json.Unmarshal([]byte(currentJSON), &rec.CurrentCoord)
 		rec.TrustLocked = trustLocked == 1

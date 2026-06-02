@@ -214,7 +214,7 @@
 
   <!-- Assistant message -->
   <div
-    v-else-if="msg.role === 'assistant'"
+    v-else-if="msg.role === 'assistant' || msg.role === 'agent'"
     class="msg-row assistant"
   >
     <div class="avatar ai-avatar">
@@ -249,7 +249,7 @@
       /></svg>
     </div>
     <div class="ai-blocks">
-      <span class="role-tag">云兮之家</span>
+      <span class="role-tag">云兮</span>
       <span
         v-if="!msg.streaming && msg.durationMs >= 1000"
         class="msg-duration"
@@ -288,6 +288,12 @@
       >
         <span class="dot"></span><span class="dot"></span><span class="dot"></span>
       </div>
+      <!-- Fallback: done message with content but no blocks (agent results, system msgs) -->
+      <ContentBlock
+        v-else-if="!msg.streaming && !msg.blocks?.length && msg.content"
+        :content="msg.content"
+        :streaming="false"
+      />
       <!-- Error fallback -->
       <div
         v-else-if="msg.status === 'error' && !msg.blocks?.length"
@@ -298,50 +304,6 @@
     </div>
   </div>
 
-  <!-- Agent message -->
-  <div
-    v-else-if="msg.role === 'agent'"
-    class="msg-row agent"
-  >
-    <div class="avatar ai-avatar">
-      <svg
-        width="14"
-        height="14"
-        viewBox="0 0 16 16"
-        fill="none"
-      ><circle
-        cx="8"
-        cy="8"
-        r="7"
-        stroke="currentColor"
-        stroke-width="1.2"
-        fill="none"
-      /><circle
-        cx="5.5"
-        cy="7"
-        r="1"
-        fill="currentColor"
-      /><circle
-        cx="10.5"
-        cy="7"
-        r="1"
-        fill="currentColor"
-      /><path
-        d="M5.5 10.5c0 0 1 2 2.5 2s2.5-2 2.5-2"
-        stroke="currentColor"
-        stroke-width="1"
-        fill="none"
-        stroke-linecap="round"
-      /></svg>
-    </div>
-    <AgentBubble
-      :agent-id="msg.agentId"
-      :goal="msg.agentGoal"
-      :status="msg.agentStatus"
-      :round="msg.agentRound"
-      :summary="msg.agentSummary"
-    />
-  </div>
   <!-- Safety fallback: unknown role not rendered -->
   <div
     v-else
@@ -355,7 +317,7 @@ import { computed } from 'vue'
 import ContentBlock from './ContentBlock.vue'
 import ThinkingBlock from './ThinkingBlock.vue'
 import ToolCallBlock from './ToolCallBlock.vue'
-import AgentBubble from './AgentBubble.vue'
+
 
 const props = defineProps({
   msg: { type: Object, required: true },
@@ -415,126 +377,86 @@ function fmtDur(ms) {
 </script>
 
 <style scoped>
-.msg-row { display: flex; gap: 10px; align-items: flex-start; }
+/* ── Layout ── */
+.msg-row { display: flex; gap: 8px; align-items: flex-start; }
 .msg-row.user { justify-content: flex-end; }
-
 .avatar {
-  width: 30px; height: 30px; min-width: 30px; border-radius: 50%; flex-shrink: 0;
+  width: 28px; height: 28px; min-width: 28px; border-radius: 50%; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
-  background: var(--surface-card); border: 1px solid var(--border-default);
+  background: var(--surface-card, #fff); border: 1px solid var(--border-subtle, #e2e8f0);
 }
-.ai-avatar { color: var(--brand-500); }
-.user-avatar { color: var(--text-muted); }
+.ai-avatar { color: var(--brand-500, #06b6d4); }
+.user-avatar { color: var(--text-muted, #94a3b8); }
 
-.user-msg-wrap {
-  display: flex; flex-direction: column; align-items: flex-end; gap: 6px;
-  max-width: 78%;
-}
-.user-attachments {
-  display: flex; flex-direction: column; gap: 6px; width: 100%;
-}
+/* ── User message ── */
+.user-msg-wrap { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; max-width: 78%; }
+.user-attachments { display: flex; flex-direction: column; gap: 6px; width: 100%; }
 .file-card-msg {
-  display: flex; align-items: center; gap: 10px;
-  padding: 10px 14px; border-radius: 12px;
-  background: var(--surface-card); border: 1px solid var(--border-default);
-  color: var(--text-primary); transition: all 0.15s; cursor: pointer;
-  max-width: 300px;
+  display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 8px;
+  background: var(--surface-card, #fff); border: 1px solid var(--border-subtle, #e2e8f0);
+  color: var(--text-primary); cursor: pointer; max-width: 300px;
 }
-.file-card-msg:hover {
-  border-color: var(--brand-300); background: var(--brand-50);
-  box-shadow: 0 2px 8px rgba(6,182,212,0.08);
-}
+.file-card-msg:hover { border-color: var(--brand-300, #67e8f9); }
 .file-card-icon { flex-shrink: 0; width: 24px; height: 28px; }
 .file-card-icon svg { width: 24px; height: 28px; display: block; }
 .file-card-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .file-card-name { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); }
 .file-card-meta { font-size: 10px; color: var(--text-muted); }
-[data-theme="dark"] .file-card-msg { background: rgba(18,26,44,0.55); border-color: rgba(255,255,255,0.07); }
-[data-theme="dark"] .file-card-msg:hover { border-color: rgba(34,211,238,0.25); background: rgba(6,182,212,0.06); }
 
 .user-bubble {
-  width: 100%; background: rgba(6,182,212,0.08);
-  border: 1px solid rgba(6,182,212,0.18);
-  color: var(--text-primary);
-  padding: 10px 16px; border-radius: 16px;
-  box-shadow: 0 2px 12px rgba(6,182,212,0.06); line-height: 1.5;
+  width: 100%; padding: 10px 14px; border-radius: 8px;
+  background: var(--surface-card, #fff);
+  border: 1px solid var(--border-subtle, #e2e8f0);
+  color: var(--text-primary); line-height: 1.6;
 }
-.user-bubble :deep(.content-body p) { margin: 0; color: var(--text-primary); }
-.user-bubble :deep(.content-body a) { color: var(--brand-600); }
+.user-bubble :deep(.content-body p) { margin: 0; }
 
+/* ── AI message ── */
 .ai-blocks {
-  display: flex; flex-direction: column; gap: 4px;
-  background: var(--surface-raised); border: 1px solid var(--border-default);
-  border-radius: 14px; padding: 14px 16px;
+  display: flex; flex-direction: column; gap: 12px;
+  border: 1px solid var(--border-subtle, #e2e8f0); border-radius: 8px; padding: 12px 14px;
+  background: var(--surface-card, #fff);
 }
-
+/* Block type separators */
+.ai-blocks :deep(.thinking-block + .tool-block),
+.ai-blocks :deep(.content-block + .tool-block) {
+  margin-top: 4px; padding-top: 8px;
+  border-top: 1px solid var(--border-subtle, #e2e8f0);
+}
+.ai-blocks :deep(.tool-block + .content-block) {
+  margin-top: 4px; padding-top: 8px;
+  border-top: 1px solid var(--border-subtle, #e2e8f0);
+}
 .role-tag {
-  display: inline-block; font-size: 10px; font-weight: 600;
-  color: var(--brand-600); background: var(--brand-50);
-  padding: 2px 8px; border-radius: 100px; text-transform: uppercase;
-  letter-spacing: 0.5px; margin-bottom: 4px; user-select: none;
+  display: inline-block; font-size: 11px; font-weight: 600;
+  color: var(--text-muted); padding-bottom: 4px; user-select: none;
 }
-[data-theme="dark"] .role-tag { color: var(--brand-400); }
+.msg-duration { display: inline-block; font-size: 10px; color: var(--text-muted); margin-left: 6px; user-select: none; }
 
-.msg-duration {
-  display: inline-block; font-size: 10px; font-weight: 400;
-  color: var(--text-muted); margin-left: 6px; user-select: none;
-}
-
+/* ── Streaming dots ── */
 .ai-empty { display: flex; align-items: center; gap: 6px; padding: 4px 0; min-height: 20px; }
-.ai-empty.error { color: var(--color-danger); font-size: 12px; }
-.ai-empty .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--brand-400); animation: dotBounce 1.2s ease-in-out infinite; }
+.ai-empty.error { color: #ef4444; font-size: 12px; }
+.ai-empty .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--text-muted); animation: dotBounce 1.2s ease-in-out infinite; }
 .ai-empty .dot:nth-child(2) { animation-delay: 0.2s; }
 .ai-empty .dot:nth-child(3) { animation-delay: 0.4s; }
 @keyframes dotBounce { 0%,60%,100% { transform: translateY(0); opacity: 0.25; } 30% { transform: translateY(-5px); opacity: 1; } }
-.muted-text { font-size: 12px; color: var(--text-muted); }
-.error-text { font-size: 12px; color: var(--color-danger); }
 
-@media (max-width: 767px) {
-  .msg-row { padding: 0 4px; }
-  .ai-blocks { max-width: calc(100% - 44px); }
-  .user-msg-wrap { max-width: calc(100% - 44px); }
-  .avatar { width: 24px; height: 24px; min-width: 24px; flex-shrink: 0; }
-}
+/* ── Animations (minimal) ── */
+.msg-row { animation: msgIn 0.2s ease-out; }
+@keyframes msgIn { from { opacity: 0; } to { opacity: 1; } }
 
-
-/* Extra polish */
-.user-bubble {
-  animation: userMsgIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-}
-@keyframes userMsgIn {
-  from { opacity: 0; transform: translateX(12px); }
-  to   { opacity: 1; transform: translateX(0); }
+/* ── Dark mode ── */
+@media (prefers-color-scheme: dark) {
+  .ai-blocks { background: #1e293b; border-color: #334155; }
+  .user-bubble { background: #1e293b; border-color: #334155; }
+  .file-card-msg { background: #1e293b; border-color: #334155; }
+  .file-card-msg:hover { border-color: #22d3ee; }
+  .avatar { background: #1e293b; border-color: #334155; }
 }
 
-.ai-blocks {
-  animation: aiMsgIn 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+/* ── Mobile ── */
+@media (max-width: 1023px) {
+  .ai-blocks, .user-bubble { font-size: 15px; }
+  .avatar { width: 24px; height: 24px; min-width: 24px; }
 }
-@keyframes aiMsgIn {
-  from { opacity: 0; transform: translateX(-8px); }
-  to   { opacity: 1; transform: translateX(0); }
-}
-
-.role-tag {
-  animation: tagFadeIn 0.3s var(--ease-out-expo);
-}
-@keyframes tagFadeIn {
-  from { opacity: 0; transform: translateY(-4px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-
-[data-theme="dark"] .ai-blocks {
-  background: rgba(18,26,44,0.55); border-color: rgba(255,255,255,0.07);
-}
-.msg-row.agent { padding-left: 0; }
-.msg-row.agent :deep(.agent-bubble) { max-width: 82%; }
-[data-theme="dark"] .user-bubble {
-  background: rgba(34,211,238,0.10); border-color: rgba(34,211,238,0.20);
-  box-shadow: 0 2px 12px rgba(34,211,238,0.04);
-}
-[data-theme="dark"] .user-bubble :deep(.content-body a) { color: #22d3ee; }
-[data-theme="dark"] .role-tag {
-  color: #22d3ee; background: rgba(6,182,212,0.12);
-}
-
 </style>

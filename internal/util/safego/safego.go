@@ -4,10 +4,13 @@ package safego
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"runtime/debug"
 	"time"
+
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 )
+
+var log = logger.ForComponent("runtime")
 
 // Notifier is called when a goroutine panics. Set it to integrate with custom alerting.
 var Notifier func(name string, panicVal any, stack []byte)
@@ -57,14 +60,14 @@ func GoWithRestart(name string, maxRestarts int, restartWindow time.Duration, fn
 
 			restarts++
 			if maxRestarts > 0 && restarts > maxRestarts {
-				slog.Error("safego: max restarts reached", "name", name, "restarts", restarts)
+				log.Error("goroutine 重启次数超限", logger.KeyEvent, "goroutine_panic", "name", name, "restarts", restarts)
 				return
 			}
 			if time.Since(windowStart) > restartWindow {
 				restarts = 0
 				windowStart = time.Now()
 			}
-			slog.Warn("safego: restarting goroutine", "name", name, "restarts", restarts)
+			log.Warn("重启 goroutine", logger.KeyEvent, "goroutine_restart", "name", name, "restarts", restarts)
 			time.Sleep(time.Second) // brief pause before restart
 		}
 	}()
@@ -76,7 +79,8 @@ func recoverPanic(name string) {
 		return
 	}
 	stack := debug.Stack()
-	slog.Error("safego: goroutine panic",
+	log.Error("goroutine panic",
+		logger.KeyEvent, "goroutine_panic",
 		"name", name,
 		"panic", fmt.Sprintf("%v", r),
 		"stack", string(stack),

@@ -10,7 +10,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"log/slog"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -20,6 +20,8 @@ import (
 
 	"github.com/Yunqingqingxi/yunxi-home/internal/nas/base"
 )
+
+var log = logger.ForComponent("nas")
 
 // FileSystem 本地文件系统实现
 type FileSystem struct {
@@ -136,7 +138,7 @@ func (s *FileSystem) resolve(requestPath string) (string, error) {
 
 // ListDir 列出目录内容
 func (s *FileSystem) ListDir(requestPath string) ([]base.FileInfo, error) {
-	slog.Info("列出目录", "路径", requestPath)
+	log.Info("列出目录", "路径", requestPath)
 	absPath, err := s.resolve(requestPath)
 	if err != nil {
 		return nil, err
@@ -218,7 +220,7 @@ func (s *FileSystem) Mkdir(requestPath string) error {
 
 // Delete 删除文件或目录
 func (s *FileSystem) Delete(requestPath string) error {
-	slog.Info("删除文件", "路径", requestPath)
+	log.Info("删除文件", "路径", requestPath)
 	absPath, err := s.resolve(requestPath)
 	if err != nil {
 		return err
@@ -705,7 +707,7 @@ func (s *FileSystem) StartChunkGC(interval time.Duration) {
 			s.CleanExpiredChunks()
 		}
 	}()
-	slog.Info("chunk GC started", "interval", interval)
+	log.Info("chunk GC started", "interval", interval)
 }
 
 func (s *FileSystem) cleanChunkDirIfEmpty() {
@@ -781,7 +783,7 @@ func (s *FileSystem) CreateZip(w io.Writer, paths []string) error {
 	defer zw.Close()
 	for _, p := range paths {
 		if err := s.addFileToZip(zw, p); err != nil {
-			slog.Warn("zip: skip file", "path", p, "error", err)
+			log.Warn("zip: skip file", "path", p, "error", err)
 			continue
 		}
 	}

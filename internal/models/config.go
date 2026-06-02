@@ -22,6 +22,10 @@ type ChatSession struct {
 	Title        string    `json:"title"`
 	MessagesJSON string    `json:"-" db:"messages"`
 	MessageCount int       `json:"message_count"`
+	// Pinned 是否置顶
+	Pinned bool `json:"pinned"`
+	// IsActive 是否有活跃的流或 Agent
+	IsActive bool `json:"is_active"`
 	// State 会话运行状态: idle | waiting_user | executing_tool | interrupted
 	State      string `json:"state"`
 	// CurrentGoal 当前任务目标

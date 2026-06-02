@@ -3,7 +3,6 @@
 import (
 	"context"
 	"database/sql"
-	"log/slog"
 	"time"
 
 	"github.com/Yunqingqingxi/yunxi-home/internal/models"
@@ -50,14 +49,14 @@ func NewSyncer(sqliteExec, mysqlExec Executor, syncCh <-chan SyncJob, sqliteCfg,
 
 // Start 启动后台同步
 func (s *Syncer) Start(ctx context.Context) {
-	slog.Info("MySQL 同步器已启动")
+	log.Info("MySQL 同步器已启动")
 
 	// 1. 启动时全量同步
 	s.fullSyncDomains(ctx)
 	s.syncAllHistory(ctx)
 	s.syncAllConfig(ctx)
 	s.fullSyncUsers(ctx)
-	slog.Info("MySQL 初始全量同步完成")
+	log.Info("MySQL 初始全量同步完成")
 
 	// 2. 定期全量校准（每 10 分钟）
 	reconcileTicker := time.NewTicker(10 * time.Minute)
@@ -72,9 +71,9 @@ func (s *Syncer) Start(ctx context.Context) {
 			s.syncAllHistory(ctx)
 			s.syncAllConfig(ctx)
 			s.fullSyncUsers(ctx)
-				slog.Debug("MySQL 定期校准完成")
+				log.Debug("MySQL 定期校准完成")
 		case <-s.stopCh:
-			slog.Info("MySQL 同步器已停止")
+			log.Info("MySQL 同步器已停止")
 			return
 		case <-ctx.Done():
 			return
@@ -107,7 +106,7 @@ func (s *Syncer) syncOneDomain(ctx context.Context, id int64) {
 func (s *Syncer) fullSyncDomains(ctx context.Context) {
 	sqliteRecs, err := s.sqliteDom.List(ctx)
 	if err != nil {
-		slog.Warn("全量同步: 读取 SQLite domains 失败", "error", err)
+		log.Warn("全量同步: 读取 SQLite domains 失败", "error", err)
 		return
 	}
 	mysqlRecs, _ := s.mysqlDom.List(ctx)
@@ -155,7 +154,7 @@ func (s *Syncer) syncAllHistory(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			slog.Warn("历史同步超时或取消", "synced", totalSynced)
+			log.Warn("历史同步超时或取消", "synced", totalSynced)
 			return
 		default:
 		}
@@ -163,7 +162,7 @@ func (s *Syncer) syncAllHistory(ctx context.Context) {
 		sqliteRecs, err := s.sqliteHist.List(ctx, ListParams{Page: page, Size: batchSize})
 		if err != nil {
 			if page == 1 {
-				slog.Warn("全量同步: 读取 SQLite histories 失败", "error", err)
+				log.Warn("全量同步: 读取 SQLite histories 失败", "error", err)
 			}
 			return
 		}
@@ -188,7 +187,7 @@ func (s *Syncer) syncAllHistory(ctx context.Context) {
 	}
 
 	if totalSynced > 0 {
-		slog.Info("历史全量同步完成", "synced", totalSynced)
+		log.Info("历史全量同步完成", "synced", totalSynced)
 	}
 }
 
@@ -215,7 +214,7 @@ func (s *Syncer) syncHistoryIncremental(ctx context.Context) {
 func (s *Syncer) syncAllConfig(ctx context.Context) {
 	sqliteSections, err := s.sqliteCfg.GetAll(ctx)
 	if err != nil {
-		slog.Warn("全量同步: 读取 SQLite config 失败", "error", err)
+		log.Warn("全量同步: 读取 SQLite config 失败", "error", err)
 		return
 	}
 	mysqlSections, _ := s.mysqlCfg.GetAll(ctx)
@@ -225,17 +224,17 @@ func (s *Syncer) syncAllConfig(ctx context.Context) {
 			continue
 		}
 		if err := s.mysqlCfg.SetSection(ctx, section, data); err != nil {
-			slog.Warn("同步 config 到 MySQL 失败", "section", section, "error", err)
+			log.Warn("同步 config 到 MySQL 失败", "section", section, "error", err)
 		}
 	}
 }
 
 func (s *Syncer) fullSyncUsers(ctx context.Context) {
 	sqliteUsers, err := s.sqliteUser.List(ctx)
-	if err != nil { slog.Warn("全量同步: 读取 SQLite users 失败", "error", err); return }
+	if err != nil { log.Warn("全量同步: 读取 SQLite users 失败", "error", err); return }
 	for i := range sqliteUsers {
 		if err := s.mysqlUser.Upsert(ctx, &sqliteUsers[i]); err != nil {
-			slog.Warn("同步 user 到 MySQL 失败", "username", sqliteUsers[i].Username, "error", err)
+			log.Warn("同步 user 到 MySQL 失败", "username", sqliteUsers[i].Username, "error", err)
 		}
 	}
 	mysqlUsers, _ := s.mysqlUser.List(ctx)

@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 	"net/http"
 	"strings"
 	"time"
@@ -82,7 +82,7 @@ func (h *ChatHandler) Chat(c echo.Context) error {
 
 	ctx := c.Request().Context()
 	if req.Model != "" {
-		slog.Info("Chat request with model override", "model", req.Model, "session", req.SessionID)
+		log.Info("Chat request with model override", "model", req.Model, "session", req.SessionID)
 		ctx = context.WithValue(ctx, base.ModelOverrideKey{}, req.Model)
 	}
 	if req.PlanMode {
@@ -126,16 +126,26 @@ func (h *ChatHandler) StreamSession(c echo.Context) error {
 	// Emit initial session_status so the frontend knows streaming/agent state
 	hasStream := h.aiService.HasActiveStream(id)
 	hasAgents := h.aiService.HasRunningAgents(id)
-	slog.Info("StreamSession 重连，发送初始状态",
+	// Collect agent details for reconnection state restore
+	agentsJSON := "[]"
+	if hasAgents {
+		agents := h.aiService.GetSessionAgents(id)
+		if len(agents) > 0 {
+			data, _ := json.Marshal(agents)
+			agentsJSON = string(data)
+		}
+	}
+	log.Info("StreamSession 重连，发送初始状态",
 		"session", id,
 		"streaming", hasStream,
 		"has_agents", hasAgents,
+		"agent_count", len(h.aiService.GetSessionAgents(id)),
 	)
 	initEv, _ := json.Marshal(base.ChatStreamEvent{
 		Type: "session_status",
 		Content: fmt.Sprintf(
-			`{"session_id":"%s","streaming":%v,"has_agents":%v}`,
-			id, hasStream, hasAgents,
+			`{"session_id":"%s","streaming":%v,"has_agents":%v,"agents":%s}`,
+			id, hasStream, hasAgents, agentsJSON,
 		),
 	})
 	fmt.Fprintf(c.Response(), "data: %s\n\n", initEv)
@@ -173,6 +183,10 @@ func (h *ChatHandler) ListSessions(c echo.Context) error {
 		sessions = h.aiService.ListSessionsByType(sessionType)
 	} else {
 		sessions = h.aiService.ListSessions()
+	}
+	// Fill IsActive for each session
+	for i := range sessions {
+		sessions[i].IsActive = h.aiService.HasActiveStream(sessions[i].ID) || h.aiService.HasRunningAgents(sessions[i].ID)
 	}
 	return c.JSON(http.StatusOK, successResp(sessions))
 }
@@ -230,6 +244,28 @@ func (h *ChatHandler) DeleteSession(c echo.Context) error {
 	return c.JSON(http.StatusOK, successResp(map[string]string{"message": "会话已删除"}))
 }
 
+// UpdateSessionMeta 更新会话元数据（标题、置顶）
+// PATCH /api/chat/sessions/:id
+func (h *ChatHandler) UpdateSessionMeta(c echo.Context) error {
+	if h.aiService == nil { return c.JSON(http.StatusNotFound, errorResp("AI 未启用")) }
+	id := c.Param("id")
+	if id == "" { return c.JSON(http.StatusBadRequest, errorResp("缺少 session_id")) }
+	var req struct {
+		Title  *string `json:"title"`
+		Pinned *bool   `json:"pinned"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, errorResp("参数错误"))
+	}
+	if req.Title == nil && req.Pinned == nil {
+		return c.JSON(http.StatusBadRequest, errorResp("至少需要 title 或 pinned"))
+	}
+	if err := h.aiService.UpdateSessionMeta(id, req.Title, req.Pinned); err != nil {
+		return c.JSON(http.StatusInternalServerError, errorResp("更新失败: "+err.Error()))
+	}
+	return c.JSON(http.StatusOK, successResp(map[string]string{"status": "updated"}))
+}
+
 // ConfirmAction 处理危险操作确认
 // POST /api/chat/confirm
 func (h *ChatHandler) ConfirmAction(c echo.Context) error {
@@ -253,7 +289,7 @@ func (h *ChatHandler) RespondInteractive(c echo.Context) error {
 	var req base.InteractiveResponse
 	if err := c.Bind(&req); err != nil {
 		body, _ := io.ReadAll(c.Request().Body)
-		slog.Warn("RespondInteractive bind failed", "error", err, "body", string(body))
+		log.Warn("RespondInteractive bind failed", "error", err, "body", string(body))
 		return c.JSON(http.StatusBadRequest, errorResp("参数错误: "+err.Error()))
 	}
 	if !h.aiService.RespondInteractive(req) {
@@ -617,12 +653,12 @@ func (h *ChatHandler) InterruptSession(c echo.Context) error {
 	if req.Mode == "" {
 		req.Mode = "soft"
 	}
-	slog.Info("InterruptSession API 调用", "session", id, "mode", req.Mode)
+	log.Info("InterruptSession API 调用", "session", id, "mode", req.Mode)
 	snapshot, err := h.aiService.CancelSession(id, req.Mode)
 	if err != nil {
-		slog.Error("InterruptSession 失败", "session", id, "error", err)
+		log.Error("InterruptSession 失败", "session", id, "error", err)
 		return c.JSON(http.StatusInternalServerError, errorResp("中断失败: "+err.Error()))
 	}
-	slog.Info("InterruptSession 成功", "session", id, "snapshot", snapshot)
+	log.Info("InterruptSession 成功", "session", id, "snapshot", snapshot)
 	return c.JSON(http.StatusOK, successResp(snapshot))
 }

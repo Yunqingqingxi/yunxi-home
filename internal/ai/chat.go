@@ -4,8 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
+	"io"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
+	"net/http"
+	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -14,6 +18,7 @@ import (
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/agent"
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/async"
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/base"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai/intent"
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/coordinator"
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/cron"
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/goal"
@@ -59,6 +64,7 @@ type Service struct {
 	mcpCfgPath      string         // mcp.json 路径（可配置）
 	tracker         *topology.Tracker      // 拓扑约束追踪器
 	promptStore     *base.PromptStore      // 提示词外置存储+缓存
+	intentPipeline  *intent.Pipeline        // 意图路由管线（nil=禁用）
 	topoActive      map[string]bool        // 会话级拓扑激活状态
 	topoMu          sync.RWMutex
 	confirmChannels      map[string]chan ConfirmResult
@@ -175,6 +181,7 @@ type ServiceConfig struct {
 	Tracker         *topology.Tracker     // 拓扑约束追踪器（nil=禁用）
 	PromptStore     *base.PromptStore     // 提示词外置存储（nil=用 Go 常量）
 	ConfigGetter    base.ConfigGetter      // 提示词 DB 后端（用于 PromptStore）
+	IntentPipeline  *intent.Pipeline       // 意图路由管线（nil=禁用）
 }
 
 func DefaultServiceConfig() ServiceConfig {
@@ -198,6 +205,7 @@ func NewService(provider base.AIProvider, reg *register.Registry, sessionRepo da
 		mcpCfgPath:      cfg.MCPConfigPath,
 		tracker:         cfg.Tracker,
 		promptStore:     cfg.PromptStore,
+		intentPipeline:  cfg.IntentPipeline,
 		topoActive:      make(map[string]bool),
 		confirmChannels:     make(map[string]chan ConfirmResult),
 		interactiveChannels: make(map[string]chan base.InteractiveResponse),
@@ -266,6 +274,8 @@ func NewService(provider base.AIProvider, reg *register.Registry, sessionRepo da
 			}
 			msg := fmt.Sprintf("[后台任务完成] %d/%d 成功\n%s", ok, ok+fail, strings.Join(parts, "\n"))
 			svc.InjectWithPriority(sessionID, msg, "info", "agent_completion")
+			// 持久化到会话历史，确保刷新不丢失
+			svc.SaveSystemMessage(sessionID, msg)
 		},
 	})
 	// Periodic agent cleanup (every 5 min, remove agents older than 30 min)
@@ -306,7 +316,18 @@ func (s *Service) buildQQBotPrompt() string {
 func (s *Service) SetMCPSubsystem(sub *mcp.Subsystem)     { s.mcpSubsystem = sub }
 func (s *Service) GetMCPSubsystem() *mcp.Subsystem        { return s.mcpSubsystem }
 func (s *Service) ChatLogger() *ChatLogger                  { return s.chatLogger }
-func (s *Service) Shutdown()                                 { s.chatLogger.Close(); if s.mcpManager != nil { s.mcpManager.CloseAll() } }
+func (s *Service) Shutdown() {
+	// Cancel all active LLM streams to prevent shutdown hang
+	s.activeStreamsMu.Lock()
+	for sid, cancel := range s.activeStreams {
+		cancel()
+		delete(s.activeStreams, sid)
+	}
+	s.activeStreamsMu.Unlock()
+	log.Info("已取消所有活跃 LLM 流", "count", len(s.activeStreams))
+	s.chatLogger.Close()
+	if s.mcpManager != nil { s.mcpManager.CloseAll() }
+}
 
 // ── Goal ──
 
@@ -375,7 +396,7 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 	s.activeStreamsMu.Lock()
 	if _, ok := s.activeStreams[sessionID]; ok {
 		s.activeStreamsMu.Unlock()
-		slog.Debug("会话已有活跃流，转为注入", "会话", sessionID)
+		log.Debug("会话已有活跃流，转为注入", "会话", sessionID)
 		s.InjectUserMessage(sessionID, userMessage)
 		// Return event bus channel so the client can still watch
 		subCh := eb.subscribe()
@@ -438,11 +459,26 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 				AgentStatus: string(a.Status),
 				Content:     a.Summary,
 			}
-			select {
-			case ch <- ev:
-			default:
-			}
+			// Safety: ch may be closed when main stream ends before agent finishes.
+			func() {
+				defer func() { recover() }()
+				select {
+				case ch <- ev:
+				default:
+				}
+			}()
 			eb.publish(ev)
+
+			// Persist agent result to session history for page refresh survival
+			if eventType == "agent_result" {
+				status := "完成"
+				if a.Status == agent.StatusError {
+					status = "失败"
+				}
+				resultMsg := fmt.Sprintf("[子Agent %s] %s | 目标: %s | 结果: %s",
+					a.ID, status, a.Goal, a.Summary)
+				s.SaveSystemMessage(sessionID, resultMsg)
+			}
 		})
 		defer s.agentMgr.SetProgressFn(oldAgentFn)
 		// ── End agent progress routing ──
@@ -471,6 +507,29 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 	history = append(history, base.Message{Role: "user", Content: userMessage})
 		s.chatLogger.LogUserMessage(sessionID, 0, userMessage)
 
+		// ── 意图路由（v3.2）──
+		if s.intentPipeline != nil {
+			result := s.intentPipeline.Route(bgCtx, userMessage)
+			switch result.Stage {
+			case "rule":
+				injectMsg := fmt.Sprintf(
+					"[系统指令] 用户意图已识别为工具 '%s'（匹配: %s, 置信度: %.0f%%）。"+
+						"请先调用此工具处理用户请求。",
+					result.Tool, result.Pattern, result.Strength*100,
+				)
+				history = append(history, base.Message{Role: "system", Content: injectMsg})
+				log.Info("意图路由(规则)", "会话", sessionID, "工具", result.Tool,
+					"模式", result.Pattern)
+			case "llm":
+				injectMsg := fmt.Sprintf(
+					"[建议] 用户意图可能对应工具 '%s'，请考虑使用。如果判断不匹配可忽略。",
+					result.Tool,
+				)
+				history = append(history, base.Message{Role: "system", Content: injectMsg})
+				log.Info("意图路由(LLM)", "会话", sessionID, "工具", result.Tool)
+			}
+		}
+
 		// ── 斜杠命令解析 ──
 		if cmdName, cmdArgs, ok := parseSlashCommand(userMessage); ok {
 			// /compact: AI 摘要 + 静默执行（不调 AI 回复）
@@ -483,7 +542,7 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 			// 其他内置命令：后台执行 + AI 简短确认
 			if builtinCommandSet[cmdName] {
 				if result := s.preExecCommand(sessionID, cmdName, cmdArgs); result != "" {
-					slog.Info("斜杠命令预执行", "session", sessionID, "command", cmdName, "args", cmdArgs)
+					log.Info("斜杠命令预执行", "session", sessionID, "command", cmdName, "args", cmdArgs)
 					history = append(history, base.Message{Role: "system", Content: result})
 					s.chatLogger.LogInject(sessionID, 0, result)
 				}
@@ -491,7 +550,7 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 		}
 
 		allTools := s.registry.All()
-		type qs struct{ round, maxRounds, loopCount, silentRounds int; lastToolSig string }
+		type qs struct{ round, maxRounds, loopCount, silentRounds int; lastToolSig string; taskAbandonCount int; taskStallCount int }
 		state := qs{maxRounds: 100}
 		silenceStart := time.Now()
 		topoActive := s.isTopologyActive(sessionID) // 一次性读取，每轮复用
@@ -508,7 +567,7 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 				} else {
 					history = append(history, base.Message{Role: "system", Content: msg.Content})
 				}
-				slog.Debug("消息注入", "会话", sessionID, "来源", msg.Source, "优先级", msg.Priority)
+				log.Debug("消息注入", "会话", sessionID, "来源", msg.Source, "优先级", msg.Priority)
 				s.chatLogger.LogInject(sessionID, state.round, msg.Content)
 			}
 			if interrupted {
@@ -526,7 +585,7 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 			// ── ForceTools 检查（拓扑激活时）──
 			if topoActive && s.tracker != nil {
 				if forcedTool := s.tracker.ShouldForceTools(sessionID, s.recentToolNames(history, 10)); forcedTool != "" {
-					slog.Info("ForceTools 触发", "会话", sessionID, "工具", forcedTool, "轮次", state.round)
+					log.Info("ForceTools 触发", "会话", sessionID, "工具", forcedTool, "轮次", state.round)
 					s.chatLogger.LogRoundStart(sessionID, state.round, len(history), len(allTools))
 					// 直接执行强制工具，跳过 LLM 调用
 					s.executeForcedTool(sessionID, forcedTool, bgCtx, emit, &history, state.round, &state.round)
@@ -540,12 +599,31 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 				history = s.ensureTopologyState(history, sessionID)
 			}
 
-			slog.Debug("调用LLM", "会话", sessionID, "轮次", state.round, "历史消息数", len(history), "工具数", len(allTools))
+			// ── ForceTools：进度过半且关键工具缺失时跳过 LLM ──
+			if topoActive && s.tracker != nil {
+				recentTools := s.extractRecentToolNames(history, 10)
+				if forceTool := s.tracker.ShouldForceTools(sessionID, recentTools); forceTool != "" {
+					trackerSt := s.tracker.GetState(sessionID)
+					progress := 0.0
+					if trackerSt != nil {
+						progress = trackerSt.CurrentCoord.X
+					}
+					injectMsg := fmt.Sprintf(
+						"[系统指令] 进度已达 %.1f/10，必须立即调用工具 '%s'。调用后给用户一句话说明执行了什么。",
+						progress, forceTool,
+					)
+					history = append(history, base.Message{Role: "system", Content: injectMsg})
+					log.Info("ForceTools触发", "会话", sessionID, "工具", forceTool,
+						"进度", fmt.Sprintf("%.1f", progress))
+				}
+			}
+
+			log.Debug("调用LLM", "会话", sessionID, "轮次", state.round, "历史消息数", len(history), "工具数", len(allTools))
 			s.chatLogger.LogRoundStart(sessionID, state.round, len(history), len(allTools))
 			stream, err := s.provider.ChatStream(bgCtx, history, allTools)
 			if err != nil {
 				s.chatLogger.LogError(sessionID, state.round, "LLM调用失败: "+err.Error())
-			slog.Error("LLM调用失败", "会话", sessionID, "轮次", state.round, "错误", err.Error())
+			log.Error("LLM调用失败", "会话", sessionID, "轮次", state.round, "错误", err.Error())
 				emit(base.ChatStreamEvent{Type: "error", Content: "AI 服务异常: " + err.Error()})
 				s.sessions.Save(sessionID, history)
 				return
@@ -595,16 +673,16 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 					contentBuf.WriteString(stripped)
 					// 从 roundBlocks 中也清理 topology 标签
 					s.stripTopoFromBlocks(&roundBlocks)
-					slog.Debug("拓扑标签已解析", "会话", sessionID, "坐标", fmt.Sprintf("(%.1f,%.2f,%.2f)", parsedTopo.Coord.X, parsedTopo.Coord.Y, parsedTopo.Coord.Z), "工具", parsedTopo.Tools)
+					log.Debug("拓扑标签已解析", "会话", sessionID, "坐标", fmt.Sprintf("(%.1f,%.2f,%.2f)", parsedTopo.Coord.X, parsedTopo.Coord.Y, parsedTopo.Coord.Z), "工具", parsedTopo.Tools)
 				}
 			}
 			if reasoningBuf.Len() > 0 { s.chatLogger.LogThinking(sessionID, state.round, reasoningBuf.String()) }
 			if contentBuf.Len() > 0 { s.chatLogger.LogContent(sessionID, state.round, contentBuf.String()) }
 			if len(toolCalls) > 0 {
-			slog.Debug("检测到工具调用", "会话", sessionID, "轮次", state.round, "工具数", len(toolCalls),
+			log.Debug("检测到工具调用", "会话", sessionID, "轮次", state.round, "工具数", len(toolCalls),
 						"AI内容", truncateStr(contentBuf.String(), 200), "思考长度", reasoningBuf.Len())
 					for _, tc := range toolCalls {
-						slog.Debug("工具调用详情", "会话", sessionID, "轮次", state.round, "工具", tc.Function.Name, "参数", truncateStr(tc.Function.Arguments, 300))
+						log.Debug("工具调用详情", "会话", sessionID, "轮次", state.round, "工具", tc.Function.Name, "参数", truncateStr(tc.Function.Arguments, 300))
 					}
 			history = append(history, base.Message{Role: "assistant", Content: contentBuf.String(), ReasoningContent: reasoningBuf.String(), ToolCalls: toolCalls, HasToolCalls: true, Blocks: roundBlocks})
 			for _, tc := range toolCalls {
@@ -641,8 +719,30 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 			// Send tool_start event so frontend knows what's executing
 			emit(base.ChatStreamEvent{Type: "tool_start", Tool: tc.Function.Name, Args: tc.Function.Arguments})
 			toolStartTime := time.Now()
-			slog.Debug("开始执行工具", "工具", tc.Function.Name)
+			log.Debug("开始执行工具", "工具", tc.Function.Name)
 				s.chatLogger.LogToolStart(sessionID, state.round, tc.Function.Name, tc.Function.Arguments)
+
+			// ── 后台异步执行：长时间任务不阻塞对话流 ──
+			isBg := false
+			if tool, ok := s.registry.Get(tc.Function.Name); ok {
+				if bg, _ := args["background"].(bool); bg {
+					isBg = true
+				}
+				if tool.Background {
+					isBg = true
+				}
+			}
+			if isBg {
+				tool, _ := s.registry.Get(tc.Function.Name)
+				if tool != nil {
+					s.dispatchBackground(tool, tc.Function.Name, args, sessionID, ch)
+				}
+				placeholder := fmt.Sprintf("[后台执行] 任务 '%s' 已提交，正在后台运行。完成后结果会自动注入对话。", tc.Function.Name)
+				history = append(history, base.Message{Role: "tool", Content: placeholder, ToolCallID: tc.ID})
+				s.sessions.Save(sessionID, history)
+				state.round++
+				continue
+			}
 
 			// Execute tool with heartbeat to prevent frontend timeout
 			type toolDone struct {
@@ -705,7 +805,7 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 							Labels: map[string]string{"tool": tc.Function.Name, "session": sessionID, "status": toolStatus},
 							Value: elapsed,
 						})
-						slog.Debug("工具执行完成", "工具", tc.Function.Name, "状态", string(result.Status), "结果", truncateStr(obs, 200))
+						log.Debug("工具执行完成", "工具", tc.Function.Name, "状态", string(result.Status), "结果", truncateStr(obs, 200))
 						emit(base.ChatStreamEvent{Type: "tool_result", Tool: tc.Function.Name, Content: obs})
 						if len(history) > 0 && history[len(history)-1].Role == "assistant" {
 							history[len(history)-1].Blocks = append(history[len(history)-1].Blocks, base.ContentBlock{Type: base.BlockTypeToolResult, ToolName: tc.Function.Name, ToolResult: obs, ToolCallID: tc.ID})
@@ -736,12 +836,47 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 			finalContent := contentBuf.String()
 			if finalContent == "" { finalContent = reasoningBuf.String() }
 			if finalContent == "" { finalContent = "抱歉，我没有生成回复。" }
-			history = append(history, base.Message{Role: "assistant", Content: finalContent, ReasoningContent: reasoningBuf.String(), Blocks: roundBlocks})
+
+		// ── 任务完成度检测：用几何距离替代启发式规则 ──
+		// 豁免条件（不拦截）：
+		//   1. AI 已生成有实质的回复（≥80字符）
+		//   2. 上一轮已派生后台 Agent/后台任务处理
+		shouldIntercept := len(finalContent) < 80 &&
+			!s.hasRecentBackgroundTool(history, 2)
+		if completed, dist := s.checkCompletionDistance(sessionID); !completed &&
+			len(toolCalls) == 0 && state.taskAbandonCount < 3 &&
+			shouldIntercept {
+			state.taskAbandonCount++
+			retryMsg := fmt.Sprintf(
+				"[系统指令] 任务未完成(差距=%.2f，目标X=10 Y=0 Z=0，当前X=%.1f Y=%.2f Z=%.2f)。"+
+					"不要用文本回复搪塞！换参数、换工具、换搜索词 — 第 %d/3 次机会。",
+				dist, parsedTopo.Coord.X, parsedTopo.Coord.Y, parsedTopo.Coord.Z,
+				state.taskAbandonCount,
+			)
+			history = append(history, base.Message{Role: "system", Content: retryMsg})
+			log.Warn("弃疗拦截(几何)", "会话", sessionID, "距离", fmt.Sprintf("%.3f", dist),
+				"次数", state.taskAbandonCount)
+			s.chatLogger.LogRoundEnd(sessionID, state.round, finalContent+" [拦截]", len(roundBlocks), "abandon_blocked")
+			state.round++
+			continue
+		}
+
+		// ── 最终输出前距离检查 ──
+		if topoActive && s.tracker != nil {
+			if completed, dist := s.checkCompletionDistance(sessionID); !completed {
+				finalContent += fmt.Sprintf(
+					"\n\n> ⚠️ 任务尚未完成。完成度 %.1f%%，差距 %.2f。",
+					parsedTopo.Coord.X*10, dist,
+				)
+			}
+		}
+
+		history = append(history, base.Message{Role: "assistant", Content: finalContent, ReasoningContent: reasoningBuf.String(), Blocks: roundBlocks})
 			// ── 拓扑验证 + 闭环检查（最后一轮纯文本回复）──
 			s.emitTopologyUpdate(sessionID, topoActive, parsedTopo, nil, finalContent, state.round, emit)
 			s.chatLogger.LogAnswer(sessionID, state.round, finalContent)
 			s.chatLogger.LogRoundEnd(sessionID, state.round, finalContent, len(roundBlocks), "completed")
-			slog.Debug("对话轮次结束", "会话", sessionID, "总轮次", state.round, "AI回复", truncateStr(finalContent, 300), "块数量", len(roundBlocks))
+			log.Debug("对话轮次结束", "会话", sessionID, "总轮次", state.round, "AI回复", truncateStr(finalContent, 300), "块数量", len(roundBlocks))
 			if st.Title == "" || st.Title == "新对话" { s.sessions.UpdateTitle(sessionID, truncateStr(userMessage, 40)) }
 			s.chatLogger.LogSessionSave(sessionID)
 			// 发射总耗时事件（前端显示用）
@@ -871,9 +1006,9 @@ func (s *Service) RequestUserInput(ctx context.Context, req base.InteractiveRequ
 	streamCh, hasStream := s.activeStreamChs[sessionID]
 	s.activeStreamsMu.Unlock()
 
-	slog.Info("interactive_request 发送", "sessionID", sessionID, "hasStream", hasStream, "reqID", req.ID)
+	log.Info("interactive_request 发送", "sessionID", sessionID, "hasStream", hasStream, "reqID", req.ID)
 	if !hasStream || streamCh == nil {
-		slog.Warn("interactive_request: 无活跃 SSE 通道，尝试 event bus fallback", "sessionID", sessionID)
+		log.Warn("interactive_request: 无活跃 SSE 通道，尝试 event bus fallback", "sessionID", sessionID)
 		// fallback: 仅发送到 event bus
 		if sessionID != "" {
 			eb := s.eventBus.getOrCreate(sessionID)
@@ -890,9 +1025,9 @@ func (s *Service) RequestUserInput(ctx context.Context, req base.InteractiveRequ
 		// 主 SSE 通道（优先，直接到达前端）
 		select {
 		case streamCh <- ev:
-			slog.Info("interactive_request: 已发送到主 SSE 通道", "reqID", req.ID)
+			log.Info("interactive_request: 已发送到主 SSE 通道", "reqID", req.ID)
 		default:
-			slog.Warn("interactive_request: 主 SSE 通道已满", "reqID", req.ID)
+			log.Warn("interactive_request: 主 SSE 通道已满", "reqID", req.ID)
 		}
 		// event bus（重连订阅者也能收到）
 		eb := s.eventBus.getOrCreate(sessionID)
@@ -916,6 +1051,7 @@ func (s *Service) ListSessions() []models.ChatSession                      { ret
 func (s *Service) ListSessionsByType(sessionType string) []models.ChatSession { return s.sessions.ListByType(sessionType) }
 func (s *Service) GetSessionHistory(sessionID string) (*models.ChatSessionDetail, error) { return s.sessions.GetHistory(sessionID) }
 func (s *Service) ClearSession(sessionID string)                 { s.sessions.Delete(sessionID) }
+func (s *Service) UpdateSessionMeta(sessionID string, title *string, pinned *bool) error { return s.sessions.UpdateMeta(sessionID, title, pinned) }
 func (s *Service) CompactSession(sessionID string) string          { return s.sessions.Compact(sessionID) }
 func (s *Service) CompactWithSummary(sessionID, summary string, keepRecent int) string {
 	return s.sessions.CompactWithSummary(sessionID, summary, keepRecent)
@@ -962,7 +1098,7 @@ func (s *Service) handleCompactCommand(history *[]base.Message, sessionID, cmdAr
 	// Generate AI summary
 	summary, err := s.generateSummary(bgCtx, oldMsgs, hint)
 	if err != nil {
-		slog.Warn("AI摘要生成失败，使用文本降级方案", "error", err)
+		log.Warn("AI摘要生成失败，使用文本降级方案", "error", err)
 		summary = fallbackSummary(oldMsgs)
 	}
 
@@ -982,7 +1118,7 @@ func (s *Service) handleCompactCommand(history *[]base.Message, sessionID, cmdAr
 	s.chatLogger.LogCompaction(sessionID, len(oldMsgs), keepRecent, summary)
 
 	// Emit result — no AI reply generated
-	slog.Info("/compact 完成", "session", sessionID, "compacted", len(oldMsgs), "keep", keepRecent, "summary_len", len(summary))
+	log.Info("/compact 完成", "session", sessionID, "compacted", len(oldMsgs), "keep", keepRecent, "summary_len", len(summary))
 	emit(base.ChatStreamEvent{Type: "content", Content: result})
 	emit(base.ChatStreamEvent{Type: "done", Content: fmt.Sprintf("%d", time.Since(startTime).Milliseconds())})
 }
@@ -1203,7 +1339,7 @@ func (s *Service) budgetCompactInPlace(history *[]base.Message) {
 		}
 	}
 	*history = newHistory
-	slog.Debug("会话已压缩", "原消息数", len(wrapped), "压缩后", len(newHistory))
+	log.Debug("会话已压缩", "原消息数", len(wrapped), "压缩后", len(newHistory))
 }
 
 // ── Background ──
@@ -1415,11 +1551,65 @@ func (s *Service) recentToolNames(history []base.Message, n int) []string {
 	return names
 }
 
+// hasRecentBackgroundTool checks if any of the last N assistant messages included
+// a background/async tool (spawn_agent, run_command with Background:true, etc.).
+// Used to skip interception when work is being handled asynchronously.
+func (s *Service) hasRecentBackgroundTool(history []base.Message, lookback int) bool {
+	count := 0
+	for i := len(history) - 1; i >= 0 && count < lookback; i-- {
+		if history[i].Role == "assistant" && history[i].HasToolCalls {
+			count++
+			for _, tc := range history[i].ToolCalls {
+				if tool, ok := s.registry.Get(tc.Function.Name); ok && tool.Background {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// checkCompletionDistance returns whether the session has completed (dist < 0.05 from target).
+// Target is (X=10, Y=0, Z=0) — perfect task completion.
+func (s *Service) checkCompletionDistance(sessionID string) (completed bool, dist float64) {
+	if s.tracker == nil {
+		return true, 0
+	}
+	st := s.tracker.GetState(sessionID)
+	if st == nil {
+		return true, 0
+	}
+	target := topology.Coordinate{X: 10, Y: 0, Z: 0}
+	dist = topology.Distance(st.CurrentCoord, target)
+	return dist < 0.05, dist
+}
+
+// extractRecentToolNames extracts tool names from the last N assistant messages in history.
+func (s *Service) extractRecentToolNames(history []base.Message, n int) []string {
+	seen := make(map[string]bool)
+	var names []string
+	count := 0
+	for i := len(history) - 1; i >= 0 && count < n; i-- {
+		msg := history[i]
+		if msg.Role == "assistant" && msg.HasToolCalls {
+			count++
+			for _, tc := range msg.ToolCalls {
+				name := tc.Function.Name
+				if !seen[name] {
+					seen[name] = true
+					names = append(names, name)
+				}
+			}
+		}
+	}
+	return names
+}
+
 // executeForcedTool 直接执行强制工具（ForceTools 触发时）
 func (s *Service) executeForcedTool(sessionID, toolName string, bgCtx context.Context, emit func(base.ChatStreamEvent), history *[]base.Message, round int, stateRound *int) {
 	tool, ok := s.registry.Get(toolName)
 	if !ok || tool == nil {
-		slog.Warn("ForceTools: 工具未注册", "工具", toolName)
+		log.Warn("ForceTools: 工具未注册", "工具", toolName)
 		return
 	}
 	tcID := fmt.Sprintf("call_%d_force", round)
@@ -1445,9 +1635,47 @@ func (s *Service) executeForcedTool(sessionID, toolName string, bgCtx context.Co
 	*stateRound++
 }
 
+// estimateFromRiskProfile 当 AI 未自报 <topology> 标签时，用 RiskProfile 系统估算坐标。
+// 这套估算确保即使用不报标签的模型，任务完成度检测也能正常工作。
+func (s *Service) estimateFromRiskProfile(sessionID string, toolNames []string) topoParseResult {
+	st := s.tracker.GetState(sessionID)
+	if st == nil {
+		return topoParseResult{Parsed: false}
+	}
+
+	// 匹配每个工具的 RiskProfile，取平均 delta
+	var totalDY, totalDZ float64
+	for _, name := range toolNames {
+		profile := topology.MatchRiskProfile(name)
+		totalDY += (profile.DeltaYMin + profile.DeltaYMax) / 2
+		totalDZ += (profile.DeltaZMin + profile.DeltaZMax) / 2
+	}
+	avgDY := totalDY / float64(len(toolNames))
+	avgDZ := totalDZ / float64(len(toolNames))
+
+	// 估算 X 进度：读工具 +1，写工具 +2，其他 +1.5
+	var deltaX float64
+	for _, name := range toolNames {
+		deltaX += topology.EstimateProgressDelta(name)
+	}
+
+	newX := st.CurrentCoord.X + deltaX
+	if newX > 10.0 {
+		newX = 10.0
+	}
+	newY := st.CurrentCoord.Y + avgDY
+	newZ := st.CurrentCoord.Z + avgDZ
+
+	return topoParseResult{
+		Coord: topology.Coordinate{X: newX, Y: newY, Z: newZ},
+		Tools: toolNames,
+		Parsed: true, // 标记为系统估算
+	}
+}
+
 // emitTopologyUpdate 验证拓扑坐标 + 闭环检查 + 发射 SSE 事件
 func (s *Service) emitTopologyUpdate(sessionID string, topoActive bool, parsed topoParseResult, toolCalls []base.ToolCall, content string, round int, emit func(base.ChatStreamEvent)) {
-	if !topoActive || s.tracker == nil || !parsed.Parsed {
+	if !topoActive || s.tracker == nil {
 		return
 	}
 
@@ -1455,6 +1683,16 @@ func (s *Service) emitTopologyUpdate(sessionID string, topoActive bool, parsed t
 	actualTools := make([]string, len(toolCalls))
 	for i, tc := range toolCalls {
 		actualTools[i] = tc.Function.Name
+	}
+
+	// 如果 AI 未自报 <topology> 标签，用 RiskProfile 系统估算坐标
+	if !parsed.Parsed && len(actualTools) > 0 {
+		parsed = s.estimateFromRiskProfile(sessionID, actualTools)
+		log.Debug("拓扑估算(无标签)", "会话", sessionID,
+			"工具", actualTools, "估算坐标", fmt.Sprintf("(%.1f,%.2f,%.2f)", parsed.Coord.X, parsed.Coord.Y, parsed.Coord.Z))
+	}
+	if !parsed.Parsed {
+		return // 没有工具调用也没有标签，无法估算
 	}
 
 	// 运行拓扑验证
@@ -1465,7 +1703,7 @@ func (s *Service) emitTopologyUpdate(sessionID string, topoActive bool, parsed t
 		closed, dist, msg := s.tracker.CheckClosedLoop(sessionID)
 		if !closed && msg != "" {
 			emit(base.ChatStreamEvent{Type: "content", Content: "\n\n" + msg})
-			slog.Warn("闭环未达成", "会话", sessionID, "距离", dist)
+			log.Warn("闭环未达成", "会话", sessionID, "距离", dist)
 		}
 	}
 
@@ -1575,6 +1813,46 @@ func (s *Service) RegisterAgentTools() {
 	// Skill 工具（支持编程式 + YAML）
 	s.registry.Register(skill.ToolDefWithExecutor(s.skillLoader, s.skillRunner, s.skillExecutor))
 	s.registry.Register(skill.ListToolDefWithExecutor(s.skillLoader, s.skillExecutor))
+
+	// system — 技能系统内部工具，用于返回 SKILL.md 正文供 AI 阅读执行
+	s.registry.Register(&base.ToolDef{
+		Name:        "system",
+		Description: "内部工具：返回技能说明文档正文。AI 调用此工具后应阅读返回内容并按其中指令执行。",
+		Category:    "system",
+		RiskLevel:   "readonly",
+		Parameters: base.ToolParams{Type: "object", Properties: map[string]base.ParamProp{
+			"skill_body": {Type: "string", Description: "技能的 SKILL.md 完整正文"},
+		}},
+		Handler: func(ctx context.Context, args map[string]any) (string, error) {
+			if body, ok := args["skill_body"].(string); ok && body != "" {
+				return body, nil
+			}
+			return "（无技能说明）", nil
+		},
+	})
+
+	// web_search — 通过 DuckDuckGo 搜索网页（免费，无需 API Key）
+	s.registry.Register(&base.ToolDef{
+		Name:        "web_search",
+		Description: "搜索互联网获取实时信息。当需要最新数据、新闻、事实时使用。背后使用 DuckDuckGo，无需 API Key。",
+		Category:    "search",
+		RiskLevel:   "readonly",
+		Timeout:     15 * time.Second,
+		Parameters: base.ToolParams{
+			Type: "object",
+			Properties: map[string]base.ParamProp{
+				"query": {Type: "string", Description: "搜索查询词"},
+			},
+			Required: []string{"query"},
+		},
+		Handler: func(ctx context.Context, args map[string]any) (string, error) {
+			query, _ := args["query"].(string)
+			if query == "" {
+				return "", fmt.Errorf("query 不能为空")
+			}
+			return bingSearch(ctx, query)
+		},
+	})
 
 	// reload_mcp — AI 可调用此工具重载 MCP
 	s.registry.Register(&base.ToolDef{
@@ -1758,7 +2036,7 @@ func (s *Service) RegisterAgentTools() {
 		},
 	})
 
-	slog.Info("agent/cron/todo/skill tools registered")
+	log.Info("agent/cron/todo/skill tools registered")
 }
 
 // LoadMCPTools 从 mcp.json 加载 MCP 服务器配置，连接并注册其工具。
@@ -1774,7 +2052,7 @@ func (s *Service) ReloadSkills() error {
 		s.registry.Register(skill.ToolDef(s.skillLoader, s.skillRunner))
 		s.registry.Register(skill.ListToolDef(s.skillLoader))
 	}
-	slog.Info("技能已热重载", "count", len(s.skillLoader.All()))
+	log.Info("技能已热重载", "count", len(s.skillLoader.All()))
 	return nil
 }
 
@@ -1863,7 +2141,7 @@ func (s *Service) ReloadMCPTools(configPath string) error {
 		return err
 	}
 	mcp.RegisterTools(s.mcpManager, MCPRegistryAdapter{s.registry})
-	slog.Info("MCP 工具已热重载", "count", len(cfg.MCPServers))
+	log.Info("MCP 工具已热重载", "count", len(cfg.MCPServers))
 	return nil
 }
 
@@ -1987,7 +2265,7 @@ func (s *Service) LoadMCPTools(configPath string) error {
 	// 读取 mcp.json
 	data, err := os.ReadFile(configPath)
 	if err != nil {
-		slog.Info("MCP config not found, skipping", "path", configPath)
+		log.Info("MCP config not found, skipping", "path", configPath)
 		return nil
 	}
 
@@ -2005,12 +2283,12 @@ func (s *Service) LoadMCPTools(configPath string) error {
 		s.mcpManager.AddServer(mcp.ServerConfig{Name: name, Command: svr.Command, Args: svr.Args})
 	}
 	if err := s.mcpManager.ConnectAll(); err != nil {
-		slog.Warn("MCP connect warning", "error", err)
+		log.Warn("MCP connect warning", "error", err)
 	}
 
 	// 将 MCP 工具注册到 AI 注册表
 	mcp.RegisterTools(s.mcpManager, MCPRegistryAdapter{s.registry})
-	slog.Info("MCP tools loaded", "servers", len(mcpConfig.MCPServers))
+	log.Info("MCP tools loaded", "servers", len(mcpConfig.MCPServers))
 	return nil
 }
 
@@ -2024,7 +2302,20 @@ func (a MCPRegistryAdapter) Register(name string, td *base.ToolDef) {
 
 func (s *Service) dispatchBackground(tool *base.ToolDef, funcName string, args map[string]any, sessionID string, ch chan<- base.ChatStreamEvent) bool {
 	if !tool.Background { return false }
-	runner := func(ctx *async.TaskContext) (string, error) { return tool.Handler(context.Background(), args) }
+	log.Info("后台任务分发", "tool", funcName, "session", sessionID)
+	runner := func(ctx *async.TaskContext) (string, error) {
+		if tool.HandlerV2 != nil {
+			res := tool.HandlerV2(context.Background(), args)
+			if res.Status == base.StatusError && res.Error != nil {
+				return "", fmt.Errorf("%s: %s", res.Error.Code, res.Error.Message)
+			}
+			return res.Summary, nil
+		}
+		if tool.Handler != nil {
+			return tool.Handler(context.Background(), args)
+		}
+		return "", fmt.Errorf("tool %s has no handler", funcName)
+	}
 	id := s.SubmitBackground(funcName, sessionID, args, runner)
 	ch <- base.ChatStreamEvent{Type: "background_task", TaskID: id, TaskStatus: "submitted", TaskMessage: "后台任务已提交: " + funcName}
 	return true
@@ -2157,6 +2448,68 @@ func (s *Service) preExecCommand(sessionID, cmdName, cmdArgs string) string {
 	default:
 		return ""
 	}
+}
+
+// bingSearch 使用 Bing 搜索（国内可访问，无需 API Key）。
+func bingSearch(ctx context.Context, query string) (string, error) {
+	req, _ := http.NewRequestWithContext(ctx, "GET",
+		"https://www.bing.com/search?"+url.Values{"q": {query}, "setlang": {"zh-cn"}, "count": {"15"}}.Encode(), nil)
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9")
+
+	client := &http.Client{Timeout: 12 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("搜索请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 512*1024))
+	html := string(body)
+
+	// 解析 Bing 搜索结果: <li class="b_algo"><h2><a href="URL">Title</a></h2><p>Desc</p>
+	algoRe := regexp.MustCompile(`<li class="b_algo">(.*?)</li>`)
+	linkRe := regexp.MustCompile(`<a[^>]*href="(https?://[^"]*)"[^>]*>([^<]*)</a>`)
+	descRe := regexp.MustCompile(`<p[^>]*>(.*?)</p>`)
+
+	algos := algoRe.FindAllStringSubmatch(html, -1)
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("搜索: %s\n\n", query))
+
+	count := 0
+	for _, algo := range algos {
+		if count >= 10 {
+			break
+		}
+		block := algo[1]
+		linkMatch := linkRe.FindStringSubmatch(block)
+		if linkMatch == nil {
+			continue
+		}
+		urlStr := linkMatch[1]
+		title := cleanHTML(linkMatch[2])
+		if urlStr == "" || title == "" {
+			continue
+		}
+		count++
+		sb.WriteString(fmt.Sprintf("[%d] %s\n%s\n", count, title, urlStr))
+		descMatch := descRe.FindStringSubmatch(block)
+		if descMatch != nil {
+			desc := cleanHTML(descMatch[1])
+			sb.WriteString(truncateStr(strings.TrimSpace(desc), 300))
+			sb.WriteString("\n")
+		}
+		sb.WriteString("\n")
+	}
+	if count == 0 {
+		return fmt.Sprintf("未找到 '%s' 的搜索结果", query), nil
+	}
+	return sb.String(), nil
+}
+
+// cleanHTML 去除 HTML 标签
+func cleanHTML(s string) string {
+	return regexp.MustCompile(`<[^>]*>`).ReplaceAllString(s, "")
 }
 
 func truncateStr(s string, maxLen int) string {

@@ -5,9 +5,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strings"
+
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 )
+
+var log = logger.ForComponent("config")
 
 var (
 	ErrMissingAccessKeyID     = errors.New("阿里云 AccessKey ID 未配置")
@@ -32,7 +35,7 @@ func Validate(cfg *Config) error {
 	if cfg.Auth.JWTSecret == "" {
 		secret := generateJWTSecret()
 		cfg.Auth.JWTSecret = secret
-		slog.Warn("JWT Secret 未配置，已自动生成随机密钥。建议通过环境变量 DNS_UPDATER_AUTH_JWT_SECRET 设置固定值以保证重启后 Token 仍有效。")
+		log.Warn("JWT Secret 未配置，已自动生成随机密钥。建议通过环境变量 DNS_UPDATER_AUTH_JWT_SECRET 设置固定值以保证重启后 Token 仍有效。")
 	}
 
 	// 阿里云配置（仅在有启用动态记录时需要）
@@ -56,7 +59,7 @@ func Validate(cfg *Config) error {
 	// 认证配置：密码为空时自动生成初始密码
 	if cfg.Auth.Password == "" {
 		cfg.Auth.Password = "admin123"
-		slog.Warn("管理后台密码未配置，已使用默认密码 admin123，请尽快修改！")
+		log.Warn("管理后台密码未配置，已使用默认密码 admin123，请尽快修改！")
 	}
 
 	// 动态记录校验
@@ -81,7 +84,7 @@ func Validate(cfg *Config) error {
 	if cfg.Notify.Email.Enabled {
 		if cfg.Notify.Email.Host == "" || cfg.Notify.Email.User == "" ||
 			cfg.Notify.Email.Password == "" || len(cfg.Notify.Email.To) == 0 {
-			slog.Warn("邮件通知配置不完整，已自动禁用，请完善配置后重新启用")
+			log.Warn("邮件通知配置不完整，已自动禁用，请完善配置后重新启用")
 			cfg.Notify.Email.Enabled = false
 		}
 	}

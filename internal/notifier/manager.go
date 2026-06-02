@@ -3,9 +3,11 @@ package notifier
 import (
 	"context"
 	"fmt"
-	"log/slog"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 	"time"
 )
+
+var log = logger.ForComponent("notifier")
 
 // Manager 通知管理器，管理多个通知渠道
 type Manager struct {
@@ -24,13 +26,13 @@ func NewManager(throttle *Throttler) *Manager {
 func (m *Manager) Register(n Notifier) {
 	if n.IsEnabled() {
 		m.notifiers = append(m.notifiers, n)
-		slog.Info("通知渠道已注册", "name", n.Name())
+		log.Info("通知渠道已注册", "name", n.Name())
 	}
 }
 
 // SendNotification 发送 DNS 变更通知（通过所有已注册的渠道）
 func (m *Manager) SendNotification(ctx context.Context, domain, rr, recordType, oldIP, newIP string) {
-	slog.Info("发送DNS变更通知", "域名", domain, "记录", rr, "类型", recordType, "旧IP", oldIP, "新IP", newIP)
+	log.Info("发送DNS变更通知", "域名", domain, "记录", rr, "类型", recordType, "旧IP", oldIP, "新IP", newIP)
 	if len(m.notifiers) == 0 {
 		return
 	}
@@ -39,7 +41,7 @@ func (m *Manager) SendNotification(ctx context.Context, domain, rr, recordType, 
 
 	// 节流检查
 	if !m.throttler.AllowAndMark(key, 10) {
-		slog.Debug("通知已节流，跳过发送", "key", key)
+		log.Debug("通知已节流，跳过发送", "key", key)
 		return
 	}
 
@@ -69,13 +71,13 @@ func (m *Manager) sendToAll(_ context.Context, event ChangeEvent) {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			if err := notifier.Send(ctx, event); err != nil {
-				slog.Error("通知发送失败",
+				log.Error("通知发送失败",
 					"channel", notifier.Name(),
 					"domain", event.FullDomain,
 					"error", err,
 				)
 			} else {
-				slog.Debug("通知发送成功",
+				log.Debug("通知发送成功",
 					"channel", notifier.Name(),
 					"domain", event.FullDomain,
 				)
@@ -94,15 +96,15 @@ func (m *Manager) Reload(emailCfg EmailConfig, webhookCfg WebhookConfig, extraNo
 	m.notifiers = nil
 	if emailCfg.Enabled {
 		m.notifiers = append(m.notifiers, NewEmailNotifier(emailCfg))
-		slog.Info("通知渠道已注册(热加载)", "name", "email")
+		log.Info("通知渠道已注册(热加载)", "name", "email")
 	}
 	if webhookCfg.Enabled {
 		m.notifiers = append(m.notifiers, NewWebhookNotifier(webhookCfg))
-		slog.Info("通知渠道已注册(热加载)", "name", "webhook")
+		log.Info("通知渠道已注册(热加载)", "name", "webhook")
 	}
 	for _, n := range extraNotifiers {
 		m.notifiers = append(m.notifiers, n)
 		name := fmt.Sprintf("%T", n)
-		slog.Info("通知渠道已注册(热加载)", "name", name)
+		log.Info("通知渠道已注册(热加载)", "name", name)
 	}
 }

@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"log/slog"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 	"net/http"
 	"os/exec"
 	"strings"
@@ -96,7 +96,7 @@ func (h *ChatHandler) InstallMCP(c echo.Context) error {
 	// 热重载 MCP 工具
 	if h.aiService != nil {
 		if reloadErr := h.aiService.ReloadMCPTools(h.getMCPPath()); reloadErr != nil {
-			slog.Warn("MCP reload after install failed", "package", req.Package, "error", reloadErr)
+			log.Warn("MCP reload after install failed", "package", req.Package, "error", reloadErr)
 		}
 	}
 

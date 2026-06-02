@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 	"strings"
 	"sync"
 	"time"
@@ -157,7 +157,7 @@ func (m *Manager) RecordTurn(sessionID string, inputTokens, outputTokens int) {
 		st.turnCount++
 		st.totalInputTokens += inputTokens
 		st.totalOutputTokens += outputTokens
-		slog.Debug("对话统计", "会话ID", sessionID, "总轮次", st.turnCount, "输入Token", st.totalInputTokens, "输出Token", st.totalOutputTokens)
+		log.Debug("对话统计", "会话ID", sessionID, "总轮次", st.turnCount, "输入Token", st.totalInputTokens, "输出Token", st.totalOutputTokens)
 	}
 }
 
@@ -215,7 +215,7 @@ func (m *Manager) GetOrCreate(sessionID, sessionType, userMessage string) ([]bas
 				b, _ := json.Marshal(st.history)
 				st.info.MessagesJSON = string(b)
 				_ = m.repo.Upsert(context.Background(), &st.info)
-				slog.Info("QQ Bot 会话已迁移到新提示词", "session", sessionID)
+				log.Info("QQ Bot 会话已迁移到新提示词", "session", sessionID)
 			}
 		}
 	}
@@ -307,7 +307,7 @@ func (m *Manager) ForkAt(sessionID string, messageIndex int, newContent string) 
 		go func() { _ = m.repo.Upsert(context.Background(), &st.info) }()
 	}
 
-	slog.Info("session forked",
+	log.Info("session forked",
 		"session", sessionID,
 		"at_index", messageIndex,
 		"truncated_msgs", truncated,
@@ -346,7 +346,7 @@ func (m *Manager) Save(sessionID string, history []base.Message) {
 	if m.repo != nil {
 		messagesJSON, _ := json.Marshal(cp)
 		st.info.MessagesJSON = string(messagesJSON)
-		slog.Debug("会话保存", "会话ID", sessionID, "消息数", len(cp), "JSON大小", len(st.info.MessagesJSON))
+		log.Debug("会话保存", "会话ID", sessionID, "消息数", len(cp), "JSON大小", len(st.info.MessagesJSON))
 		go func() { _ = m.repo.Upsert(context.Background(), &st.info) }()
 	}
 }
@@ -414,7 +414,7 @@ func (m *Manager) Compact(sessionID string) string {
 		go func() { _ = m.repo.Upsert(context.Background(), &st.info) }()
 	}
 
-	slog.Info("会话已压缩",
+	log.Info("会话已压缩",
 		"session", sessionID,
 		"before", len(history),
 		"after", len(newHistory),
@@ -470,7 +470,7 @@ func (m *Manager) CompactWithSummary(sessionID string, summary string, keepRecen
 		go func() { _ = m.repo.Upsert(context.Background(), &st.info) }()
 	}
 
-	slog.Info("会话已压缩（追加AI摘要标记）",
+	log.Info("会话已压缩（追加AI摘要标记）",
 		"session", sessionID,
 		"total_msgs", totalMsgs,
 		"compacted", compactedCount,
@@ -518,6 +518,26 @@ func buildCompactionSummary(messages []base.Message) string {
 	return sb.String()
 }
 
+// UpdateMeta updates session metadata (title, pinned) in memory and DB.
+func (m *Manager) UpdateMeta(sessionID string, title *string, pinned *bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	st, ok := m.sessions[sessionID]
+	if !ok {
+		return fmt.Errorf("session not found: %s", sessionID)
+	}
+	if title != nil {
+		st.info.Title = *title
+	}
+	if pinned != nil {
+		st.info.Pinned = *pinned
+	}
+	if m.repo != nil {
+		return m.repo.UpdateSessionMeta(context.Background(), sessionID, title, pinned)
+	}
+	return nil
+}
+
 // Delete removes a session.
 func (m *Manager) Delete(sessionID string) {
 	m.mu.Lock()
@@ -545,7 +565,7 @@ func (m *Manager) loadFromDB() {
 	ctx := context.Background()
 	dbSessions, err := m.repo.List(ctx)
 	if err != nil {
-		slog.Warn("failed to load chat sessions from DB", "error", err)
+		log.Warn("failed to load chat sessions from DB", "error", err)
 		return
 	}
 	for _, dbs := range dbSessions {
@@ -558,7 +578,7 @@ func (m *Manager) loadFromDB() {
 		}
 		m.sessions[dbs.ID] = &state{info: dbs, history: history}
 	}
-	slog.Info("loaded chat sessions from DB", "count", len(dbSessions))
+	log.Info("loaded chat sessions from DB", "count", len(dbSessions))
 }
 
 // repairIncompleteToolCalls 修复因服务崩溃导致的不完整工具调用。

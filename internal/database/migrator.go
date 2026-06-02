@@ -3,7 +3,6 @@ package database
 import (
 	"context"
 	"fmt"
-	"log/slog"
 
 	"github.com/Yunqingqingxi/yunxi-home/internal/models"
 	"github.com/Yunqingqingxi/yunxi-home/internal/nas"
@@ -49,18 +48,18 @@ func (m *Migrator) Migrate(ctx context.Context, onProgress func(ProgressEvent)) 
 			return ctx.Err()
 		default:
 		}
-		slog.Info("开始迁移", "entity", e.name)
+		log.Info("开始迁移", "entity", e.name)
 		if err := e.fn(ctx); err != nil {
 			if onProgress != nil {
 				onProgress(ProgressEvent{Entity: e.name, Error: err.Error()})
 			}
-			slog.Error("迁移失败", "entity", e.name, "error", err)
+			log.Error("迁移失败", "entity", e.name, "error", err)
 			return fmt.Errorf("migrate %s: %w", e.name, err)
 		}
 		if onProgress != nil {
 			onProgress(ProgressEvent{Entity: e.name, Done: 1, Total: 1})
 		}
-		slog.Info("迁移完成", "entity", e.name)
+		log.Info("迁移完成", "entity", e.name)
 	}
 
 	return nil
@@ -79,7 +78,7 @@ func (m *Migrator) migrateUsers(ctx context.Context) error {
 			StorageQuota: u.StorageQuota,
 			StorageUsed:  u.StorageUsed,
 		}); err != nil {
-			slog.Warn("迁移用户失败", "username", u.Username, "error", err)
+			log.Warn("迁移用户失败", "username", u.Username, "error", err)
 		}
 	}
 	return nil
@@ -92,7 +91,7 @@ func (m *Migrator) migrateConfig(ctx context.Context) error {
 	}
 	for section, data := range all {
 		if err := m.dst.ConfigRepo.SetSection(ctx, section, data); err != nil {
-			slog.Warn("迁移配置失败", "section", section, "error", err)
+			log.Warn("迁移配置失败", "section", section, "error", err)
 		}
 	}
 	return nil
@@ -106,7 +105,7 @@ func (m *Migrator) migrateDomains(ctx context.Context) error {
 	for _, r := range recs {
 		rec := r
 		if _, err := m.dst.DomainRepo.Create(ctx, &rec); err != nil {
-			slog.Warn("迁移域名失败", "domain", r.Domain, "error", err)
+			log.Warn("迁移域名失败", "domain", r.Domain, "error", err)
 		}
 	}
 	return nil
@@ -127,7 +126,7 @@ func (m *Migrator) migrateHistories(ctx context.Context) error {
 		for _, r := range result.Records {
 			rec := r
 			if _, err := m.dst.HistoryRepo.Create(ctx, &rec); err != nil {
-				slog.Warn("迁移历史失败", "id", r.ID, "error", err)
+				log.Warn("迁移历史失败", "id", r.ID, "error", err)
 			}
 		}
 		if int64(page*batchSize) >= result.Total {
@@ -146,7 +145,7 @@ func (m *Migrator) migrateChatSessions(ctx context.Context) error {
 	for _, s := range sessions {
 		sess := s
 		if err := m.dst.ChatRepo.Upsert(ctx, &sess); err != nil {
-			slog.Warn("迁移会话失败", "id", s.ID, "error", err)
+			log.Warn("迁移会话失败", "id", s.ID, "error", err)
 		}
 	}
 	return nil
@@ -166,7 +165,7 @@ func (m *Migrator) migrateShares(ctx context.Context) error {
 			ExpiresAt: s.ExpiresAt,
 		}
 		if _, err := m.dst.ShareRepo.Create(ctx, &share); err != nil {
-			slog.Warn("迁移分享失败", "token", s.Token, "error", err)
+			log.Warn("迁移分享失败", "token", s.Token, "error", err)
 		}
 	}
 	return nil
@@ -180,7 +179,7 @@ func (m *Migrator) migrateFilePerms(ctx context.Context) error {
 	for _, p := range perms {
 		perm := p
 		if err := m.dst.FilePermRepo.Upsert(ctx, &perm); err != nil {
-			slog.Warn("迁移文件权限失败", "path", p.Path, "error", err)
+			log.Warn("迁移文件权限失败", "path", p.Path, "error", err)
 		}
 	}
 	return nil

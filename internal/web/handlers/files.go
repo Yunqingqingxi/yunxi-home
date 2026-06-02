@@ -1,7 +1,7 @@
 package handlers
 
 import (
-	"log/slog"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 	"io"
 	"mime"
 	"net/http"
@@ -78,7 +78,7 @@ func (h *FilesHandler) DownloadFile(c echo.Context) error {
 func (h *FilesHandler) UploadFile(c echo.Context) error {
 	ct := c.Request().Header.Get("Content-Type")
 
-	slog.Debug("upload request", "content-type", ct, "content-length", c.Request().Header.Get("Content-Length"))
+	log.Debug("upload request", "content-type", ct, "content-length", c.Request().Header.Get("Content-Length"))
 
 	dir := c.FormValue("dir")
 	// 清理 Windows 路径翻译产生的非法路径 (如 C:/Program Files/Git/ -> /)
@@ -91,7 +91,7 @@ func (h *FilesHandler) UploadFile(c echo.Context) error {
 
 	file, err := c.FormFile("file")
 	if err != nil {
-		slog.Warn("upload parse failed", "error", err.Error(), "content-type", ct)
+		log.Warn("upload parse failed", "error", err.Error(), "content-type", ct)
 		return c.JSON(http.StatusBadRequest, map[string]any{"code": 400, "message": "请选择文件", "detail": err.Error(), "content_type": ct})
 	}
 
@@ -479,7 +479,7 @@ func (h *FilesHandler) SaveChunk(c echo.Context) error {
 	defer src.Close()
 
 	if err := h.fs.SaveChunk(uploadID, chunkIndex, src); err != nil {
-		slog.Error("chunk save failed", "upload_id", uploadID, "chunk", chunkIndex, "error", err)
+		log.Error("chunk save failed", "upload_id", uploadID, "chunk", chunkIndex, "error", err)
 		return c.JSON(http.StatusInternalServerError, errorResp(err.Error()))
 	}
 	return c.JSON(http.StatusOK, successResp(map[string]any{
@@ -572,7 +572,7 @@ func (h *FilesHandler) SaveFileContent(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, errorResp("读取请求体失败"))
 	}
 	if err := h.fs.WriteFile(path, body); err != nil {
-		slog.Error("保存文件失败", "path", path, "error", err)
+		log.Error("保存文件失败", "path", path, "error", err)
 		return c.JSON(http.StatusInternalServerError, errorResp(err.Error()))
 	}
 	return c.JSON(http.StatusOK, successResp(map[string]string{"message": "已保存"}))
@@ -636,7 +636,7 @@ func (h *FilesHandler) BatchDownload(c echo.Context) error {
 	c.Response().Header().Set("Content-Disposition", "attachment; filename=\"files.zip\"")
 	writer := c.Response().Writer
 	if err := h.fs.CreateZip(writer, req.Paths); err != nil {
-		slog.Error("zip打包失败", "error", err)
+		log.Error("zip打包失败", "error", err)
 		return c.JSON(http.StatusInternalServerError, errorResp("打包失败"))
 	}
 	return nil

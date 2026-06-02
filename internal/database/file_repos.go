@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"sync"
 	"time"
@@ -465,6 +466,23 @@ func (r *FileChatRepo) Upsert(ctx context.Context, s *models.ChatSession) error 
 	}
 	c.Sessions = append(c.Sessions, *s)
 	return r.save(c)
+}
+
+func (r *FileChatRepo) UpdateSessionMeta(ctx context.Context, id string, title *string, pinned *bool) error {
+	c, _ := r.load()
+	for i := range c.Sessions {
+		if c.Sessions[i].ID == id {
+			if title != nil {
+				c.Sessions[i].Title = *title
+			}
+			if pinned != nil {
+				c.Sessions[i].Pinned = *pinned
+			}
+			c.Sessions[i].UpdatedAt = time.Now()
+			return r.save(c)
+		}
+	}
+	return fmt.Errorf("session not found: %s", id)
 }
 
 func (r *FileChatRepo) Delete(ctx context.Context, id string) error {

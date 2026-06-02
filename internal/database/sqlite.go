@@ -94,6 +94,7 @@ func (db *DB) migrate() error {
 			type       TEXT NOT NULL DEFAULT 'chat',
 			title      TEXT NOT NULL DEFAULT '',
 			messages   TEXT NOT NULL DEFAULT '[]',
+			pinned     INTEGER NOT NULL DEFAULT 0,
 			created_at DATETIME NOT NULL DEFAULT (datetime('now')),
 			updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
 		)`,
@@ -182,6 +183,8 @@ func (db *DB) migrate() error {
 		`ALTER TABLE users ADD COLUMN storage_quota INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE users ADD COLUMN storage_used INTEGER NOT NULL DEFAULT 0`,
 		`ALTER TABLE histories ADD COLUMN rr TEXT NOT NULL DEFAULT ''`,
+		// v4 — sidebar pin support
+		`ALTER TABLE chat_sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0`,
 
 		// ── v3.1 拓扑几何约束系统 ─────────────────────
 		`CREATE TABLE IF NOT EXISTS agent_sessions (

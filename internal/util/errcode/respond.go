@@ -1,11 +1,13 @@
 package errcode
 
 import (
-	"log/slog"
 	"net/http"
 
 	"github.com/labstack/echo/v4"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 )
+
+var log = logger.ForComponent("web")
 
 // APIResponse is the standard JSON envelope for all API responses.
 type APIResponse struct {
@@ -30,13 +32,15 @@ func Respond(c echo.Context, err *AppError) error {
 
 	// Log internal errors with stack
 	if err.Code == ErrInternal {
-		slog.Error("internal error",
+		log.Error("内部错误",
+			logger.KeyEvent, "internal_error",
 			"detail", err.Detail,
 			"cause", err.Cause,
 			"stack", err.Stack,
 		)
 	} else if err.Cause != nil {
-		slog.Warn("app error",
+		log.Warn("应用错误",
+			logger.KeyEvent, "app_error",
 			"code", err.Code,
 			"detail", err.Detail,
 			"cause", err.Cause,

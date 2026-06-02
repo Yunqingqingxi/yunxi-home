@@ -4,7 +4,7 @@ package coordinator
 
 import (
 	"fmt"
-	"log/slog"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 	"sync"
 	"time"
 )
@@ -87,7 +87,7 @@ func (c *Coordinator) RegisterSession(id, title string) {
 		return
 	}
 	c.sessions[id] = &SessionInfo{ID: id, Title: title, StartedAt: now, LastSeen: now}
-	slog.Info("session registered", "id", id, "title", title)
+	log.Info("session registered", "id", id, "title", title)
 }
 
 // UnregisterSession 注销会话（释放其所有锁）
@@ -110,7 +110,7 @@ func (c *Coordinator) UnregisterSession(id string) {
 	}
 	delete(c.sessions, id)
 	delete(c.subscribers, id)
-	slog.Info("session unregistered", "id", id)
+	log.Info("session unregistered", "id", id)
 }
 
 // Heartbeat 心跳（更新 lastSeen + 续约锁）
@@ -189,7 +189,7 @@ func (c *Coordinator) Acquire(sessionID, path string, mode LockMode) (*ResourceL
 		Message:   fmt.Sprintf("会话 %s 获取了 %s 的 %s 锁", sessionID, path, mode),
 	})
 
-	slog.Debug("lock acquired", "path", path, "session", sessionID, "mode", mode)
+	log.Debug("lock acquired", "path", path, "session", sessionID, "mode", mode)
 	return lock, nil
 }
 
@@ -313,7 +313,7 @@ func (c *Coordinator) cleanupLoop() {
 		for path, lock := range c.locks {
 			if now.After(lock.ExpiresAt) {
 				delete(c.locks, path)
-				slog.Info("lock expired", "path", path, "session", lock.SessionID)
+				log.Info("lock expired", "path", path, "session", lock.SessionID)
 				c.broadcast(ResourceEvent{
 					Type: "unlocked", Path: path, SessionID: lock.SessionID,
 					Timestamp: now, Message: fmt.Sprintf("%s 的锁已过期自动释放", path),

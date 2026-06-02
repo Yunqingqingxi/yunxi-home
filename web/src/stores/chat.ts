@@ -2,8 +2,12 @@ import { defineStore } from 'pinia'
 import { ref, computed, ComputedRef } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import type { ChatMessage, ChatBlock, Conversation, SSEEvent, AgentInfo, ToolCall } from '../types/chat'
+import type { ChatMessage, ChatBlock, Conversation, SSEEvent, AgentInfo, ToolCall, AgentState, AgentRole, LockConflict } from '../types/chat'
 import type { TopologyState, TopologyUpdate } from '../types/topology'
+
+// ── Session Connection Lifecycle (v2.0) ──
+type Lifecycle = 'idle' | 'connecting' | 'streaming' | 'reconnecting' | 'closed'
+const STORAGE_KEY = 'yunxi_lifecycle'
 
 // ── Additional types ──────────────────────
 
@@ -87,6 +91,8 @@ export function renderMarkdown(text: string): string {
 // ── Store ─────────────────────────────────
 
 export const useChatStore = defineStore('chat', () => {
+  // Per-session message storage — isolates SSE writes per session, prevents cross-session corruption
+  const _sessionMsgs: Record<string, ChatMessage[]> = {}
   const messages = ref<ChatMessage[]>([])
   const sessionId = ref<string>('')
   const loading = ref<boolean>(false)
@@ -104,26 +110,62 @@ export const useChatStore = defineStore('chat', () => {
   const interactiveRequest = ref<InteractiveRequest | null>(null)
   const topology = ref<TopologyState | null>(null)
 
-  // ── Per-session streaming & agent state (persists across tab switches) ──
-  const streamingSessions = ref<Record<string, boolean>>({})
+  // ── v2.0 Session connection lifecycle ──
+  // Persisted across tab switches + page refreshes via sessionStorage.
+  const lifecycles = ref<Record<string, Lifecycle>>(loadLifecycles())
   const sessionAgents = ref<Record<string, AgentInfo[]>>({})
+  const agentActiveSessions = ref<Record<string, boolean>>({})
+  // Legacy alias for backward compat
+  const streamingSessions = ref<Record<string, boolean>>({})
 
-  // Computed: current session streaming state
+  // Computed: current session is busy (streaming or sending)
   const isStreaming = computed<boolean>(() => {
     const sid = sessionId.value
     if (!sid) return false
-    return !!streamingSessions.value[sid]
+    const lc = getLifecycle(sid)
+    return lc === 'streaming' || lc === 'reconnecting' || lc === 'connecting'
   })
 
-  // Computed: current session has running agents
   const hasRunningAgents = computed<boolean>(() => {
     const sid = sessionId.value
     if (!sid) return false
+    if (agentActiveSessions.value[sid]) return true
     const list = sessionAgents.value[sid] || []
     return list.some((a) => a.agent_status === 'running' || a.status === 'running')
   })
 
-  // Current session agents (for backward compatibility)
+  // ── Lifecycle helpers ──
+  function loadLifecycles(): Record<string, Lifecycle> {
+    try { const raw = sessionStorage.getItem(STORAGE_KEY); return raw ? JSON.parse(raw) : {} } catch { return {} }
+  }
+  function saveLifecycles(): void {
+    try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(lifecycles.value)) } catch {}
+  }
+  function setLifecycle(sid: string, lc: Lifecycle): void {
+    if (lc === 'closed' || lc === 'idle') { delete lifecycles.value[sid]; delete streamingSessions.value[sid] }
+    else { lifecycles.value[sid] = lc; streamingSessions.value[sid] = true }
+    saveLifecycles()
+  }
+  function getLifecycle(sid: string): Lifecycle {
+    return lifecycles.value[sid] || 'idle'
+  }
+  if (typeof window !== 'undefined') {
+    window.addEventListener('beforeunload', saveLifecycles)
+  }
+
+  // ── v2.0 Lock conflict & meta report storage ──
+  const _lockConflicts: Record<string, LockConflict[]> = {}
+  const _metaReports: Record<string, any> = {}
+  const lockConflicts = computed<LockConflict[]>(() => {
+    const sid = sessionId.value
+    return sid ? (_lockConflicts[sid] || []) : []
+  })
+  const metaReport = computed<any>(() => {
+    const sid = sessionId.value
+    return sid ? (_metaReports[sid] || null) : null
+  })
+
+  // ── Debug injection (dev only) ──
   const agents = computed<AgentInfo[]>(() => {
     const sid = sessionId.value
     if (!sid) return []
@@ -153,12 +195,10 @@ export const useChatStore = defineStore('chat', () => {
     streamingPlaceholders.value = []
     currentToolName.value = ''
     currentToolProgress.value = ''
-    interruptSnapshot.value = null
     loading.value = false
-    // Clear per-session state
     const sid = sessionId.value
     if (sid) {
-      streamingSessions.value[sid] = false
+      setLifecycle(sid, 'idle')
       sessionAgents.value[sid] = []
     }
   }
@@ -205,11 +245,12 @@ export const useChatStore = defineStore('chat', () => {
     const token = localStorage.getItem('token')
     if (!text.trim()) return
 
-    // Disconnect reconnection stream to avoid duplicate SSE events
-    disconnectStream()
+    const sendSid = sessionId.value || ('chat_' + Date.now())
+    _sending[sendSid] = true
 
     // If streaming or agent running, inject into current session
     if (isStreaming.value || hasRunningAgents.value) {
+      console.log('[chat] sendMessage: taking INJECT path')
       addUserMessage(text)
       try {
         await fetch('/api/chat/inject', {
@@ -224,18 +265,20 @@ export const useChatStore = defineStore('chat', () => {
         const idx = addAssistantPlaceholder()
         streamingPlaceholders.value = [...streamingPlaceholders.value, idx]
       }
+      delete _sending[sendSid]
       return
     }
 
     loading.value = true
     if (!sessionId.value) {
-      sessionId.value = 'chat_' + Date.now()
+      sessionId.value = sendSid
+      activeConversationId.value = sessionId.value  // keep in sync
     }
 
     addUserMessage(text)
     const firstIdx = addAssistantPlaceholder()
     streamingPlaceholders.value = [firstIdx]
-    streamingSessions.value[sessionId.value] = true
+    setLifecycle(sessionId.value, 'streaming')
 
     try {
       const body: Record<string, any> = { message: text, session_id: sessionId.value }
@@ -266,29 +309,69 @@ export const useChatStore = defineStore('chat', () => {
           const trimmed = l.trim()
           if (!trimmed.startsWith('data: ')) continue
           try {
-            processSSEEvent(JSON.parse(trimmed.slice(6)))
-          } catch (e) {
-            /* skip */
-          }
+            const evt = JSON.parse(trimmed.slice(6))
+            // Redirect writes to correct session's message store if user switched away
+            if (sessionId.value !== sendSid && sendSid) {
+              const origMsgs = messages.value
+              const origPlaceholders = [...streamingPlaceholders.value]
+              messages.value = _sessionMsgs[sendSid] || []
+              streamingPlaceholders.value = []
+              processSSEEvent(evt, sendSid) // ← pass correct session ID
+              _sessionMsgs[sendSid] = [...messages.value]
+              messages.value = origMsgs
+              streamingPlaceholders.value = origPlaceholders
+            } else {
+              processSSEEvent(evt, sendSid)
+            }
+          } catch (e) { /* skip */ }
         }
       }
       if (buf.trim().startsWith('data: ')) {
         try {
-          processSSEEvent(JSON.parse(buf.trim().slice(6)))
+          const evt = JSON.parse(buf.trim().slice(6))
+          if (sessionId.value !== sendSid && sendSid) {
+            const origMsgs = messages.value
+            const origPlaceholders = [...streamingPlaceholders.value]
+            messages.value = _sessionMsgs[sendSid] || []
+            streamingPlaceholders.value = []
+            processSSEEvent(evt, sendSid)
+            _sessionMsgs[sendSid] = [...messages.value]
+            messages.value = origMsgs
+            streamingPlaceholders.value = origPlaceholders
+          } else {
+            processSSEEvent(evt, sendSid)
+          }
         } catch (e) {}
       }
     } catch (e: any) {
+      const msgs = (sendSid && sessionId.value !== sendSid) ? (_sessionMsgs[sendSid] || messages.value) : messages.value
       const idx = streamingPlaceholders.value[0]
-      const msg = messages.value[idx]
+      const msg = msgs[idx]
       if (msg) {
         msg.status = 'error'
         msg.content = e.message
         msg.contentHtml = '<p class="error-text">' + (e.message || '请求失败') + '</p>'
       }
     } finally {
-      finalizeStream()
+      delete _sending[sendSid]
+      if (sessionId.value === sendSid) {
+        finalizeStream()
+      } else {
+        // Session changed — finalize the send session's messages in the per-session store
+        console.log('[chat] sendMessage: finalizing for different session', sendSid)
+        if (sendSid && _sessionMsgs[sendSid]) {
+          const savedMsgs = messages.value
+          const savedPlaceholders = [...streamingPlaceholders.value]
+          messages.value = _sessionMsgs[sendSid]
+          streamingPlaceholders.value = []
+          finalizeStream()
+          _sessionMsgs[sendSid] = [...messages.value]
+          messages.value = savedMsgs
+          streamingPlaceholders.value = savedPlaceholders
+        }
+      }
       // Reconnect stream after send completes
-      if (sessionId.value) connectStream(sessionId.value)
+      if (sessionId.value) debouncedReconnect(sessionId.value)
     }
   }
 
@@ -298,23 +381,60 @@ export const useChatStore = defineStore('chat', () => {
     return messages.value[list[list.length - 1]]
   }
 
-  // Helper: get mutable agents array for current session
-  function currentAgents(): AgentInfo[] {
-    const sid = sessionId.value
-    if (!sid) return []
-    if (!sessionAgents.value[sid]) sessionAgents.value[sid] = []
-    return sessionAgents.value[sid]
+  // Helper: get mutable agents array for a specific session
+  function currentAgents(sid?: string): AgentInfo[] {
+    const target = sid || sessionId.value
+    if (!target) return []
+    if (!sessionAgents.value[target]) sessionAgents.value[target] = []
+    return sessionAgents.value[target]
   }
 
-  function processSSEEvent(ev: SSEEvent): void {
+  // Sync messages.value from per-session store after switching
+  function _syncMessages(sid: string) {
+    if (_sessionMsgs[sid]) {
+      messages.value = _sessionMsgs[sid]
+    } else {
+      messages.value = []
+    }
+  }
+
+  // ── Event dedup state ──
+  const _lastSeq: Record<string, number> = {}
+
+  function processSSEEvent(ev: SSEEvent, sid?: string): void {
+    const targetSid = sid || sessionId.value
     const t = ev.type
+
+    // v2.0: Dedup by _seq to prevent replay overlap
+    const seq = (ev as any)._seq as number | undefined
+    if (seq != null && targetSid) {
+      if (_lastSeq[targetSid] && seq <= _lastSeq[targetSid]) return
+      _lastSeq[targetSid] = seq
+    }
 
     // Handle session_status for reconnection sync
     if (t === 'session_status') {
       try {
         const st = JSON.parse(ev.content || '{}')
+        console.log('[chat] session_status event:', st)
         if (st.session_id) {
           streamingSessions.value[st.session_id] = !!st.streaming
+          // Persist agent-active flag across page refreshes
+          if (st.has_agents) {
+            agentActiveSessions.value[st.session_id] = true
+            // Restore agent details from reconnection event
+            if (st.agents && Array.isArray(st.agents)) {
+              sessionAgents.value[st.session_id] = st.agents.map((a: any) => ({
+                agent_id: a.agent_id || a.id,
+                agent_goal: a.goal,
+                agent_status: a.status,
+                agent_round: a.round,
+                content: a.summary || a.progress || '',
+              }))
+            }
+          } else {
+            delete agentActiveSessions.value[st.session_id]
+          }
         }
       } catch (_) {}
       return
@@ -322,6 +442,7 @@ export const useChatStore = defineStore('chat', () => {
 
     // Handle interrupted event
     if (t === 'interrupted') {
+      console.log('[chat] interrupted event:', ev.content)
       const content = ev.content || ''
       const pm = content.match(/进度\s*(\d+)%/)
       const tm = content.match(/最后执行：(.+)/)
@@ -329,7 +450,33 @@ export const useChatStore = defineStore('chat', () => {
         progress: pm ? parseInt(pm[1]) : 0,
         last_task: tm ? tm[1] : '',
       }
-      console.log('[chat] session interrupted:', content)
+      setLifecycle(targetSid, 'idle')
+      return
+    }
+
+    // ── v2.0 event handlers ──
+    if (t === 'state_change' && ev.state_change) {
+      const sc = ev.state_change
+      const list = currentAgents(targetSid)
+      const idx = list.findIndex(a => a.agent_id === sc.agent_id)
+      if (idx >= 0) list[idx].state = sc.to
+      return
+    }
+    if (t === 'role_change' && ev.role_change) {
+      const rc = ev.role_change
+      const list = currentAgents(targetSid)
+      const idx = list.findIndex(a => a.agent_id === rc.agent_id)
+      if (idx >= 0) list[idx].role = rc.new_role
+      return
+    }
+    if (t === 'lock_conflict' && ev.lock_conflict) {
+      // Store for LockConflictNotice component
+      if (!_lockConflicts[targetSid]) _lockConflicts[targetSid] = []
+      _lockConflicts[targetSid].push(ev.lock_conflict)
+      return
+    }
+    if (t === 'meta_report' && ev.meta_report) {
+      _metaReports[targetSid] = ev.meta_report
       return
     }
 
@@ -339,51 +486,45 @@ export const useChatStore = defineStore('chat', () => {
       return
     }
     if (t === 'agent_progress') {
-      const list = currentAgents()
+      const list = currentAgents(targetSid)
       const idx = list.findIndex((a) => a.agent_id === ev.agent_id)
       if (idx >= 0) Object.assign(list[idx], ev)
-      else {
-        list.push({ ...ev } as AgentInfo)
-        messages.value.push({
-          id: 'ag_' + (ev.agent_id || Date.now()),
-          role: 'agent' as const,
-          agentId: ev.agent_id || '',
-          agentGoal: ev.agent_goal || ev.goal || '',
-          agentStatus: ev.agent_status || 'running',
-          agentRound: ev.agent_round || 0,
-          agentSummary: ev.content || '',
-          createdAt: Date.now(),
-        } as ChatMessage)
-      }
+      else list.push({ ...ev } as AgentInfo)
       updateSubAgent(sessionId.value, ev as AgentInfo)
       return
     }
     if (t === 'agent_result') {
-      const list = currentAgents()
+      const list = currentAgents(targetSid)
       const idx = list.findIndex((a) => a.agent_id === ev.agent_id)
       const merged = { ...ev, status: ev.agent_status || ev.status || 'done' }
       if (idx >= 0) Object.assign(list[idx], merged)
-      const msgIdx = messages.value.findIndex((m) => m.role === 'agent' && m.agentId === ev.agent_id)
-      if (msgIdx >= 0) {
-        messages.value[msgIdx] = {
-          ...messages.value[msgIdx],
-          agentStatus: merged.status,
-          agentSummary: ev.content || ev.summary || messages.value[msgIdx].agentSummary,
-          agentRound: ev.agent_round || messages.value[msgIdx].agentRound,
-        } as ChatMessage
-      } else {
+      else list.push(merged as AgentInfo)
+      updateSubAgent(sessionId.value, merged as AgentInfo)
+      // Only push a message bubble if NOT in active sendMessage streaming.
+      // During streaming, pushing messages corrupts the ReAct loop flow.
+      // AgentPanel already shows the agent status card.
+      const lc = getLifecycle(targetSid)
+      if (lc !== 'streaming') {
+        const isOk = merged.status === 'done'
+        const resultContent = ev.content || ev.summary || ''
+        const isQQ = targetSid?.startsWith('qqbot_')
+        const agentContent = isQQ
+          ? `${isOk ? '✓' : '✗'} ${ev.agent_goal || ev.goal || ''}: ${resultContent.slice(0, 200)}`
+          : isOk
+            ? `子Agent 完成\n> ${ev.agent_goal || ev.goal || ''}\n\n${resultContent}`
+            : `子Agent 失败\n> ${ev.agent_goal || ev.goal || ''}\n\n${resultContent}`
         messages.value.push({
-          id: 'ag_' + (ev.agent_id || Date.now()),
-          role: 'agent' as const,
-          agentId: ev.agent_id || '',
-          agentGoal: ev.agent_goal || ev.goal || '',
-          agentStatus: merged.status,
-          agentRound: ev.agent_round || 0,
-          agentSummary: ev.content || ev.summary || '',
+          id: 'agr_' + (ev.agent_id || Date.now()),
+          role: 'assistant' as const,
+          content: agentContent,
+          contentHtml: renderMarkdown(agentContent),
+          blocks: [{ type: 'content' as const, content: agentContent }],
+          status: 'done' as const,
+          streaming: false,
+          _v: ++_msgVersion,
           createdAt: Date.now(),
         } as ChatMessage)
       }
-      updateSubAgent(sessionId.value, merged as AgentInfo)
       return
     }
     if (t === 'topology_update') {
@@ -439,8 +580,8 @@ export const useChatStore = defineStore('chat', () => {
 
     let msg = currentStreamingMsg()
     // Auto-create placeholder for reconnection events
+    // (streaming state is managed by session_status event, not reconnection)
     if (!msg && _listeningForEvents) {
-      streamingSessions.value[sessionId.value] = true
       const idx = addAssistantPlaceholder()
       streamingPlaceholders.value = [idx]
       msg = messages.value[idx]
@@ -528,6 +669,7 @@ export const useChatStore = defineStore('chat', () => {
       finalizeOne(last)
     }
     messages.value = messages.value.filter((m) => {
+      if (!m) return false // safety: filter null entries
       if (m.streaming && m.role === 'assistant') return false
       if (m.role === 'assistant' && m.status === 'done' && (!m.blocks || !m.blocks.length)) return false
       return true
@@ -583,11 +725,20 @@ export const useChatStore = defineStore('chat', () => {
     messages.value = (msgs || [])
       .filter((m) => m.role !== 'tool')
       .map((m, i) => {
+        // Synthesize content for agent messages from their structured fields
+        let content = m.content || ''
+        let role = m.role
+        if (role === 'agent' && !content) {
+          const status = m.agent_status || m.status || ''
+          const icon = status === 'done' ? '✅' : status === 'error' ? '❌' : '🔄'
+          content = `${icon} 子Agent: ${m.agent_goal || m.goal || ''}\n${m.agent_summary || m.summary || ''}`
+          role = 'assistant' // render as normal bubble
+        }
         const msg: ChatMessage = {
           id: 'h_' + i + '_' + Math.random().toString(36).slice(2, 6),
-          role: m.role,
-          content: m.content || '',
-          contentHtml: renderMarkdown(m.content || ''),
+          role,
+          content,
+          contentHtml: renderMarkdown(content),
           reasoning: m.reasoning_content || '',
           tools: (m.tool_calls || []).map((tc: any) => ({
             name: tc.name || '',
@@ -649,72 +800,249 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function clearCurrent(): void {
+    const sid = sessionId.value
+    if (sid && messages.value.length > 0) {
+      _sessionMsgs[sid] = [...messages.value]
+    }
+    // Bug 2 fix: clean per-session send flag
+    if (sid) {
+      delete _sending[sid]
+      delete agentActiveSessions.value[sid]
+      setLifecycle(sid, 'closed')
+    }
     messages.value = []
     resetStreaming()
     sessionId.value = ''
+    activeConversationId.value = ''
   }
 
   let _streamAbort: AbortController | null = null
   let _listeningForEvents = false
+  let _streamPromise: Promise<void> | null = null
+  // Bug 2 fix: per-session send flag — prevents cross-session stickiness
+  const _sending: Record<string, boolean> = {}
+  let _switchToken = 0
+  // Bug 1 fix: debounced reconnect timer
+  let _reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  let _pendingReconnectSid: string | null = null
 
   async function connectStream(sid: string): Promise<void> {
+    console.log('[chat] connectStream: start', sid)
     const token = localStorage.getItem('token')
     const controller = new AbortController()
     _streamAbort = controller
-
     _listeningForEvents = true
 
-    try {
-      const res = await fetch('/api/chat/stream/' + sid, {
-        headers: { Authorization: 'Bearer ' + token },
-        signal: controller.signal,
-      })
-      if (!res.ok) {
-        streamingSessions.value[sessionId.value] = false
-        _listeningForEvents = false
-        return
-      }
+    // Track promise so disconnectStream can await full cleanup.
+    _streamPromise = (async () => {
+      try {
+        const res = await fetch('/api/chat/stream/' + sid, {
+          headers: { Authorization: 'Bearer ' + token },
+          signal: controller.signal,
+        })
+        if (!res.ok) {
+          streamingSessions.value[sessionId.value] = false
+          return
+        }
 
-      const reader = res.body!.getReader()
-      const dec = new TextDecoder()
-      let buf = ''
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buf += dec.decode(value, { stream: true })
-        const lines = buf.split('\n')
-        buf = lines.pop() || ''
-        for (const l of lines) {
-          const trimmed = l.trim()
-          if (!trimmed.startsWith('data: ')) continue
-          try {
-            processSSEEvent(JSON.parse(trimmed.slice(6)))
-          } catch (e) {}
+        const reader = res.body!.getReader()
+        const dec = new TextDecoder()
+        let buf = ''
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buf += dec.decode(value, { stream: true })
+          const lines = buf.split('\n')
+          buf = lines.pop() || ''
+          for (const l of lines) {
+            const trimmed = l.trim()
+            if (!trimmed.startsWith('data: ')) continue
+            try {
+              processSSEEvent(JSON.parse(trimmed.slice(6)), sid)
+            } catch (e) {}
+          }
+        }
+      } catch (e: any) {
+        if (e.name !== 'AbortError') {
+          console.warn('[chat] stream disconnected:', e.message)
+        }
+      } finally {
+        _listeningForEvents = false
+        _streamAbort = null
+        _streamPromise = null
+        // v2.0: Only clean up if session is truly closed, not just reconnecting
+        const lc = getLifecycle(sid)
+        if (lc === 'closed') {
+          if (sessionId.value === sid) {
+            streamingPlaceholders.value = []
+          }
+          return
+        }
+        // Don't prematurely clear streaming — let switch/send manage the lifecycle
+        if (_sending[sid]) return
+        if (sessionId.value === sid && lc !== 'streaming') {
+          const idx = streamingPlaceholders.value[0]
+          if (idx != null) {
+            const m = messages.value[idx]
+            if (m && m.streaming && (!m.blocks || !m.blocks.length) && !m.content) {
+              messages.value.splice(idx, 1)
+            }
+          }
+          streamingPlaceholders.value = []
         }
       }
-    } catch (e: any) {
-      if (e.name !== 'AbortError') {
-        console.warn('[chat] stream disconnected:', e.message)
+    })()
+
+    return _streamPromise
+  }
+
+  async function disconnectStream(): Promise<void> {
+    // Bug 3 fix: synchronously clear streaming states for current session
+    const sid = sessionId.value
+    if (sid) {
+      delete streamingSessions.value[sid]
+    }
+    // Cancel any pending reconnect
+    if (_reconnectTimer) {
+      clearTimeout(_reconnectTimer)
+      _reconnectTimer = null
+      _pendingReconnectSid = null
+    }
+    console.log('[chat] disconnectStream: abort:', !!_streamAbort, '| hasPromise:', !!_streamPromise)
+    // Bug 1 fix: idempotent abort — don't re-abort an already-aborted controller
+    if (_streamAbort) {
+      try { _streamAbort.abort() } catch (_) { /* already aborted */ }
+      _streamAbort = null
+    }
+    _listeningForEvents = false
+    // Wait for the old stream's finally block to finish
+    if (_streamPromise) {
+      try { await _streamPromise } catch (_) {
+        console.log('[chat] disconnectStream: promise rejected:', _)
       }
-    } finally {
-      _listeningForEvents = false
-      const idx = streamingPlaceholders.value[0]
-      if (idx != null) {
-        const m = messages.value[idx]
-        if (m && m.streaming && (!m.blocks || !m.blocks.length) && !m.content) {
-          messages.value.splice(idx, 1)
-        }
+    }
+    console.log('[chat] disconnectStream: done')
+  }
+
+  // Bug 1 fix: debounced reconnect — prevents SSE thrashing on rapid switches
+  function debouncedReconnect(targetSid: string): void {
+    if (_reconnectTimer) {
+      clearTimeout(_reconnectTimer)
+      _reconnectTimer = null
+    }
+    _pendingReconnectSid = targetSid
+    _reconnectTimer = setTimeout(() => {
+      _reconnectTimer = null
+      if (_pendingReconnectSid === targetSid && sessionId.value === targetSid) {
+        _pendingReconnectSid = null
+        connectStream(targetSid)
       }
-      streamingSessions.value[sessionId.value] = false
-      finalizeStream()
+    }, 150)
+  }
+
+  // Bug 3 fix: clean up ALL streaming sessions (used on route leave / page unload)
+  function cleanupAllStreams(): void {
+    console.log('[chat] cleanupAllStreams: keys:', Object.keys(streamingSessions.value))
+    // Abort current stream reader
+    if (_streamAbort) {
+      try { _streamAbort.abort() } catch (_) { /* already aborted */ }
+      _streamAbort = null
+    }
+    _listeningForEvents = false
+    if (_reconnectTimer) {
+      clearTimeout(_reconnectTimer)
+      _reconnectTimer = null
+      _pendingReconnectSid = null
+    }
+    // Clear all streaming session flags
+    const keys = Object.keys(streamingSessions.value)
+    for (const k of keys) {
+      delete streamingSessions.value[k]
+      delete agentActiveSessions.value[k]
+    }
+    console.log('[chat] cleanupAllStreams: done, cleared', keys.length, 'sessions')
+  }
+
+  // Bug 2 fix: force-clear all per-session send flags (used on unmount)
+  function forceClearSending(): void {
+    const keys = Object.keys(_sending)
+    for (const k of keys) {
+      delete _sending[k]
+    }
+    if (keys.length > 0) {
+      console.log('[chat] forceClearSending: cleared', keys.length, 'flags')
     }
   }
 
-  function disconnectStream(): void {
-    if (_streamAbort) {
-      _streamAbort.abort()
-      _streamAbort = null
-    }
+  // ── Conversation management actions ──
+
+  async function renameConversation(id: string, title: string): Promise<boolean> {
+    const token = localStorage.getItem('token')
+    try {
+      const res = await fetch('/api/chat/sessions/' + id, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify({ title }),
+      })
+      const data = await res.json()
+      if (data.code === 200) {
+        // Optimistically update local state
+        const conv = conversations.value.find(c => c.id === id)
+        if (conv) conv.title = title
+        return true
+      }
+    } catch (e) { /* ignore */ }
+    return false
+  }
+
+  async function deleteConversation(id: string): Promise<boolean> {
+    const token = localStorage.getItem('token')
+    try {
+      const res = await fetch('/api/chat/sessions/' + id, {
+        method: 'DELETE',
+        headers: { Authorization: 'Bearer ' + token },
+      })
+      const data = await res.json()
+      if (data.code === 200) {
+        // Remove from list
+        conversations.value = conversations.value.filter(c => c.id !== id)
+        // Clean up per-session cache
+        delete _sessionMsgs[id]
+        delete _sending[id]
+        delete streamingSessions.value[id]
+        delete sessionAgents.value[id]
+        delete agentActiveSessions.value[id]
+        // If currently viewing this session, jump to home
+        if (sessionId.value === id) {
+          clearCurrent()
+        }
+        return true
+      }
+    } catch (e) { /* ignore */ }
+    return false
+  }
+
+  async function togglePin(id: string, pinned: boolean): Promise<boolean> {
+    const token = localStorage.getItem('token')
+    // Optimistic update
+    const conv = conversations.value.find(c => c.id === id)
+    if (conv) (conv as any).pinned = pinned
+    try {
+      const res = await fetch('/api/chat/sessions/' + id, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify({ pinned }),
+      })
+      const data = await res.json()
+      if (data.code === 200) {
+        // Reload to get correct sort order
+        await loadConversations()
+        return true
+      }
+    } catch (e) { /* ignore */ }
+    // Rollback on failure
+    if (conv) (conv as any).pinned = !pinned
+    return false
   }
 
   // ── Multi-Conversation State ──
@@ -730,6 +1058,8 @@ export const useChatStore = defineStore('chat', () => {
       })
       const data = await res.json()
       if (data.code === 200 && data.data) {
+        // Backend returns sorted by pinned DESC, updated_at DESC — preserve that order
+        // Client-side sort as safety net: pinned first, then by updated_at descending
         conversations.value = (data.data || [])
           .map((s: any) => ({
             id: s.id,
@@ -737,8 +1067,13 @@ export const useChatStore = defineStore('chat', () => {
             createdAt: s.created_at,
             updatedAt: s.updated_at,
             messageCount: s.message_count || 0,
+            pinned: s.pinned || false,
+            isActive: s.is_active || false,
           }))
-          .sort((a: Conversation, b: Conversation) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+          .sort((a: any, b: any) => {
+            if (a.pinned !== b.pinned) return a.pinned ? -1 : 1
+            return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+          })
       }
     } catch (e) {
       /* ignore */
@@ -746,21 +1081,61 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function switchConversation(id: string): Promise<boolean> {
+    const token = ++_switchToken
+
     if (activeConversationId.value === id) return true
-    disconnectStream()
+
+    // Save current messages to per-session store before leaving
+    const oldSid = sessionId.value
+    if (oldSid) {
+      _sessionMsgs[oldSid] = [...messages.value]
+      delete _sending[oldSid]
+    }
+
+    // Stop listening to the OLD session's SSE, but don't close it — it keeps running
+    await disconnectStream()
+
+    if (token !== _switchToken) return false
+
+    // Switch to new session
     activeConversationId.value = id
     sessionId.value = id
+
+    // Preserve target session's lifecycle — don't overwrite with 'idle'
+    const targetLc = getLifecycle(id)
+    const wasStreaming = targetLc === 'streaming' || targetLc === 'reconnecting' || targetLc === 'connecting'
+
+    // Only clear these if the target is NOT streaming (otherwise keep them)
+    if (!wasStreaming) {
+      interruptSnapshot.value = null
+      confirmRequest.value = null
+      todoList.value = []
+      streamingPlaceholders.value = []
+      currentToolName.value = ''
+      currentToolProgress.value = ''
+      loading.value = false
+    }
+
+    // ALWAYS restore from per-session cache first (it has the latest messages from SSE redirects)
+    const cached = _sessionMsgs[id]
+    if (cached && cached.length > 0) {
+      messages.value = [...cached]
+      if (token === _switchToken) debouncedReconnect(id)
+      return true
+    }
+
+    // No cache — load from DB
     messages.value = []
-    sessionAgents.value[id] = []
-    resetStreaming()
     const ok = await fetchSessionMessages(id)
+    if (token !== _switchToken) return false
     if (!ok) {
       clearCurrent()
       sessionId.value = id
       activeConversationId.value = ''
       return false
     }
-    connectStream(id)
+    _sessionMsgs[id] = [...messages.value]
+    if (token === _switchToken) debouncedReconnect(id)
     return ok
   }
 
@@ -784,6 +1159,29 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  // ── v2.0 debug injection (dev only) ──
+  if (typeof window !== 'undefined' && import.meta.env.DEV) {
+    (window as any).__debug = {
+      injectSSE: (e: any) => processSSEEvent(e),
+      get store() { return useChatStore() },
+      simulateConflict: () => processSSEEvent({ type: 'lock_conflict', lock_conflict: { resource_id: 'file:/etc/test.txt', agents: ['agent_1','agent_2'], decision: 'yield', winner: 'agent_1', reason: 'priority' } }),
+      simulatePromotion: () => processSSEEvent({ type: 'role_change', role_change: { agent_id: 'agent_1', old_role: 'executor', new_role: 'supervisor', reason: 'test' } }),
+      simulateStateChange: (to: any) => processSSEEvent({ type: 'state_change', state_change: { agent_id: 'agent_1', from: 'reasoning' as any, to, event: 'debug' } }),
+      runScenario(name: string) {
+        const s: any = useChatStore()
+        const sid = s.sessionId || 'debug_' + Date.now()
+        if (!s.sessionId) { s.sessionId = sid; s.activeConversationId = sid }
+        switch (name) {
+          case 'greeting': { const m = s.addUserMessage('你好'); s.messages.push({ id: 'a_debug', role: 'assistant', content: '你好！有什么可以帮你的？', blocks: [{ type: 'content', content: '你好！有什么可以帮你的？' }], status: 'done', streaming: false }); break }
+          case 'short': { const m = s.addUserMessage('列出 /tmp 目录'); s.sessionAgents[sid] = [{ agent_id: 'agent_1', agent_goal: '列出文件', agent_status: 'running', agent_round: 1, state: 'executing' }]; s.messages.push({ id: 'a_short', role: 'assistant', content: '', blocks: [{ type: 'tool', name: 'file_list', args: '{}', result: 'file1.txt\nfile2.log' }], status: 'done', streaming: false }); break }
+          case 'long': { s.addUserMessage('同时检查DNS和Docker'); s.sessionAgents[sid] = [{ agent_id: 'agent_1', agent_goal: '检查DNS', agent_status: 'running', agent_round: 3, state: 'executing', role: 'supervisor' }, { agent_id: 'agent_2', agent_goal: '检查Docker', agent_status: 'running', agent_round: 2, state: 'executing', role: 'executor' }, { agent_id: 'agent_3', agent_goal: '读配置', agent_status: 'running', agent_round: 1, state: 'waiting_lock', role: 'executor' }]; s.messages.push({ id: 'a_long', role: 'assistant', content: '正在并行检查...', blocks: [{ type: 'content', content: '正在并行检查系统状态...' }], status: 'streaming', streaming: true }); break }
+          case 'compound': { s.addUserMessage('全面巡检服务器'); s.sessionAgents[sid] = [{ agent_id: 'agent_1', agent_goal: '备份数据库', agent_status: 'running', agent_round: 5, state: 'executing', role: 'supervisor' }, { agent_id: 'agent_2', agent_goal: '检查磁盘', agent_status: 'running', agent_round: 3, state: 'executing', role: 'executor' }, { agent_id: 'agent_3', agent_goal: '查日志', agent_status: 'running', agent_round: 2, state: 'waiting_lock', role: 'executor' }]; s._lockConflicts[sid] = [{ resource_id: 'file:/etc/hosts', agents: ['agent_1','agent_3'], decision: 'yield', winner: 'agent_1', reason: 'priority preempt' }]; s._metaReports[sid] = { agent_id: 'agent_1', success_rate: 0.95, avg_latency_ms: 230, conflict_count: 1, task_completed: 10, task_failed: 1, current_load: 0.3, role: 'supervisor' }; break }
+          case 'switch': { s.addUserMessage('长任务执行中'); s.messages.push({ id: 'a_switch', role: 'assistant', content: '', blocks: [{ type: 'tool', name: 'long_task', args: '{}', result: '', status: 'running' }], status: 'streaming', streaming: true }); (s as any).setLifecycle(sid, 'streaming'); break }
+        }
+      },
+    }
+  }
+
   return {
     messages,
     sessionId,
@@ -797,13 +1195,16 @@ export const useChatStore = defineStore('chat', () => {
     confirmRequest,
     interactiveRequest,
     topology,
-    // Tool progress
     currentToolName,
     currentToolProgress,
-    // Per-session state
     streamingSessions,
     sessionAgents,
+    agentActiveSessions,
     interruptSnapshot,
+    // v2.0
+    lifecycles,
+    lockConflicts,
+    metaReport,
     resetStreaming,
     sendMessage,
     loadSession,
@@ -815,11 +1216,16 @@ export const useChatStore = defineStore('chat', () => {
     finalizeStream,
     connectStream,
     disconnectStream,
+    cleanupAllStreams,
+    forceClearSending,
     conversations,
     activeConversationId,
     subAgents,
     loadConversations,
     switchConversation,
+    renameConversation,
+    deleteConversation,
+    togglePin,
     updateSubAgent,
   }
 })

@@ -71,6 +71,15 @@
       </div>
     </div>
 
+    <!-- Agent system v2.0 -->
+    <div v-if="agentMetrics" class="agent-strip">
+      <div class="agent-block"><span class="agent-val ok">{{ agentMetrics.success_rate }}</span><span class="agent-key">助手成功率</span></div>
+      <div class="agent-block"><span class="agent-val">{{ agentMetrics.spawned }}</span><span class="agent-key">助手任务</span></div>
+      <div class="agent-block"><span class="agent-val warn">{{ agentMetrics.conflicts }}</span><span class="agent-key">资源冲突</span></div>
+      <div class="agent-block"><span class="agent-val">{{ agentMetrics.promotions }}</span><span class="agent-key">角色升级</span></div>
+      <div class="agent-block"><span class="agent-val">{{ agentMetrics.demotions }}</span><span class="agent-key">角色降级</span></div>
+    </div>
+
     <!-- Gauges -->
     <div
       v-if="status?.system"
@@ -300,6 +309,21 @@ const mcpStats = computed(() => status.value?.mcp || null)
 const goRuntime = computed(() => status.value?.go_runtime || null)
 const processStats = computed(() => status.value?.process || null)
 const notifyStatus = computed(() => status.value?.notify || { email_enabled: false, webhook_enabled: false, dingtalk_enabled: false })
+
+const agentMetrics = computed(() => {
+  const ai = status.value?.ai || {}
+  const spawned = ai.sub_agent_spawned || 0
+  const success = ai.sub_agent_success || 0
+  const failed = ai.sub_agent_failed || 0
+  const total = spawned || 1
+  return {
+    success_rate: Math.round((success / total) * 100) + '%',
+    spawned,
+    conflicts: ai.lock_conflicts || 0,
+    promotions: ai.role_promotions || 0,
+    demotions: ai.role_demotions || 0,
+  }
+})
 const notifyCount = computed(() => [notifyStatus.value.email_enabled, notifyStatus.value.webhook_enabled, notifyStatus.value.dingtalk_enabled].filter(Boolean).length)
 const cpuCount = computed(() => status.value?.system?.cpu_cores || 1)
 
@@ -381,6 +405,12 @@ onUnmounted(() => { isActive = false; timers.forEach(clearInterval) })
 
 /* AI strip */
 .ai-strip { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
+.agent-strip { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-top: 10px; }
+.agent-block { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 8px; background: var(--surface-card); border: 1px solid var(--border-default); border-radius: 10px; }
+.agent-val { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text-primary); }
+.agent-val.ok { color: #22c55e; }
+.agent-val.warn { color: #f59e0b; }
+.agent-key { font-size: 11px; color: var(--text-muted); }
 .ai-block { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 10px 8px; background: linear-gradient(135deg, rgba(6,182,212,0.04), rgba(8,145,178,0.02)); border: 1px solid rgba(6,182,212,0.15); border-radius: 10px; }
 .ai-val { font-size: 18px; font-weight: 700; color: var(--brand-600); }
 .ai-key { font-size: 10px; color: var(--text-muted); }

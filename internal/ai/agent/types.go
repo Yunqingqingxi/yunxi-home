@@ -9,7 +9,7 @@ import (
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/register"
 )
 
-// Status 子 Agent 状态
+// Status 子 Agent 状态（保留向后兼容，新代码使用 AgentState）
 type Status string
 
 const (
@@ -19,13 +19,34 @@ const (
 	StatusError   Status = "error"
 )
 
+// StatusFromAgentState 将 AgentState 映射为旧版 Status
+func StatusFromAgentState(s AgentState) Status {
+	switch s {
+	case StateStart, StateReasoning, StateExecuting, StateRetry:
+		return StatusRunning
+	case StateWaitingLock, StateWaitingHuman, StateDelegate:
+		return StatusRunning // 等待态在前端显示为运行中
+	case StateSuspended, StateTimeout:
+		return StatusPending
+	case StateDone:
+		return StatusDone
+	case StateFailed:
+		return StatusError
+	case StateCancel:
+		return StatusError
+	default:
+		return StatusPending
+	}
+}
+
 // SubAgent 一个 AI 派生的子 Agent
 type SubAgent struct {
 	ID          string          `json:"agent_id"`
 	Goal        string          `json:"goal"`         // 单一子任务描述
 	ToolFilter  []string        `json:"tool_filter"`  // 允许的工具列表（空=全部，["*"]=全部）
 	Context     []base.Message  `json:"-"`            // 独立上下文
-	Status      Status          `json:"status"`
+	ParentID    string          `json:"parent_id"`    // 父会话 ID
+	Status      Status          `json:"status"`       // 兼容旧版，自动从 StateMachine 派生
 	Summary     string          `json:"summary"`      // 完成后的结果摘要
 	Error       string          `json:"error,omitempty"`
 	Round       int             `json:"round"`        // 已完成轮次
@@ -33,6 +54,7 @@ type SubAgent struct {
 	StartedAt   time.Time       `json:"started_at"`
 	FinishedAt  time.Time       `json:"finished_at,omitempty"`
 	progressFn  ProgressFunc    // 创建时捕获的进度回调（nil-safe）
+	State       *StateMachine   `json:"-"`            // 状态机（v2.0）
 }
 
 // Result 子 Agent 完成后返回的结果

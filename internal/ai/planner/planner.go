@@ -5,7 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 	"strings"
 	"sync"
 	"time"
@@ -164,7 +164,7 @@ func (e *Engine) Execute(ctx context.Context, plan *base.Plan) *base.PlanResult 
 		}
 
 		if len(ready) == 0 {
-			slog.Warn("plan deadlock detected", "executed", len(executed), "remaining", len(plan.Steps)-len(executed))
+			log.Warn("plan deadlock detected", "executed", len(executed), "remaining", len(plan.Steps)-len(executed))
 			break
 		}
 
@@ -190,7 +190,7 @@ func (e *Engine) Execute(ctx context.Context, plan *base.Plan) *base.PlanResult 
 		if plan.RollbackOnFailure {
 			for _, idx := range ready {
 				if result.Steps[idx].Status == base.StatusError {
-					slog.Warn("plan step failed, rollback requested", "step", result.Steps[idx].ID)
+					log.Warn("plan step failed, rollback requested", "step", result.Steps[idx].ID)
 					result.DurationMs = time.Since(start).Milliseconds()
 					return result
 				}
@@ -212,7 +212,7 @@ func (e *Engine) Execute(ctx context.Context, plan *base.Plan) *base.PlanResult 
 }
 
 func (e *Engine) executeStep(ctx context.Context, step *base.PlanStep) *base.StepResult {
-	slog.Info("executing plan step", "id", step.ID, "tool", step.Tool, "purpose", step.Purpose)
+	log.Info("executing plan step", "id", step.ID, "tool", step.Tool, "purpose", step.Purpose)
 
 	tool, ok := e.registry.Get(step.Tool)
 	if !ok {
