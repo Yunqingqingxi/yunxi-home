@@ -89,7 +89,6 @@ export function renderMarkdown(text: string): string {
 export const useChatStore = defineStore('chat', () => {
   const messages = ref<ChatMessage[]>([])
   const sessionId = ref<string>('')
-  const isStreaming = ref<boolean>(false)
   const loading = ref<boolean>(false)
   const hintTexts: string[] = [
     '查看系统状态和磁盘使用情况',
@@ -101,15 +100,42 @@ export const useChatStore = defineStore('chat', () => {
   ]
 
   const todoList = ref<Todo[]>([])
-  const agents = ref<AgentInfo[]>([])
   const confirmRequest = ref<ConfirmRequest | null>(null)
   const interactiveRequest = ref<InteractiveRequest | null>(null)
   const topology = ref<TopologyState | null>(null)
 
-  // Whether any agent (subtask) is running
-  const hasRunningAgents = computed<boolean>(() =>
-    agents.value.some((a) => a.agent_status === 'running' || a.status === 'running'),
-  )
+  // ── Per-session streaming & agent state (persists across tab switches) ──
+  const streamingSessions = ref<Record<string, boolean>>({})
+  const sessionAgents = ref<Record<string, AgentInfo[]>>({})
+
+  // Computed: current session streaming state
+  const isStreaming = computed<boolean>(() => {
+    const sid = sessionId.value
+    if (!sid) return false
+    return !!streamingSessions.value[sid]
+  })
+
+  // Computed: current session has running agents
+  const hasRunningAgents = computed<boolean>(() => {
+    const sid = sessionId.value
+    if (!sid) return false
+    const list = sessionAgents.value[sid] || []
+    return list.some((a) => a.agent_status === 'running' || a.status === 'running')
+  })
+
+  // Current session agents (for backward compatibility)
+  const agents = computed<AgentInfo[]>(() => {
+    const sid = sessionId.value
+    if (!sid) return []
+    return sessionAgents.value[sid] || []
+  })
+
+  // Tool progress tracking
+  const currentToolName = ref('')
+  const currentToolProgress = ref('')
+
+  // Interrupt state (for InterruptBanner)
+  const interruptSnapshot = ref<{ progress: number; last_task: string } | null>(null)
 
   // Current turn's streaming assistant message indices
   const streamingPlaceholders = ref<number[]>([])
@@ -124,10 +150,17 @@ export const useChatStore = defineStore('chat', () => {
     }
     confirmRequest.value = null
     todoList.value = []
-    agents.value = []
     streamingPlaceholders.value = []
-    isStreaming.value = false
+    currentToolName.value = ''
+    currentToolProgress.value = ''
+    interruptSnapshot.value = null
     loading.value = false
+    // Clear per-session state
+    const sid = sessionId.value
+    if (sid) {
+      streamingSessions.value[sid] = false
+      sessionAgents.value[sid] = []
+    }
   }
 
   function addUserMessage(text: string): ChatMessage {
@@ -172,6 +205,9 @@ export const useChatStore = defineStore('chat', () => {
     const token = localStorage.getItem('token')
     if (!text.trim()) return
 
+    // Disconnect reconnection stream to avoid duplicate SSE events
+    disconnectStream()
+
     // If streaming or agent running, inject into current session
     if (isStreaming.value || hasRunningAgents.value) {
       addUserMessage(text)
@@ -199,7 +235,7 @@ export const useChatStore = defineStore('chat', () => {
     addUserMessage(text)
     const firstIdx = addAssistantPlaceholder()
     streamingPlaceholders.value = [firstIdx]
-    isStreaming.value = true
+    streamingSessions.value[sessionId.value] = true
 
     try {
       const body: Record<string, any> = { message: text, session_id: sessionId.value }
@@ -251,6 +287,8 @@ export const useChatStore = defineStore('chat', () => {
       }
     } finally {
       finalizeStream()
+      // Reconnect stream after send completes
+      if (sessionId.value) connectStream(sessionId.value)
     }
   }
 
@@ -260,8 +298,40 @@ export const useChatStore = defineStore('chat', () => {
     return messages.value[list[list.length - 1]]
   }
 
+  // Helper: get mutable agents array for current session
+  function currentAgents(): AgentInfo[] {
+    const sid = sessionId.value
+    if (!sid) return []
+    if (!sessionAgents.value[sid]) sessionAgents.value[sid] = []
+    return sessionAgents.value[sid]
+  }
+
   function processSSEEvent(ev: SSEEvent): void {
     const t = ev.type
+
+    // Handle session_status for reconnection sync
+    if (t === 'session_status') {
+      try {
+        const st = JSON.parse(ev.content || '{}')
+        if (st.session_id) {
+          streamingSessions.value[st.session_id] = !!st.streaming
+        }
+      } catch (_) {}
+      return
+    }
+
+    // Handle interrupted event
+    if (t === 'interrupted') {
+      const content = ev.content || ''
+      const pm = content.match(/进度\s*(\d+)%/)
+      const tm = content.match(/最后执行：(.+)/)
+      interruptSnapshot.value = {
+        progress: pm ? parseInt(pm[1]) : 0,
+        last_task: tm ? tm[1] : '',
+      }
+      console.log('[chat] session interrupted:', content)
+      return
+    }
 
     // todo_update, agent events don't need a streaming msg
     if (t === 'todo_update') {
@@ -269,10 +339,11 @@ export const useChatStore = defineStore('chat', () => {
       return
     }
     if (t === 'agent_progress') {
-      const idx = agents.value.findIndex((a) => a.agent_id === ev.agent_id)
-      if (idx >= 0) Object.assign(agents.value[idx], ev)
+      const list = currentAgents()
+      const idx = list.findIndex((a) => a.agent_id === ev.agent_id)
+      if (idx >= 0) Object.assign(list[idx], ev)
       else {
-        agents.value.push({ ...ev } as AgentInfo)
+        list.push({ ...ev } as AgentInfo)
         messages.value.push({
           id: 'ag_' + (ev.agent_id || Date.now()),
           role: 'agent' as const,
@@ -288,9 +359,10 @@ export const useChatStore = defineStore('chat', () => {
       return
     }
     if (t === 'agent_result') {
-      const idx = agents.value.findIndex((a) => a.agent_id === ev.agent_id)
+      const list = currentAgents()
+      const idx = list.findIndex((a) => a.agent_id === ev.agent_id)
       const merged = { ...ev, status: ev.agent_status || ev.status || 'done' }
-      if (idx >= 0) Object.assign(agents.value[idx], merged)
+      if (idx >= 0) Object.assign(list[idx], merged)
       const msgIdx = messages.value.findIndex((m) => m.role === 'agent' && m.agentId === ev.agent_id)
       if (msgIdx >= 0) {
         messages.value[msgIdx] = {
@@ -348,6 +420,9 @@ export const useChatStore = defineStore('chat', () => {
 
     // tool_start / tool_progress
     if (t === 'tool_start' || t === 'tool_progress') {
+      // Track current tool for AgentStatusBar
+      if (ev.tool) currentToolName.value = ev.tool
+      currentToolProgress.value = ev.content || ''
       const pending = currentStreamingMsg()
       if (!pending) return
       const blocks = [...pending.blocks!]
@@ -365,7 +440,7 @@ export const useChatStore = defineStore('chat', () => {
     let msg = currentStreamingMsg()
     // Auto-create placeholder for reconnection events
     if (!msg && _listeningForEvents) {
-      isStreaming.value = true
+      streamingSessions.value[sessionId.value] = true
       const idx = addAssistantPlaceholder()
       streamingPlaceholders.value = [idx]
       msg = messages.value[idx]
@@ -484,6 +559,25 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  // mergeToolBlocks merges adjacent tool_call+tool_result pairs into a single tool block.
+  function mergeToolBlocks(blocks: ChatBlock[]): ChatBlock[] {
+    const merged: ChatBlock[] = []
+    for (let i = 0; i < blocks.length; i++) {
+      const b = blocks[i]
+      if (b.type === 'tool' && !b.result && b.name && i + 1 < blocks.length) {
+        const next = blocks[i + 1]
+        // Next block is a tool_result for the same tool (no name, no args, has result)
+        if (next.type === 'tool' && !next.name && !next.args && next.result) {
+          merged.push({ ...b, result: next.result })
+          i++ // skip the tool_result block
+          continue
+        }
+      }
+      merged.push(b)
+    }
+    return merged
+  }
+
   async function loadSession(sid: string, msgs: any[]): Promise<void> {
     sessionId.value = sid
     messages.value = (msgs || [])
@@ -507,7 +601,7 @@ export const useChatStore = defineStore('chat', () => {
         }
 
         if (m.blocks && m.blocks.length > 0) {
-          msg.blocks = m.blocks.map(normalizeBlock)
+          msg.blocks = mergeToolBlocks(m.blocks.map(normalizeBlock))
         } else {
           msg.blocks = buildBlocksLegacy(m.role, m.content || '', m.reasoning_content || '', msg.tools || [])
         }
@@ -576,7 +670,7 @@ export const useChatStore = defineStore('chat', () => {
         signal: controller.signal,
       })
       if (!res.ok) {
-        isStreaming.value = false
+        streamingSessions.value[sessionId.value] = false
         _listeningForEvents = false
         return
       }
@@ -611,7 +705,7 @@ export const useChatStore = defineStore('chat', () => {
           messages.value.splice(idx, 1)
         }
       }
-      isStreaming.value = false
+      streamingSessions.value[sessionId.value] = false
       finalizeStream()
     }
   }
@@ -657,7 +751,7 @@ export const useChatStore = defineStore('chat', () => {
     activeConversationId.value = id
     sessionId.value = id
     messages.value = []
-    agents.value = []
+    sessionAgents.value[id] = []
     resetStreaming()
     const ok = await fetchSessionMessages(id)
     if (!ok) {
@@ -703,6 +797,13 @@ export const useChatStore = defineStore('chat', () => {
     confirmRequest,
     interactiveRequest,
     topology,
+    // Tool progress
+    currentToolName,
+    currentToolProgress,
+    // Per-session state
+    streamingSessions,
+    sessionAgents,
+    interruptSnapshot,
     resetStreaming,
     sendMessage,
     loadSession,

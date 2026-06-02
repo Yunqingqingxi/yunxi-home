@@ -33,6 +33,9 @@ type ChatService interface {
 	InjectMessage(sessionID, content string)
 	HasActiveSession(sessionID string) bool
 	ListActiveSessions() []string
+	// Interrupt (v3.1)
+	CancelSession(sessionID string, mode string) (any, error)
+	HasActiveStream(sessionID string) bool
 }
 
 // GoalInfo 目标信息（避免 import cycle）

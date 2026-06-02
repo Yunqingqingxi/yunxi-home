@@ -49,6 +49,10 @@ export interface SSEEvent {
   tool?: string
   args?: string
   result?: string
+  // tool_progress
+  tool_name?: string
+  tool_progress?: string
+  // agent
   agent_id?: string
   agent_goal?: string
   agent_status?: string

@@ -384,7 +384,7 @@ type InteractiveField struct {
 type InteractiveResponse struct {
 	ID       string            `json:"id"`
 	Approved bool              `json:"approved"`           // confirm 模式
-	Values   map[string]string `json:"values,omitempty"`  // form/input 模式
+	Values   map[string]any    `json:"values,omitempty"`  // form/input 模式（any 类型兼容 number）
 	Selected string            `json:"selected,omitempty"` // select 模式
 }
 

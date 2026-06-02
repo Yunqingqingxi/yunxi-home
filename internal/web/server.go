@@ -267,6 +267,7 @@ func New(cfg *config.Config, configRepo database.ConfigRepository, domainRepo da
 	api.POST("/chat/sessions/:id/topology/override", chatH.OverrideNode)
 	api.PUT("/chat/sessions/:id/messages/:messageIndex", chatH.EditMessage)
 	api.DELETE("/chat/sessions/:id/messages/:messageIndex", chatH.DeleteMessage)
+	api.POST("/chat/sessions/:id/interrupt", chatH.InterruptSession)
 	// 技能与 MCP 市场
 	api.POST("/market/search-skills", chatH.SearchSkills)
 	api.POST("/market/install-skill", chatH.InstallSkill)

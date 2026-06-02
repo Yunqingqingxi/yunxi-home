@@ -203,6 +203,7 @@ func NewService(provider base.AIProvider, reg *register.Registry, sessionRepo da
 		interactiveChannels: make(map[string]chan base.InteractiveResponse),
 		eventBus:        newSessionEventBus(),
 		activeStreams:   make(map[string]context.CancelFunc),
+		activeStreamChs: make(map[string]chan base.ChatStreamEvent),
 		chatLogger:      NewChatLogger("log/chat"),
 	}
 	svc.asyncExec = async.New(3, svc.injectCallback, svc.progressCallback)
@@ -275,12 +276,33 @@ func NewService(provider base.AIProvider, reg *register.Registry, sessionRepo da
 			svc.agentMgr.Cleanup(30 * time.Minute)
 		}
 	}()
+	// Wire all prompts through PromptStore (supports DB hot-reload)
+	svc.sessions.SystemPromptFn = func(userMessage string, recentToolCalls []string) string {
+		if svc.promptStore != nil {
+			p, _ := svc.promptStore.BuildSystemPrompt(userMessage, recentToolCalls)
+			return p
+		}
+		return base.BuildSystemPrompt(userMessage, recentToolCalls)
+	}
+	svc.sessions.QQBotPromptFn = func() string {
+		return svc.buildQQBotPrompt()
+	}
 	return svc
 }
 
 func (s *Service) GetRegistry() *register.Registry      { return s.registry }
 func (s *Service) PlanMode() bool                         { return s.planMode }
 func (s *Service) GetMetrics() *MetricsCollector          { return s.metrics }
+
+// buildQQBotPrompt constructs the QQ Bot prompt entirely from PromptStore.
+// PromptStore.Get() internally falls back to Go defaults if DB has no override,
+// so this works even before InitDefaults() runs.
+func (s *Service) buildQQBotPrompt() string {
+	if s.promptStore == nil {
+		return base.QQBotPrompt // only if PromptStore completely unavailable
+	}
+	return s.promptStore.Get("prompt_core_compact") + s.promptStore.Get("prompt_qqbot_suffix")
+}
 func (s *Service) SetMCPSubsystem(sub *mcp.Subsystem)     { s.mcpSubsystem = sub }
 func (s *Service) GetMCPSubsystem() *mcp.Subsystem        { return s.mcpSubsystem }
 func (s *Service) ChatLogger() *ChatLogger                  { return s.chatLogger }
@@ -370,6 +392,7 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 	}
 	_, streamCancel := context.WithCancel(context.Background())
 	s.activeStreams[sessionID] = streamCancel
+	s.activeStreamChs[sessionID] = ch
 	s.activeStreamsMu.Unlock()
 
 	go func() {
@@ -377,6 +400,7 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 		defer func() {
 			s.activeStreamsMu.Lock()
 			delete(s.activeStreams, sessionID)
+			delete(s.activeStreamChs, sessionID)
 			s.activeStreamsMu.Unlock()
 			streamCancel()
 		}()
@@ -401,7 +425,7 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 		if modelOverride != "" {
 			bgCtx = context.WithValue(bgCtx, base.ModelOverrideKey{}, modelOverride)
 		}
-		injectCh := s.getOrCreateInjectCh(sessionID)
+		s.getOrCreateInjectCh(sessionID) // ensure injectCh exists before draining
 		s.subscribeCrossSession(sessionID, ch)
 
 		// ── Agent progress → SSE routing ──
@@ -423,7 +447,11 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 		defer s.agentMgr.SetProgressFn(oldAgentFn)
 		// ── End agent progress routing ──
 
-		history, st := s.sessions.GetOrCreate(sessionID, models.SessionTypeChat, userMessage)
+		sessionType := models.SessionTypeChat
+		if strings.HasPrefix(sessionID, "qqbot_") {
+			sessionType = models.SessionTypeQQBot
+		}
+		history, st := s.sessions.GetOrCreate(sessionID, sessionType, userMessage)
 		if resumePrompt := s.checkGoalResume(sessionID, userMessage); resumePrompt != "" {
 		history = append(history, base.Message{Role: "system", Content: resumePrompt})
 		}
@@ -468,17 +496,31 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 		silenceStart := time.Now()
 		topoActive := s.isTopologyActive(sessionID) // 一次性读取，每轮复用
 		for state.round = 0; state.round < state.maxRounds; state.round++ {
-			select {
-			case msg := <-injectCh:
+			// ── 优先级批量消费 injectCh（支持中断信号）──
+			msgs, interrupted := s.drainInjectChNonBlocking(sessionID)
+			for _, msg := range msgs {
+				if msg.Priority == "interrupt" && msg.Source == "cancel_session" {
+					continue // handled by interrupted flag below
+				}
 				if msg.Source == "user" {
 					history = append(history, base.Message{Role: "user", Content: strings.TrimPrefix(msg.Content, "[用户消息] ")})
 					s.chatLogger.LogUserMessage(sessionID, state.round, strings.TrimPrefix(msg.Content, "[用户消息] "))
 				} else {
 					history = append(history, base.Message{Role: "system", Content: msg.Content})
 				}
-				slog.Debug("消息注入", "会话", sessionID, "来源", msg.Source)
+				slog.Debug("消息注入", "会话", sessionID, "来源", msg.Source, "优先级", msg.Priority)
 				s.chatLogger.LogInject(sessionID, state.round, msg.Content)
-			default:
+			}
+			if interrupted {
+				snapshot := s.buildSnapshot(sessionID)
+				s.saveSnapshot(sessionID)
+				emit(base.ChatStreamEvent{
+					Type:    "interrupted",
+					Content: fmt.Sprintf("进度 %d%%，最后执行：%s", snapshot.Progress, snapshot.LastTask),
+				})
+				s.sessions.Save(sessionID, history)
+				s.chatLogger.LogSessionSave(sessionID)
+				return
 			}
 
 			// ── ForceTools 检查（拓扑激活时）──
@@ -591,9 +633,10 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 
 			// Create tool context AFTER confirm (so it's not cancelled)
 			toolCtx, toolCancel := context.WithCancel(bgCtx)
+			toolCtx = base.WithSessionID(toolCtx, sessionID)
 			toolCtx = todo.WithSessionID(toolCtx, sessionID)
 			toolCtx = cron.WithSessionID(toolCtx, sessionID)
-			toolCtx = agent.WithSessionID(toolCtx, sessionID)
+		toolCtx = agent.WithSessionID(toolCtx, sessionID)
 
 			// Send tool_start event so frontend knows what's executing
 			emit(base.ChatStreamEvent{Type: "tool_start", Tool: tc.Function.Name, Args: tc.Function.Arguments})
@@ -823,17 +866,37 @@ func (s *Service) RequestUserInput(ctx context.Context, req base.InteractiveRequ
 		s.interactiveMu.Unlock()
 	}()
 
-	// 发送事件到当前活跃流
+	// 发送事件到当前活跃 SSE 流（主通道 + event bus 重连通道）
 	s.activeStreamsMu.Lock()
-	_, hasStream := s.activeStreams[sessionID]
+	streamCh, hasStream := s.activeStreamChs[sessionID]
 	s.activeStreamsMu.Unlock()
 
-	if hasStream {
-		eb := s.eventBus.getOrCreate(sessionID)
-		eb.publish(base.ChatStreamEvent{
+	slog.Info("interactive_request 发送", "sessionID", sessionID, "hasStream", hasStream, "reqID", req.ID)
+	if !hasStream || streamCh == nil {
+		slog.Warn("interactive_request: 无活跃 SSE 通道，尝试 event bus fallback", "sessionID", sessionID)
+		// fallback: 仅发送到 event bus
+		if sessionID != "" {
+			eb := s.eventBus.getOrCreate(sessionID)
+			eb.publish(base.ChatStreamEvent{
+				Type:               "interactive_request",
+				InteractiveRequest: &req,
+			})
+		}
+	} else {
+		ev := base.ChatStreamEvent{
 			Type:               "interactive_request",
 			InteractiveRequest: &req,
-		})
+		}
+		// 主 SSE 通道（优先，直接到达前端）
+		select {
+		case streamCh <- ev:
+			slog.Info("interactive_request: 已发送到主 SSE 通道", "reqID", req.ID)
+		default:
+			slog.Warn("interactive_request: 主 SSE 通道已满", "reqID", req.ID)
+		}
+		// event bus（重连订阅者也能收到）
+		eb := s.eventBus.getOrCreate(sessionID)
+		eb.publish(ev)
 	}
 
 	// 等待响应或超时
@@ -1568,21 +1631,39 @@ func (s *Service) RegisterAgentTools() {
 		},
 	})
 
-	// request_confirmation — AI 请求用户确认危险操作
+	// request_confirmation — AI 请求用户交互（确认/表单/输入/向导）
 	s.registry.Register(&base.ToolDef{
 		Name:        "request_confirmation",
-		Description: "在执行高风险操作前请求用户确认。高风险操作包括：修改系统配置文件（/etc/、/opt/下文件，包括 /opt/yunxi-home/mcp.json）、使用 sudo 命令、安装/卸载系统软件包、修改数据库结构、删除重要数据。调用后系统弹出确认弹窗，用户可选择批准或拒绝。批准后方可继续执行后续操作。⚠️ 禁止猜测用户凭据——需要密码/密钥时先用此工具询问用户。",
+		Description: "请求用户交互。支持四种模式：\n1) confirm: 简单确认弹窗（默认）。适合询问是否执行操作。\n2) input: 单页表单。适合收集少量字段（如 host/port）。\n3) form: 同 input，带更多字段。\n4) wizard: 多页向导。用 pages 参数定义多页，每页有独立 fields。\n\n高风险操作（修改配置文件、sudo、安装软件包、改数据库、删数据）必须先调此工具。⚠️ 禁止猜测用户凭据——需要密码/密钥时用此工具询问。",
 		Category:    "system",
 		RiskLevel:   "mutation",
 		Timeout:     120 * time.Second,
 		Parameters: base.ToolParams{
 			Type: "object",
 			Properties: map[string]base.ParamProp{
-				"title":       {Type: "string", Description: "确认弹窗标题，例如 '修改系统配置文件'"},
-				"message":     {Type: "string", Description: "详细说明要执行的操作及影响范围"},
-				"details":     {Type: "string", Description: "操作详情（可选），例如要执行的完整命令、要修改的文件路径等"},
-				"variant":     {Type: "string", Description: "弹窗变体", Enum: []string{"danger", "warning", "info"}},
-				"timeout_sec": {Type: "integer", Description: "等待用户确认的超时秒数，默认 120"},
+				"title":       {Type: "string", Description: "弹窗标题"},
+				"message":     {Type: "string", Description: "主说明文字"},
+				"details":     {Type: "string", Description: "操作详情（可选），完整命令或文件路径"},
+				"type":        {Type: "string", Description: "弹窗类型", Enum: []string{"confirm", "input", "form", "wizard"}},
+				"variant":     {Type: "string", Description: "视觉风格", Enum: []string{"danger", "warning", "info"}},
+				"timeout_sec": {Type: "integer", Description: "超时秒数，默认 120"},
+				"fields": {Type: "array", Description: "表单字段列表（type=input/form 时使用）", Items: &base.ParamProp{Type: "object", Properties: map[string]base.ParamProp{
+					"name":        {Type: "string", Description: "字段名（英文）"},
+					"label":       {Type: "string", Description: "字段标签（中文）"},
+					"type":        {Type: "string", Description: "输入类型: text | password | number"},
+					"placeholder": {Type: "string", Description: "占位提示"},
+					"default":     {Type: "string", Description: "默认值"},
+					"required":    {Type: "boolean", Description: "是否必填"},
+				}, Required: []string{"name", "label"}}},
+				"pages": {Type: "array", Description: "多页向导（type=wizard 时使用）", Items: &base.ParamProp{Type: "object", Properties: map[string]base.ParamProp{
+					"title":       {Type: "string", Description: "本页标题"},
+					"description": {Type: "string", Description: "本页说明"},
+					"fields": {Type: "array", Items: &base.ParamProp{Type: "object", Properties: map[string]base.ParamProp{
+						"name": {Type: "string", Description: "字段名"}, "label": {Type: "string", Description: "字段标签"},
+						"type": {Type: "string", Description: "text|password|number"}, "placeholder": {Type: "string"},
+						"default": {Type: "string"}, "required": {Type: "boolean"},
+					}, Required: []string{"name", "label"}}},
+				}, Required: []string{"title", "fields"}}},
 			},
 			Required: []string{"title", "message"},
 		},
@@ -1591,28 +1672,89 @@ func (s *Service) RegisterAgentTools() {
 			message, _ := args["message"].(string)
 			details, _ := args["details"].(string)
 			variant, _ := args["variant"].(string)
+			reqType, _ := args["type"].(string)
 			timeoutSec := toolreg.GetInt(args, "timeout_sec", 120)
 
-			if variant == "" {
-				variant = "warning"
-			}
+			if variant == "" { variant = "warning" }
+			if reqType == "" { reqType = "confirm" }
 
 			fullMsg := message
-			if details != "" {
-				fullMsg = message + "\n\n" + details
+			if details != "" { fullMsg = message + "\n\n" + details }
+
+			// 解析 fields
+			var fields []base.InteractiveField
+			if rawFields, ok := args["fields"]; ok {
+				if arr, ok := rawFields.([]any); ok {
+					for _, item := range arr {
+						if m, ok := item.(map[string]any); ok {
+							f := base.InteractiveField{
+								Name:        strVal(m, "name"),
+								Label:       strVal(m, "label"),
+								Type:        strVal(m, "type"),
+								Placeholder: strVal(m, "placeholder"),
+								Default:     strVal(m, "default"),
+								Required:    boolVal(m, "required"),
+							}
+							if f.Type == "" { f.Type = "text" }
+							fields = append(fields, f)
+						}
+					}
+				}
+			}
+
+			// 解析 pages (wizard)
+			var pages []base.InteractivePage
+			if rawPages, ok := args["pages"]; ok {
+				if arr, ok := rawPages.([]any); ok {
+					for _, item := range arr {
+						if m, ok := item.(map[string]any); ok {
+							p := base.InteractivePage{
+								Title:       strVal(m, "title"),
+								Description: strVal(m, "description"),
+							}
+							if rawF, ok := m["fields"]; ok {
+								if farr, ok := rawF.([]any); ok {
+									for _, fi := range farr {
+										if fm, ok := fi.(map[string]any); ok {
+											f := base.InteractiveField{
+												Name: strVal(fm, "name"), Label: strVal(fm, "label"),
+												Type: strVal(fm, "type"), Placeholder: strVal(fm, "placeholder"),
+												Default: strVal(fm, "default"), Required: boolVal(fm, "required"),
+											}
+											if f.Type == "" { f.Type = "text" }
+											p.Fields = append(p.Fields, f)
+										}
+									}
+								}
+							}
+							pages = append(pages, p)
+						}
+					}
+				}
 			}
 
 			resp := s.RequestUserInput(ctx, base.InteractiveRequest{
-				Type:       "confirm",
+				Type:       reqType,
 				Title:      title,
 				Message:    fullMsg,
+				Fields:     fields,
+				Pages:      pages,
 				TimeoutSec: timeoutSec,
 				Variant:    variant,
 			})
 			if resp == nil || !resp.Approved {
 				return "❌ 用户拒绝了确认请求。操作已取消。请勿重试，改为询问用户是否愿意更改方案或降低风险。", nil
 			}
-			return "✅ 用户已确认。你可以继续执行操作。注意：后续的 run_command 或 file_write 等操作可能会单独触发弹窗确认，这是正常的。", nil
+			// 包含用户填写的值
+			extra := ""
+			if len(resp.Values) > 0 {
+				parts := make([]string, 0, len(resp.Values))
+				for k, v := range resp.Values {
+					parts = append(parts, fmt.Sprintf("%s=%v", k, v))
+				}
+				extra = fmt.Sprintf(" 用户提交的值: %s。", strings.Join(parts, ", "))
+			}
+			return "✅ 用户已确认。" + extra + "你可以继续执行操作。注意：后续的 run_command 或 file_write 等操作可能会单独触发弹窗确认，这是正常的。", nil
 		},
 	})
 

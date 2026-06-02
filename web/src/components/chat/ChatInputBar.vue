@@ -567,7 +567,20 @@ function onKeydown(e) {
   }
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); store.isStreaming && !input.value.trim() ? stopGeneration() : doSend() }
 }
-function stopGeneration() { store.resetStreaming() }
+async function stopGeneration() {
+  const sid = store.sessionId
+  if (!sid) { store.resetStreaming(); return }
+  const token = localStorage.getItem('token')
+  try {
+    await fetch('/api/chat/sessions/' + sid + '/interrupt', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: 'soft' }),
+    })
+  } catch (_) {}
+  store.disconnectStream()
+  store.resetStreaming()
+}
 
 // ── Send ──
 async function doSend() {

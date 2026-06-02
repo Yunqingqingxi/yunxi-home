@@ -67,8 +67,20 @@ func (s *FileSystem) IsSandbox() bool { return s.sandboxRoot != "" }
 // SandboxRoot 返回沙箱根目录（仅调试用）
 func (s *FileSystem) SandboxRoot() string { return s.sandboxRoot }
 
-// resolve 解析并验证路径
+// resolve 解析并验证路径。
+// 自动去除沙箱根目录前缀，防止路径双重嵌套。
 func (s *FileSystem) resolve(requestPath string) (string, error) {
+	// 去沙箱根前缀：/opt/.../yunxiFiles/pictures → /pictures
+	if s.sandboxRoot != "" {
+		absSandbox := filepath.Clean(s.sandboxRoot)
+		absRequest := filepath.Clean(requestPath)
+		if strings.HasPrefix(absRequest, absSandbox) {
+			requestPath = strings.TrimPrefix(absRequest, absSandbox)
+			if requestPath == "" {
+				requestPath = "/"
+			}
+		}
+	}
 	clean := filepath.Clean(requestPath)
 
 	// ── 沙箱模式 ──

@@ -107,8 +107,8 @@ func New(cfg Config) *Provider {
 		baseURL:     "https://dashscope.aliyuncs.com/compatible-mode/v1",
 		model:       "qwen-plus",
 		client:      &http.Client{Timeout: 10 * time.Minute},
-		inputPrice:  0.0008 / 1000, // ¥0.0008/1K tokens (qwen-plus)
-		outputPrice: 0.002 / 1000,  // ¥0.002/1K tokens (qwen-plus)
+		inputPrice:  0.8,  // 元/百万 tokens (qwen-plus: ¥0.0008/1K)
+		outputPrice: 2.0,  // 元/百万 tokens (qwen-plus: ¥0.002/1K)
 	}
 }
 
@@ -313,7 +313,7 @@ func (p *Provider) readStream(ctx context.Context, resp *http.Response, ch chan<
 	}
 
 	if lastChunk != nil {
-		cost := float64(promptTokens)*p.inputPrice + float64(compTokens)*p.outputPrice
+		cost := float64(promptTokens)*p.inputPrice/1e6 + float64(compTokens)*p.outputPrice/1e6
 		emit(base.ChatStreamEvent{Type: "done", Usage: &base.StreamUsage{
 			PromptTokens:     promptTokens,
 			CompletionTokens: compTokens,

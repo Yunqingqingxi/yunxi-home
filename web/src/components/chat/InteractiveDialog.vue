@@ -150,6 +150,15 @@
           </div>
           <div class="wizard-page-title">{{ req.pages[currentPage].title }}</div>
           <div v-if="req.pages[currentPage].description" class="wizard-page-desc">{{ req.pages[currentPage].description }}</div>
+          <!-- 当前页为确认页（无输入字段）时，展示已填写的所有值 -->
+          <div v-if="!req.pages[currentPage].fields?.length" class="wizard-summary">
+            <div v-for="(_, i) in req.pages" :key="'sum'+i">
+              <div v-if="i < currentPage" v-for="f in req.pages[i].fields" :key="'f'+f.name" class="summary-row">
+                <span class="sum-label">{{ f.label }}</span>
+                <span class="sum-value">{{ values[f.name] || '(未填)' }}</span>
+              </div>
+            </div>
+          </div>
           <div v-for="f in req.pages[currentPage].fields" :key="f.name" class="interact-field">
             <label>{{ f.label }} <span v-if="f.required" class="req">*</span></label>
             <input v-model="values[f.name]" :type="f.type || 'text'" :placeholder="f.placeholder || f.default" class="interact-input" />
@@ -224,9 +233,14 @@ watch(() => props.request, (r) => {
   selected.value = ''
   submitting.value = false
   timeoutLeft.value = r.timeout_sec || 120
-  // 填默认值
+  // 填默认值（支持 plain fields 和 wizard pages）
   for (const f of (r.fields || [])) {
     if (f.default) values[f.name] = f.default
+  }
+  for (const p of (r.pages || [])) {
+    for (const f of (p.fields || [])) {
+      if (f.default) values[f.name] = f.default
+    }
   }
   // 倒计时
   clearInterval(timer)
@@ -308,6 +322,10 @@ onUnmounted(() => clearInterval(timer))
 .wizard-dot.active { background: var(--brand-500); transform: scale(1.3); }
 .wizard-dot.done { background: var(--brand-300); }
 .wizard-page-title { font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.wizard-summary { background: rgba(6,182,212,0.05); border: 1px solid var(--border-default); border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; max-height: 180px; overflow-y: auto; }
+.summary-row { display: flex; justify-content: space-between; align-items: center; font-size: 12px; }
+.sum-label { color: var(--text-secondary); }
+.sum-value { color: var(--text-primary); font-weight: 500; }
 .wizard-page-desc { font-size: 12px; color: var(--text-muted); line-height: 1.5; }
 .interact-btn.prev { background: transparent; color: var(--text-secondary); border: 1px solid var(--border-default); }
 .interact-btn.prev:hover { background: var(--surface-hover); }

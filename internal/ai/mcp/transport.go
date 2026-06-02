@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"sync"
+	"time"
 )
 
 // Transport 与 MCP 服务器的 stdio 通信通道
@@ -49,7 +51,8 @@ func StartTransport(command string, args []string, env map[string]string) (*Tran
 	}, nil
 }
 
-// Send 发送一条 JSON-RPC 请求并等待响应
+// Send 发送一条 JSON-RPC 请求并等待响应。
+// 兼容输出多行日志的 MCP 服务器：跳过非 JSON 行，直到找到有效的 JSON-RPC 响应。
 func (t *Transport) Send(request map[string]any) (map[string]any, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -63,23 +66,51 @@ func (t *Transport) Send(request map[string]any) (map[string]any, error) {
 		return nil, fmt.Errorf("write request: %w", err)
 	}
 
-	if !t.stdout.Scan() {
-		if err := t.stdout.Err(); err != nil {
-			return nil, fmt.Errorf("read response: %w", err)
+	// 读取直到找到有效的 JSON-RPC 响应（跳过非 JSON 日志行）
+	deadline := time.After(30 * time.Second)
+	for {
+		select {
+		case <-deadline:
+			return nil, fmt.Errorf("timeout waiting for MCP response")
+		default:
 		}
-		return nil, fmt.Errorf("unexpected EOF from MCP server")
-	}
 
-	var response map[string]any
-	if err := json.Unmarshal(t.stdout.Bytes(), &response); err != nil {
-		return nil, fmt.Errorf("unmarshal response: %w", err)
-	}
+		if !t.stdout.Scan() {
+			if err := t.stdout.Err(); err != nil {
+				return nil, fmt.Errorf("read response: %w", err)
+			}
+			return nil, fmt.Errorf("unexpected EOF from MCP server")
+		}
 
-	if errObj, ok := response["error"]; ok {
-		return nil, fmt.Errorf("MCP error: %v", errObj)
-	}
+		line := t.stdout.Bytes()
+		if len(line) == 0 {
+			continue
+		}
+		// 跳过非 JSON 行（日志、warning 等）
+		if line[0] != '{' {
+			slog.Debug("MCP transport: skipping non-JSON line", "line", string(line)[:min(len(line), 100)])
+			continue
+		}
 
-	return response, nil
+		var response map[string]any
+		if err := json.Unmarshal(line, &response); err != nil {
+			slog.Debug("MCP transport: skipping unparseable line", "line", string(line)[:min(len(line), 100)], "error", err)
+			continue
+		}
+
+		// 确认是 JSON-RPC 响应（有 jsonrpc 字段或有 id 字段）
+		if _, hasRPC := response["jsonrpc"]; !hasRPC {
+			if _, hasID := response["id"]; !hasID {
+				continue
+			}
+		}
+
+		if errObj, ok := response["error"]; ok {
+			return nil, fmt.Errorf("MCP error: %v", errObj)
+		}
+
+		return response, nil
+	}
 }
 
 // SendNotification 发送一条 JSON-RPC 通知（无 id，不等待响应）

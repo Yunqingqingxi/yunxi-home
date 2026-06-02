@@ -138,9 +138,9 @@ func New(cfg Config) *Provider {
 		baseURL:    "https://api.deepseek.com",
 		model:      "deepseek-v4-flash",
 		client:     &http.Client{Transport: transport, Timeout: 10 * time.Minute},
-		inputPrice: 0.28 / 1_000_000,
-		outputPrice: 1.10 / 1_000_000,
-		cachePrice: 0.07 / 1_000_000,
+		inputPrice: 0.28,   // 元/百万 tokens
+		outputPrice: 1.10,  // 元/百万 tokens
+		cachePrice: 0.07,   // 元/百万 tokens (cache hit)
 	}
 }
 
@@ -372,7 +372,7 @@ func (p *Provider) readStream(ctx context.Context, resp *http.Response, ch chan<
 		}
 		slog.Info("DeepSeek", "model", p.model, "hit", lastChunk.Usage.PromptCacheHitTokens,
 			"miss", lastChunk.Usage.PromptCacheMissTokens, "out", lastChunk.Usage.CompletionTokens,
-			"rate", fmt.Sprintf("%.1f%%", rate), "cost", fmt.Sprintf("%.4f元", cost))
+			"rate", fmt.Sprintf("%.1f%%", rate), "cost", fmt.Sprintf("%.6f元", cost))
 	}
 	slog.Info("流式响应完成", "模型", p.model, "内容长度", contentBuf.Len(), "思考长度", reasoningBuf.Len(), "工具调用数", len(toolCallMap))
 

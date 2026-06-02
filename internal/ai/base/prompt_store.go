@@ -81,6 +81,7 @@ func (ps *PromptStore) registerDefaults() {
 		"prompt_core_compact":  CorePrompt,
 		"prompt_topology":      TopologyPrompt,
 		"prompt_code_review":   CodeReviewPrompt,
+		"prompt_qqbot_suffix":  QQBotSuffix,
 	}
 }
 

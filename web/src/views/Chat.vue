@@ -39,6 +39,21 @@
           @wheel.passive="onPanelWheel"
           @touchmove.passive="onPanelTouchMove"
         >
+          <InterruptBanner
+            :visible="interruptBannerVisible && !!store.interruptSnapshot"
+            :progress="store.interruptSnapshot?.progress || 0"
+            :last-task="store.interruptSnapshot?.last_task || ''"
+            @continue="onInterruptContinue"
+            @retry="onInterruptRetry"
+            @dismiss="onInterruptNewTask"
+          />
+          <AgentStatusBar
+            v-if="store.currentToolName"
+            :visible="store.isStreaming || store.hasRunningAgents"
+            :is-running="store.isStreaming"
+            :tool-name="store.currentToolName"
+            :progress="store.currentToolProgress"
+          />
           <TopologyPanel />
           <TodoPanel :items="store.todoList" />
           <AgentPanel :agents="store.agents" />
@@ -150,7 +165,7 @@
 
 <script setup lang="ts">
 // @ts-nocheck
-import { ref, watch, onMounted, onUnmounted, onErrorCaptured, nextTick } from 'vue'
+import { ref, watch, onMounted, onUnmounted, onErrorCaptured, nextTick, getCurrentInstance } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '../stores/chat'
 import ChatMessage from '../components/chat/ChatMessage.vue'
@@ -162,10 +177,44 @@ import Sidebar from '../components/chat/Sidebar.vue'
 import HomeState from '../components/chat/HomeState.vue'
 import ChatInputBar from '../components/chat/ChatInputBar.vue'
 import TopologyPanel from '../components/chat/TopologyPanel.vue'
+import InterruptBanner from '../components/chat/InterruptBanner.vue'
+import AgentStatusBar from '../components/chat/AgentStatusBar.vue'
 
 const route = useRoute()
 const router = useRouter()
 const store = useChatStore()
+
+// ── Interrupt banner state ──
+const interruptBannerVisible = ref(false)
+let _interruptTimer: ReturnType<typeof setTimeout> | null = null
+
+// Watch store interruptSnapshot to show banner
+watch(() => store.interruptSnapshot, (snap) => {
+  if (snap) {
+    interruptBannerVisible.value = true
+    if (_interruptTimer) clearTimeout(_interruptTimer)
+    _interruptTimer = setTimeout(() => { interruptBannerVisible.value = false }, 30000)
+  }
+}, { deep: true })
+
+function dismissBanner() {
+  interruptBannerVisible.value = false
+  if (_interruptTimer) { clearTimeout(_interruptTimer); _interruptTimer = null }
+}
+
+function onInterruptContinue() {
+  dismissBanner()
+  store.sendMessage('继续', '', {})
+}
+
+function onInterruptRetry() {
+  dismissBanner()
+  store.sendMessage('换个方式重新执行刚才的任务', '', {})
+}
+
+function onInterruptNewTask() {
+  dismissBanner()
+}
 
 const msgContainer = ref(null)
 const scrollAnchor = ref(null)
@@ -240,6 +289,15 @@ async function saveEdit(i: number) {
       _fadeTimer = setTimeout(() => { fadingNodes.value = 0; editRebaseIndex.value = -1 }, 1500)
     }
 
+    // ④ 编辑后中断（fire-and-forget，仅当 Agent 活跃时）
+    if (store.isStreaming || store.hasRunningAgents) {
+      fetch(`/api/chat/sessions/${sid}/interrupt`, {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'soft' }),
+      }).catch(() => {})
+    }
+
     // Reload the session
     store.fetchSessionMessages(sid)
   } catch (e) {
@@ -291,11 +349,15 @@ function onQuickStart(text) {
 async function onInteractiveRespond(resp) {
   const token = localStorage.getItem('token')
   try {
-    await fetch('/api/chat/respond', {
+    const r = await fetch('/api/chat/respond', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
       body: JSON.stringify(resp)
     })
+    if (!r.ok) {
+      const txt = await r.text()
+      console.error('respond failed:', r.status, txt)
+    }
   } catch (e) { console.error('respond failed', e) }
 }
 

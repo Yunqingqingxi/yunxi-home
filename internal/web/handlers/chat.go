@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -122,6 +123,24 @@ func (h *ChatHandler) StreamSession(c echo.Context) error {
 	ch := h.aiService.SubscribeSession(id)
 	defer h.aiService.UnsubscribeSession(id, ch)
 
+	// Emit initial session_status so the frontend knows streaming/agent state
+	hasStream := h.aiService.HasActiveStream(id)
+	hasAgents := h.aiService.HasRunningAgents(id)
+	slog.Info("StreamSession 重连，发送初始状态",
+		"session", id,
+		"streaming", hasStream,
+		"has_agents", hasAgents,
+	)
+	initEv, _ := json.Marshal(base.ChatStreamEvent{
+		Type: "session_status",
+		Content: fmt.Sprintf(
+			`{"session_id":"%s","streaming":%v,"has_agents":%v}`,
+			id, hasStream, hasAgents,
+		),
+	})
+	fmt.Fprintf(c.Response(), "data: %s\n\n", initEv)
+	flusher.Flush()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -232,7 +251,11 @@ func (h *ChatHandler) ConfirmAction(c echo.Context) error {
 func (h *ChatHandler) RespondInteractive(c echo.Context) error {
 	if h.aiService == nil { return c.JSON(http.StatusNotFound, errorResp("AI 未启用")) }
 	var req base.InteractiveResponse
-	if err := c.Bind(&req); err != nil { return c.JSON(http.StatusBadRequest, errorResp("参数错误")) }
+	if err := c.Bind(&req); err != nil {
+		body, _ := io.ReadAll(c.Request().Body)
+		slog.Warn("RespondInteractive bind failed", "error", err, "body", string(body))
+		return c.JSON(http.StatusBadRequest, errorResp("参数错误: "+err.Error()))
+	}
 	if !h.aiService.RespondInteractive(req) {
 		return c.JSON(http.StatusNotFound, errorResp("请求已过期或不存在"))
 	}
@@ -575,4 +598,31 @@ func (h *ChatHandler) DeleteMessage(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, errorResp("删除失败: "+err.Error()))
 	}
 	return c.JSON(http.StatusOK, successResp(result))
+}
+
+// InterruptSession 中断会话的活跃流
+// POST /api/chat/sessions/:id/interrupt
+func (h *ChatHandler) InterruptSession(c echo.Context) error {
+	if h.aiService == nil {
+		return c.JSON(http.StatusNotFound, errorResp("AI 未启用"))
+	}
+	id := c.Param("id")
+	if id == "" {
+		return c.JSON(http.StatusBadRequest, errorResp("缺少 session_id"))
+	}
+	var req struct {
+		Mode string `json:"mode"`
+	}
+	c.Bind(&req)
+	if req.Mode == "" {
+		req.Mode = "soft"
+	}
+	slog.Info("InterruptSession API 调用", "session", id, "mode", req.Mode)
+	snapshot, err := h.aiService.CancelSession(id, req.Mode)
+	if err != nil {
+		slog.Error("InterruptSession 失败", "session", id, "error", err)
+		return c.JSON(http.StatusInternalServerError, errorResp("中断失败: "+err.Error()))
+	}
+	slog.Info("InterruptSession 成功", "session", id, "snapshot", snapshot)
+	return c.JSON(http.StatusOK, successResp(snapshot))
 }

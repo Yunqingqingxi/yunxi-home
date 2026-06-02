@@ -16,9 +16,11 @@ import (
 
 // Manager manages chat sessions (CRUD + persistence).
 type Manager struct {
-	repo     database.ChatSessionRepository
-	sessions map[string]*state
-	mu       sync.RWMutex
+	repo            database.ChatSessionRepository
+	sessions        map[string]*state
+	mu              sync.RWMutex
+	SystemPromptFn  func(userMessage string, recentToolCalls []string) string // PromptStore 动态 prompt
+	QQBotPromptFn   func() string                                             // 动态 QQBot prompt
 }
 
 type state struct {
@@ -97,17 +99,17 @@ func (m *Manager) GetHistory(sessionID string) (*models.ChatSessionDetail, error
 				Result: toolResults[tc.ID],
 			})
 		}
-		// 传递 blocks（新格式），tool_result 块合并到同 ID 的 tool_call 块
+		// 传递 blocks（新格式），跳过 tool_result 块（toolResults map 已覆盖）
 		if len(msg.Blocks) > 0 {
 			for _, b := range msg.Blocks {
+				if b.Type == "tool_result" {
+					continue // toolResults map 已覆盖，跳过冗余块
+				}
 				cb := models.ChatBlock{
 					Type:     string(b.Type),
 					Content:  b.Content,
 					ToolName: b.ToolName,
 					ToolArgs: b.ToolArgs,
-				}
-				if b.Type == "tool_result" {
-					cb.ToolResult = b.ToolResult
 				}
 				// 为 tool_call 块填充结果
 				if b.Type == "tool_call" && b.ToolCallID != "" {
@@ -183,6 +185,10 @@ func (m *Manager) GetOrCreate(sessionID, sessionType, userMessage string) ([]bas
 			sessionType = models.SessionTypeChat
 		}
 		now := time.Now()
+		sysPrompt := m.systemPrompt(userMessage, nil)
+		if sessionType == models.SessionTypeQQBot {
+			sysPrompt = m.qqBotPrompt()
+		}
 		st = &state{
 			info: models.ChatSession{
 				ID:        sessionID,
@@ -191,7 +197,7 @@ func (m *Manager) GetOrCreate(sessionID, sessionType, userMessage string) ([]bas
 				CreatedAt: now,
 				UpdatedAt: now,
 			},
-			history: []base.Message{{Role: "system", Content: base.BuildSystemPrompt(userMessage, nil)}},
+			history: []base.Message{{Role: "system", Content: sysPrompt}},
 		}
 		m.sessions[sessionID] = st
 		if m.repo != nil {
@@ -200,6 +206,18 @@ func (m *Manager) GetOrCreate(sessionID, sessionType, userMessage string) ([]bas
 	} else {
 		// Repair incomplete tool calls from previous crash
 		st.history = repairIncompleteToolCalls(st.history)
+		// Ensure QQ Bot sessions use the correct prompt (migration from old CorePrompt)
+		if st.info.Type == models.SessionTypeQQBot && len(st.history) > 0 &&
+			st.history[0].Role == "system" && !strings.Contains(st.history[0].Content, "QQ 聊天模式") {
+			st.history[0].Content = m.qqBotPrompt()
+			// Sync to DB immediately to persist the migration
+			if m.repo != nil {
+				b, _ := json.Marshal(st.history)
+				st.info.MessagesJSON = string(b)
+				_ = m.repo.Upsert(context.Background(), &st.info)
+				slog.Info("QQ Bot 会话已迁移到新提示词", "session", sessionID)
+			}
+		}
 	}
 	st.info.UpdatedAt = time.Now()
 	return st.history, &st.info
@@ -643,4 +661,20 @@ func (m *Manager) BuildResumePrompt(sessionID, userMessage string) string {
 		}
 		return "你有一个未完成的目标需要继续。请回顾以上历史记录，从上次中断的地方继续执行。\n如果目标已完成，请给出总结。"
 	}
+}
+
+// systemPrompt returns the current system prompt via PromptStore (DB-backed).
+func (m *Manager) systemPrompt(userMessage string, recentToolCalls []string) string {
+	if m.SystemPromptFn != nil {
+		return m.SystemPromptFn(userMessage, recentToolCalls)
+	}
+	return base.BuildSystemPrompt(userMessage, recentToolCalls)
+}
+
+// qqBotPrompt returns the current QQ Bot system prompt.
+func (m *Manager) qqBotPrompt() string {
+	if m.QQBotPromptFn != nil {
+		return m.QQBotPromptFn()
+	}
+	return base.QQBotPrompt
 }

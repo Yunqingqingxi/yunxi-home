@@ -83,8 +83,9 @@ type Bot struct {
 	botUser        *dto.User // 机器人自身信息
 	filePromptSent map[string]bool
 	promptMu       sync.Mutex
-	online         bool // WebSocket 连接状态
+	online         bool                // WebSocket 连接状态
 	statusMu       sync.RWMutex
+	sessionMgr     botgo.SessionManager // 复用 session 以支持断线恢复
 }
 
 // BotInfo 机器人基础信息
@@ -110,6 +111,7 @@ func New(cfg Config) (*Bot, error) {
 		cfg:         cfg,
 		api:         botgo.NewOpenAPI(cfg.AppID, tokenSource),
 		tokenSource: tokenSource,
+		sessionMgr:  botgo.NewSessionManager(),
 		handlers:    make(map[string]Handler),
 		msgLimiter:     rate.NewLimiter(rate.Every(2*time.Second), 3),
 		lastCmd:        make(map[string]string),
@@ -195,29 +197,60 @@ func (b *Bot) markFilePromptSent(userID string) {
 }
 
 func (b *Bot) Start(ctx context.Context) error {
-	apInfo, err := b.api.WS(ctx, nil, "")
-	if err != nil {
-		return fmt.Errorf("get gateway failed: %w", err)
-	}
-	slog.Info("QQ Bot gateway acquired", "url", apInfo.URL, "shards", apInfo.Shards)
-
-	// 设置全局事件处理器（SDK 限制：多 Bot 时最后一个启动的 Bot 处理所有消息）
-	// 其他 Bot 保持 WebSocket 连接以维持 Token 活跃，但不处理消息
-	event.DefaultHandlers.C2CMessage = func(ev *dto.WSPayload, data *dto.WSC2CMessageData) error {
-		b.handlePrivateMessage(ctx, data)
-		return nil
-	}
-	event.DefaultHandlers.GroupATMessage = func(ev *dto.WSPayload, data *dto.WSGroupATMessageData) error {
-		b.handleGroupMessage(ctx, data)
-		return nil
-	}
+	backoff := 1 * time.Second
+	const maxBackoff = 60 * time.Second
 	intent := dto.IntentGuilds | dto.IntentGroupMessages
 
-	slog.Debug("QQ Bot connecting to WebSocket...")
-	b.SetOnline(true)
-	err = botgo.NewSessionManager().Start(apInfo, b.tokenSource, &intent)
-	b.SetOnline(false)
-	return err
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		// 每次重连重新获取 gateway（URL 可能变化）
+		apInfo, err := b.api.WS(ctx, nil, "")
+		if err != nil {
+			slog.Error("QQ Bot 获取 gateway 失败，稍后重试", "error", err, "backoff", backoff)
+			select {
+			case <-time.After(backoff):
+				backoff = min(backoff*2, maxBackoff)
+				continue
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		slog.Info("QQ Bot gateway acquired", "url", apInfo.URL, "shards", apInfo.Shards)
+
+		// 设置全局事件处理器
+		event.DefaultHandlers.C2CMessage = func(ev *dto.WSPayload, data *dto.WSC2CMessageData) error {
+			b.handlePrivateMessage(ctx, data)
+			return nil
+		}
+		event.DefaultHandlers.GroupATMessage = func(ev *dto.WSPayload, data *dto.WSGroupATMessageData) error {
+			b.handleGroupMessage(ctx, data)
+			return nil
+		}
+
+		b.SetOnline(true)
+		slog.Info("QQ Bot WebSocket 连接中...")
+		err = b.sessionMgr.Start(apInfo, b.tokenSource, &intent)
+		b.SetOnline(false)
+
+		if err != nil {
+			slog.Error("QQ Bot WebSocket 断开，将重连", "error", err, "backoff", backoff)
+		} else {
+			slog.Info("QQ Bot WebSocket 正常关闭，将重连")
+			backoff = 1 * time.Second // 正常关闭不加速退避
+		}
+
+		select {
+		case <-time.After(backoff):
+			backoff = min(backoff*2, maxBackoff)
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 }
 
 func (b *Bot) handleGroupMessage(ctx context.Context, data *dto.WSGroupATMessageData) {
@@ -347,13 +380,15 @@ func (b *Bot) handleAIChat(ctx context.Context, userID, message string) (string,
 	return reply, true
 }
 
-// sendC2CFile 上传并发送文件给 C2C 用户
-// sendC2CFile 上传文件到 QQ 并发送给 C2C 用户
+// sendC2CFile 上传并发送文件给 C2C 用户。
+// 小文件（< 10MB）用 base64 JSON 上传，大文件用 multipart/form-data 流式上传。
 func (b *Bot) sendC2CFile(ctx context.Context, userID, filePath, fileName string) error {
-	fileData, err := os.ReadFile(filePath)
+	// 获取文件信息
+	st, err := os.Stat(filePath)
 	if err != nil {
-		return fmt.Errorf("读取文件失败: %w", err)
+		return fmt.Errorf("读取文件信息失败: %w", err)
 	}
+	fileSize := st.Size()
 
 	ext := strings.ToLower(filepath.Ext(fileName))
 	fileType := 1 // 默认图片
@@ -368,14 +403,27 @@ func (b *Bot) sendC2CFile(ctx context.Context, userID, filePath, fileName string
 		fileType = 4 // 普通文件
 	}
 
-	// Step 1: 上传文件（POST /v2/users/{openid}/files，JSON body 含 file_data）
-	fileInfo, err := b.uploadC2CFile(ctx, userID, fileData, fileName, fileType)
-	if err != nil {
-		return fmt.Errorf("上传QQ文件失败: %w", err)
+	// Step 1: 上传文件
+	var fileInfo []byte
+	const largeFileThreshold = 10 * 1024 * 1024 // 10MB
+	if fileSize < largeFileThreshold {
+		fileData, err := os.ReadFile(filePath)
+		if err != nil {
+			return fmt.Errorf("读取文件失败: %w", err)
+		}
+		fileInfo, err = b.uploadC2CFileBase64(ctx, userID, fileData, fileName, fileType)
+		if err != nil {
+			return fmt.Errorf("上传QQ文件失败: %w", err)
+		}
+	} else {
+		var err error
+		fileInfo, err = b.uploadC2CFileMultipart(ctx, userID, filePath, fileName, fileType, fileSize)
+		if err != nil {
+			return fmt.Errorf("上传QQ大文件失败: %w", err)
+		}
 	}
 
-	// Step 2: 发送富媒体消息（POST /v2/users/{openid}/messages，msg_type=7）
-	// 注意：file_info 已是字符串，不能用 SDK 的 []byte（会被二次 base64 编码）
+	// Step 2: 发送富媒体消息
 	sendBody := fmt.Sprintf(`{"msg_type":7,"media":{"file_info":"%s"}}`, string(fileInfo))
 	sendReq, _ := http.NewRequestWithContext(ctx, "POST",
 		fmt.Sprintf("https://api.sgroup.qq.com/v2/users/%s/messages", userID),
@@ -394,12 +442,12 @@ func (b *Bot) sendC2CFile(ctx context.Context, userID, filePath, fileName string
 	if sendResp.StatusCode != 200 && sendResp.StatusCode != 201 {
 		return fmt.Errorf("发送文件消息失败 status=%d: %s", sendResp.StatusCode, string(sendRespBody))
 	}
-	slog.Debug("QQ Bot 文件已发送", "user", userID, "file", fileName, "size", len(fileData))
+	slog.Info("QQ Bot 文件已发送", "user", userID, "file", fileName, "size", fileSize)
 	return nil
 }
 
-// uploadC2CFile 上传文件到 QQ C2C 文件接口（使用 file_data base64）
-func (b *Bot) uploadC2CFile(ctx context.Context, userID string, data []byte, fileName string, fileType int) ([]byte, error) {
+// uploadC2CFileBase64 小文件上传（base64 JSON body，适用于 < 10MB）。
+func (b *Bot) uploadC2CFileBase64(ctx context.Context, userID string, data []byte, fileName string, fileType int) ([]byte, error) {
 	payload := map[string]any{
 		"file_type":    fileType,
 		"url":          "",
@@ -442,6 +490,79 @@ func (b *Bot) uploadC2CFile(ctx context.Context, userID string, data []byte, fil
 		return []byte(result.FileUUID), nil
 	}
 	return nil, fmt.Errorf("上传响应缺少 file_info: %s", string(respBody))
+}
+
+// uploadC2CFileMultipart 大文件流式上传（multipart/form-data，适用于 ≥ 10MB 的视频等）。
+func (b *Bot) uploadC2CFileMultipart(ctx context.Context, userID, filePath, fileName string, fileType int, fileSize int64) ([]byte, error) {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("打开文件失败: %w", err)
+	}
+	defer f.Close()
+
+	pr, pw := io.Pipe()
+	mw := multipart.NewWriter(pw)
+
+	// 异步写入 multipart body
+	go func() {
+		defer pw.Close()
+		defer mw.Close()
+
+		// file_type 字段
+		mw.WriteField("file_type", fmt.Sprintf("%d", fileType))
+		mw.WriteField("srv_send_msg", "false")
+
+		// 文件流
+		part, err := mw.CreateFormFile("file", fileName)
+		if err != nil {
+			slog.Error("QQ Bot multipart: 创建文件字段失败", "error", err)
+			return
+		}
+		written, err := io.Copy(part, f)
+		if err != nil {
+			slog.Error("QQ Bot multipart: 写入文件流失败", "error", err, "written", written)
+		}
+	}()
+
+	apiURL := fmt.Sprintf("https://api.sgroup.qq.com/v2/users/%s/files", userID)
+	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, pr)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.Header.Set("Authorization", "QQBot "+b.getAccessToken())
+
+	// 大文件超时按文件大小估算（每 GB 约 5 分钟 + 2 分钟基础）
+	timeout := 2*time.Minute + time.Duration(fileSize/(1024*1024*1024))*5*time.Minute
+	if timeout > 30*time.Minute {
+		timeout = 30 * time.Minute
+	}
+	client := &http.Client{Timeout: timeout}
+	slog.Info("QQ Bot 开始上传大文件", "file", fileName, "sizeMB", fileSize/(1024*1024), "timeout", timeout)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("上传请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 && resp.StatusCode != 201 {
+		return nil, fmt.Errorf("上传失败 status=%d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result struct {
+		FileUUID string `json:"file_uuid"`
+		FileInfo string `json:"file_info"`
+	}
+	json.Unmarshal(respBody, &result)
+	if result.FileInfo != "" {
+		return []byte(result.FileInfo), nil
+	}
+	if result.FileUUID != "" {
+		return []byte(result.FileUUID), nil
+	}
+	return nil, fmt.Errorf("上传响应缺少 file_info")
 }
 
 // getAccessToken 获取当前 access token
