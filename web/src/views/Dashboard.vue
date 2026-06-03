@@ -71,14 +71,6 @@
       </div>
     </div>
 
-    <!-- Agent system v2.0 -->
-    <div v-if="agentMetrics" class="agent-strip">
-      <div class="agent-block"><span class="agent-val ok">{{ agentMetrics.success_rate }}</span><span class="agent-key">助手成功率</span></div>
-      <div class="agent-block"><span class="agent-val">{{ agentMetrics.spawned }}</span><span class="agent-key">助手任务</span></div>
-      <div class="agent-block"><span class="agent-val warn">{{ agentMetrics.conflicts }}</span><span class="agent-key">资源冲突</span></div>
-      <div class="agent-block"><span class="agent-val">{{ agentMetrics.promotions }}</span><span class="agent-key">角色升级</span></div>
-      <div class="agent-block"><span class="agent-val">{{ agentMetrics.demotions }}</span><span class="agent-key">角色降级</span></div>
-    </div>
 
     <!-- Gauges -->
     <div
@@ -310,20 +302,6 @@ const goRuntime = computed(() => status.value?.go_runtime || null)
 const processStats = computed(() => status.value?.process || null)
 const notifyStatus = computed(() => status.value?.notify || { email_enabled: false, webhook_enabled: false, dingtalk_enabled: false })
 
-const agentMetrics = computed(() => {
-  const ai = status.value?.ai || {}
-  const spawned = ai.sub_agent_spawned || 0
-  const success = ai.sub_agent_success || 0
-  const failed = ai.sub_agent_failed || 0
-  const total = spawned || 1
-  return {
-    success_rate: Math.round((success / total) * 100) + '%',
-    spawned,
-    conflicts: ai.lock_conflicts || 0,
-    promotions: ai.role_promotions || 0,
-    demotions: ai.role_demotions || 0,
-  }
-})
 const notifyCount = computed(() => [notifyStatus.value.email_enabled, notifyStatus.value.webhook_enabled, notifyStatus.value.dingtalk_enabled].filter(Boolean).length)
 const cpuCount = computed(() => status.value?.system?.cpu_cores || 1)
 

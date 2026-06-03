@@ -118,6 +118,14 @@ echo ">>> 上传二进制到 ${SSH_HOST}..."
 scp "${BUILD_DIR}/${BINARY}" "${SSH_HOST}:${REMOTE_DIR}/${BINARY}.new"
 echo "    上传完成"
 
+# ── 同步记忆文件 ────────────────────────────────────
+if [ -d "memory" ]; then
+    echo ">>> 同步记忆文件..."
+    ssh "$SSH_HOST" "mkdir -p ${REMOTE_DIR}/memory"
+    scp memory/*.md "${SSH_HOST}:${REMOTE_DIR}/memory/"
+    echo "    记忆文件已同步"
+fi
+
 # ── 远程部署 ────────────────────────────────────────
 echo ">>> 远程部署..."
 ssh "$SSH_HOST" <<'SSH_DEPLOY'

@@ -2,6 +2,7 @@ package memory
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -103,4 +104,29 @@ func parseFile(path string) (*Memory, error) {
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}, nil
+}
+
+// WriteToFile serializes a Memory back to a .md file with YAML frontmatter.
+func WriteToFile(dir string, mem *Memory) error {
+	filePath := filepath.Join(dir, mem.Name+".md")
+	f, err := os.Create(filePath)
+	if err != nil {
+		return fmt.Errorf("创建文件失败: %w", err)
+	}
+	defer f.Close()
+
+	// YAML frontmatter
+	f.WriteString("---\n")
+	fmt.Fprintf(f, "name: %s\n", mem.Name)
+	fmt.Fprintf(f, "description: %s\n", mem.Description)
+	fmt.Fprintf(f, "type: %s\n", string(mem.Type))
+	f.WriteString("---\n\n")
+	// Body
+	f.WriteString(mem.Content)
+	if !strings.HasSuffix(mem.Content, "\n") {
+		f.WriteString("\n")
+	}
+
+	loaderLog.Info("记忆文件已写入", "file", filePath, "name", mem.Name)
+	return nil
 }

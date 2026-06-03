@@ -360,7 +360,9 @@ type InteractiveRequest struct {
 	ConfirmText string             `json:"confirm_text,omitempty"`
 	CancelText  string             `json:"cancel_text,omitempty"`
 	Variant     string             `json:"variant,omitempty"`
-	Pages       []InteractivePage  `json:"pages,omitempty"` // v3.1 多页向导
+	Pages       []InteractivePage  `json:"pages,omitempty"`   // v3.1 多页向导
+	ActionURL   string             `json:"action_url,omitempty"`   // v3.3 操作链接（如 GitHub Token 页面）
+	ActionLabel string             `json:"action_label,omitempty"` // v3.3 链接文字
 }
 
 // InteractivePage 向导中的一页

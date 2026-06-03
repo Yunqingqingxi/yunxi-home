@@ -268,6 +268,27 @@ func (h *ChatHandler) UpdateSessionMeta(c echo.Context) error {
 	return c.JSON(http.StatusOK, successResp(map[string]string{"status": "updated"}))
 }
 
+// GenerateTitle 为会话生成标题  POST /api/chat/title
+func (h *ChatHandler) GenerateTitle(c echo.Context) error {
+	if !h.isAIEnabled() {
+		return c.JSON(http.StatusOK, successResp(map[string]string{"title": "新对话"}))
+	}
+	var req struct {
+		SessionID string `json:"session_id"`
+		Message   string `json:"message"`
+	}
+	if err := c.Bind(&req); err != nil || req.SessionID == "" || req.Message == "" {
+		return c.JSON(http.StatusBadRequest, errorResp("缺少 session_id 或 message"))
+	}
+
+	title, err := h.aiService.GenerateTitle(c.Request().Context(), req.SessionID, req.Message)
+	if err != nil {
+		log.Warn("标题生成失败", "session", req.SessionID, "error", err)
+		return c.JSON(http.StatusOK, successResp(map[string]string{"title": "新对话"}))
+	}
+	return c.JSON(http.StatusOK, successResp(map[string]string{"title": title}))
+}
+
 // ConfirmAction 处理危险操作确认
 // POST /api/chat/confirm
 func (h *ChatHandler) ConfirmAction(c echo.Context) error {

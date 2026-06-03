@@ -10,6 +10,8 @@ type: reference
 - 地址：`github.com/Yunqingqingxi/yunxi-home`
 - 默认分支：`main`
 - Git 用户：yunxi
+- **仓库是公开的（public）！** `git clone https://github.com/Yunqingqingxi/yunxi-home.git` 不需要任何认证
+- **只有 push 才需要认证**；clone/pull 公开仓库直接用 HTTPS 即可
 
 ## Token 存放位置
 按优先级顺序查找：
@@ -19,8 +21,8 @@ type: reference
 4. GitHub CLI 登录状态：运行 `gh auth status` 检查
 
 ## 操作规范
-- **任何 git push/pull 操作前，先用 `gh auth status` 检查认证状态**
-- 如果未认证，告知用户并建议运行 `gh auth login`
+- **clone/pull 公开仓库不需要认证**——直接 `git clone https://github.com/Yunqingqingxi/yunxi-home.git` 即可
+- **只有 push 才需要 Token 或 SSH 密钥**
 - 项目代码中不存储 Token
 - 不要将 Token 写入任何会被 git 追踪的文件
 

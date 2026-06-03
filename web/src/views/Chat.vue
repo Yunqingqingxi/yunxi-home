@@ -553,6 +553,40 @@ function loadSessionFromRoute(sid) {
 watch(() => route.params.sessionId, loadSessionFromRoute, { immediate: true })
 watch(() => route.query.session, loadSessionFromRoute)
 
+// ── Auto-send prompt from URL query parameter (page analyzer) ──
+let _autoPromptSent = false
+watch(
+  () => route.query.prompt,
+  (prompt) => {
+    if (!prompt || _autoPromptSent) return
+    const text = typeof prompt === 'string' ? decodeURIComponent(prompt) : String(prompt)
+    if (!text) return
+    _autoPromptSent = true
+    // Build context message from URL query
+    const context = route.query.context
+    const fullMessage = context
+      ? `[页面上下文: 用户正在查看"${context}"页面]\n${text}`
+      : text
+    // Wait for store to be ready, then send
+    const trySend = () => {
+      if (store.loading) { setTimeout(trySend, 300); return }
+      nextTick(() => {
+        store.sendMessage(fullMessage).then(() => {
+          // Clean up query params after send
+          router.replace({ path: '/chat/' + (store.sessionId || ''), query: {} })
+        })
+      })
+    }
+    // If no session yet, wait for the page to initialize
+    if (!store.sessionId) {
+      setTimeout(trySend, 500)
+    } else {
+      trySend()
+    }
+  },
+  { immediate: true },
+)
+
 function onSidebarSelect(id) {
   if (id === store.sessionId) return
   store.switchConversation(id).then(ok => { if (ok) router.replace('/chat/' + id) })

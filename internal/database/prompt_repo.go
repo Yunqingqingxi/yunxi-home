@@ -3,6 +3,7 @@ package database
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/Yunqingqingxi/yunxi-home/internal/database/base"
 )
@@ -18,6 +19,24 @@ type sqlitePromptRepo struct{ db Executor }
 // NewPromptRepo creates a SQLite-backed PromptRepository.
 func NewPromptRepo(db Executor) base.PromptRepository {
 	return &sqlitePromptRepo{db: db}
+}
+
+// EnsureSchema creates the prompts table if not exists.
+func (r *sqlitePromptRepo) EnsureSchema(ctx context.Context) error {
+	_, err := r.db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS prompts (
+			id         TEXT PRIMARY KEY,
+			category   TEXT NOT NULL DEFAULT 'general',
+			name       TEXT NOT NULL DEFAULT '',
+			content    TEXT NOT NULL DEFAULT '',
+			keywords   TEXT NOT NULL DEFAULT '',
+			priority   INTEGER NOT NULL DEFAULT 0,
+			enabled    INTEGER NOT NULL DEFAULT 1,
+			created_at TEXT NOT NULL DEFAULT '',
+			updated_at TEXT NOT NULL DEFAULT ''
+		)
+	`)
+	return err
 }
 
 func (r *sqlitePromptRepo) GetByCategory(ctx context.Context, category string) ([]base.PromptRecord, error) {
@@ -43,12 +62,17 @@ func (r *sqlitePromptRepo) GetAll(ctx context.Context) ([]base.PromptRecord, err
 
 func (r *sqlitePromptRepo) GetByID(ctx context.Context, id string) (*base.PromptRecord, error) {
 	var p base.PromptRecord
+	var enabled int
+	var createdAtStr, updatedAtStr string
 	err := r.db.QueryRowContext(ctx,
 		"SELECT id, category, name, content, keywords, priority, enabled, created_at, updated_at FROM prompts WHERE id=?",
-		id).Scan(&p.ID, &p.Category, &p.Name, &p.Content, &p.Keywords, &p.Priority, &p.Enabled, &p.CreatedAt, &p.UpdatedAt)
+		id).Scan(&p.ID, &p.Category, &p.Name, &p.Content, &p.Keywords, &p.Priority, &enabled, &createdAtStr, &updatedAtStr)
 	if err != nil {
 		return nil, nil // not found
 	}
+	p.Enabled = enabled != 0
+	p.CreatedAt = parseTime(createdAtStr)
+	p.UpdatedAt = parseTime(updatedAtStr)
 	return &p, nil
 }
 
@@ -77,6 +101,23 @@ func (r *sqlitePromptRepo) Delete(ctx context.Context, id string) error {
 }
 
 func (r *sqlitePromptRepo) InitDefaults(ctx context.Context, prompts []base.PromptRecord) error {
+	// 确保表存在
+	if _, err := r.db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS prompts (
+			id         TEXT PRIMARY KEY,
+			category   TEXT NOT NULL DEFAULT 'general',
+			name       TEXT NOT NULL DEFAULT '',
+			content    TEXT NOT NULL DEFAULT '',
+			keywords   TEXT NOT NULL DEFAULT '',
+			priority   INTEGER NOT NULL DEFAULT 0,
+			enabled    INTEGER NOT NULL DEFAULT 1,
+			created_at TEXT NOT NULL DEFAULT '',
+			updated_at TEXT NOT NULL DEFAULT ''
+		)
+	`); err != nil {
+		return fmt.Errorf("ensure prompts table: %w", err)
+	}
+
 	var count int
 	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM prompts").Scan(&count); err != nil {
 		return fmt.Errorf("count prompts: %w", err)
@@ -124,12 +165,17 @@ func (r *mysqlPromptRepo) GetAll(ctx context.Context) ([]base.PromptRecord, erro
 
 func (r *mysqlPromptRepo) GetByID(ctx context.Context, id string) (*base.PromptRecord, error) {
 	var p base.PromptRecord
+	var enabled int
+	var createdAtStr, updatedAtStr string
 	err := r.db.QueryRowContext(ctx,
 		"SELECT id, category, name, content, keywords, priority, enabled, created_at, updated_at FROM prompts WHERE id=?",
-		id).Scan(&p.ID, &p.Category, &p.Name, &p.Content, &p.Keywords, &p.Priority, &p.Enabled, &p.CreatedAt, &p.UpdatedAt)
+		id).Scan(&p.ID, &p.Category, &p.Name, &p.Content, &p.Keywords, &p.Priority, &enabled, &createdAtStr, &updatedAtStr)
 	if err != nil {
 		return nil, nil
 	}
+	p.Enabled = enabled != 0
+	p.CreatedAt = parseTime(createdAtStr)
+	p.UpdatedAt = parseTime(updatedAtStr)
 	return &p, nil
 }
 
@@ -158,6 +204,22 @@ func (r *mysqlPromptRepo) Delete(ctx context.Context, id string) error {
 }
 
 func (r *mysqlPromptRepo) InitDefaults(ctx context.Context, prompts []base.PromptRecord) error {
+	if _, err := r.db.ExecContext(ctx, `
+		CREATE TABLE IF NOT EXISTS prompts (
+			id         VARCHAR(255) PRIMARY KEY,
+			category   VARCHAR(50) NOT NULL DEFAULT 'general',
+			name       VARCHAR(255) NOT NULL DEFAULT '',
+			content    TEXT NOT NULL,
+			keywords   VARCHAR(500) NOT NULL DEFAULT '',
+			priority   INT NOT NULL DEFAULT 0,
+			enabled    TINYINT NOT NULL DEFAULT 1,
+			created_at DATETIME NOT NULL DEFAULT NOW(),
+			updated_at DATETIME NOT NULL DEFAULT NOW()
+		)
+	`); err != nil {
+		return fmt.Errorf("ensure prompts table: %w", err)
+	}
+
 	var count int
 	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM prompts").Scan(&count); err != nil {
 		return fmt.Errorf("count prompts: %w", err)
@@ -186,11 +248,30 @@ func scanPrompts(rows promptRows) ([]base.PromptRecord, error) {
 	for rows.Next() {
 		var p base.PromptRecord
 		var enabled int
-		if err := rows.Scan(&p.ID, &p.Category, &p.Name, &p.Content, &p.Keywords, &p.Priority, &enabled, &p.CreatedAt, &p.UpdatedAt); err != nil {
+		var createdAtStr, updatedAtStr string
+		if err := rows.Scan(&p.ID, &p.Category, &p.Name, &p.Content, &p.Keywords, &p.Priority, &enabled, &createdAtStr, &updatedAtStr); err != nil {
 			return nil, fmt.Errorf("scan prompt: %w", err)
 		}
 		p.Enabled = enabled != 0
+		p.CreatedAt = parseTime(createdAtStr)
+		p.UpdatedAt = parseTime(updatedAtStr)
 		result = append(result, p)
 	}
 	return result, rows.Err()
+}
+
+// parseTime parses a time string from DB. Supports SQLite datetime() and RFC3339 formats.
+func parseTime(s string) time.Time {
+	if s == "" {
+		return time.Time{}
+	}
+	// SQLite datetime('now') / MySQL NOW() format: "2006-01-02 15:04:05"
+	if t, err := time.Parse("2006-01-02 15:04:05", s); err == nil {
+		return t
+	}
+	// RFC3339 format: "2006-01-02T15:04:05Z"
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t
+	}
+	return time.Time{}
 }

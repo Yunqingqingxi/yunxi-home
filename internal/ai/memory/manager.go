@@ -16,6 +16,7 @@ var log = logger.ForComponent("ai.memory")
 type Manager struct {
 	repo     Repository
 	memories map[string]*Memory
+	dir      string // memory/ directory path for file write-back
 	mu       sync.RWMutex
 }
 
@@ -34,6 +35,7 @@ func (m *Manager) EnsureSchema(ctx context.Context) error {
 
 // InitFromDir loads .md files from a directory into DB (skips existing names).
 func (m *Manager) InitFromDir(dir string) error {
+	m.dir = dir // remember for file write-back
 	log.Info("开始从目录导入记忆种子文件", "dir", dir)
 
 	fileMems, err := LoadFromDir(dir)
@@ -66,7 +68,7 @@ func (m *Manager) InitFromDir(dir string) error {
 			continue
 		}
 		fm.Source = "file"
-		if err := m.repo.Save(ctx, fm); err != nil {
+		if err := m.Save(ctx, fm); err != nil {
 			log.Warn("导入记忆失败", "name", fm.Name, "error", err)
 			continue
 		}
@@ -236,16 +238,22 @@ func (m *Manager) Get(name string) (*Memory, error) {
 
 // Save persists a memory to DB and updates the in-memory index.
 func (m *Manager) Save(ctx context.Context, mem *Memory) error {
-	_, existing := m.memories[mem.Name]
-
 	if err := m.repo.Save(ctx, mem); err != nil {
 		log.Error("保存记忆失败", "name", mem.Name, "error", err)
 		return fmt.Errorf("保存记忆失败: %w", err)
 	}
 
 	m.mu.Lock()
+	_, existing := m.memories[mem.Name]
 	m.memories[mem.Name] = mem
 	m.mu.Unlock()
+
+	// 同步回写 .md 文件（如果配置了目录）
+	if m.dir != "" {
+		if err := WriteToFile(m.dir, mem); err != nil {
+			log.Warn("回写记忆文件失败", "name", mem.Name, "error", err)
+		}
+	}
 
 	if existing {
 		log.Info("记忆已更新", "name", mem.Name, "type", string(mem.Type), "content_len", len(mem.Content))

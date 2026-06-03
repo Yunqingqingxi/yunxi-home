@@ -98,6 +98,7 @@
             placeholder="搜索会话..."
             type="text"
           />
+          <kbd class="search-kbd">Ctrl+K</kbd>
         </div>
       </div>
 
@@ -161,56 +162,68 @@
 
         <!-- Time-grouped items -->
         <template v-for="(group, gIdx) in filteredGroups" :key="gIdx">
-          <div class="time-group-label">{{ group.label }}</div>
           <div
-            v-for="conv in group.items"
-            :key="conv.id"
-            :class="['sidebar-item', { active: conv.id === activeId }]"
-            @click="$emit('select', conv.id)"
-            @mouseenter="hoveredConv = conv.id"
-            @mouseleave="hoveredConv = null"
+            class="time-group-label"
+            :class="{ collapsible: group.label !== '今天' }"
+            @click="group.label !== '今天' && toggleGroup(group.label)"
           >
-            <div class="sidebar-item-main">
-              <input
-                v-if="renamingId === conv.id"
-                ref="renameInput"
-                v-model="renameValue"
-                class="inline-rename-input"
-                @keydown.enter="commitRename(conv.id)"
-                @keydown.escape="cancelRename"
-                @blur="commitRename(conv.id)"
-                @click.stop
-              />
-              <span v-else class="sidebar-item-title">
-                <template v-if="conv.isActive"><span class="active-dot" title="活跃中" /></template>
-                <template v-if="isQQBot(conv.id)"><svg class="bot-icon" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="5" width="10" height="8" rx="2"/><circle cx="7" cy="9" r="1" fill="currentColor"/><circle cx="10" cy="9" r="1" fill="currentColor"/><line x1="6" y1="12" x2="11" y2="12" stroke="currentColor" stroke-linecap="round"/></svg></template>
-                {{ conv.title }}
-              </span>
-              <span class="sidebar-item-meta">{{ fmtTime(conv.updatedAt) }} · {{ conv.messageCount }} 条</span>
-            </div>
-            <button
-              v-if="hoveredConv === conv.id"
-              class="sidebar-menu-btn"
-              title="更多操作"
-              @click.stop="openMenu(conv.id, $event)"
-            >
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="3" r="1.8"/><circle cx="8" cy="8" r="1.8"/><circle cx="8" cy="13" r="1.8"/></svg>
-            </button>
+            <span v-if="group.label !== '今天'" class="group-toggle-arrow">
+              {{ isGroupCollapsed(group.label) ? '▶' : '▼' }}
+            </span>
+            {{ group.label }}
+            <span class="group-count">{{ group.items.length }}</span>
+          </div>
+          <template v-if="!isGroupCollapsed(group.label)">
             <div
-              v-if="subAgents[conv.id]?.length"
-              class="sidebar-subs"
+              v-for="conv in group.items"
+              :key="conv.id"
+              :class="['sidebar-item', { active: conv.id === activeId }]"
+              @click="$emit('select', conv.id)"
+              @mouseenter="hoveredConv = conv.id"
+              @mouseleave="hoveredConv = null"
             >
-              <div
-                v-for="sa in subAgents[conv.id]"
-                :key="sa.id"
-                :class="['sub-line', sa.status]"
-                :title="sa.goal"
+              <div class="sidebar-item-main">
+                <input
+                  v-if="renamingId === conv.id"
+                  ref="renameInput"
+                  v-model="renameValue"
+                  class="inline-rename-input"
+                  @keydown.enter="commitRename(conv.id)"
+                  @keydown.escape="cancelRename"
+                  @blur="commitRename(conv.id)"
+                  @click.stop
+                />
+                <span v-else class="sidebar-item-title">
+                  <template v-if="conv.isActive"><span class="active-dot" title="活跃中" /></template>
+                  <template v-if="isQQBot(conv.id)"><svg class="bot-icon" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="5" width="10" height="8" rx="2"/><circle cx="7" cy="9" r="1" fill="currentColor"/><circle cx="10" cy="9" r="1" fill="currentColor"/><line x1="6" y1="12" x2="11" y2="12" stroke="currentColor" stroke-linecap="round"/></svg></template>
+                  {{ conv.title }}
+                </span>
+                <span class="sidebar-item-meta">{{ fmtTime(conv.updatedAt) }} · {{ conv.messageCount }} 条</span>
+              </div>
+              <button
+                v-if="hoveredConv === conv.id"
+                class="sidebar-menu-btn"
+                title="更多操作"
+                @click.stop="openMenu(conv.id, $event)"
               >
-                <StatusDot :status="sa.status" :size="8" class="sub-dot" />
-                <span class="sub-goal">{{ sa.goal }}</span>
+                <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="3" r="1.8"/><circle cx="8" cy="8" r="1.8"/><circle cx="8" cy="13" r="1.8"/></svg>
+              </button>
+              <div
+                v-if="subAgents[conv.id]?.length"
+                class="sidebar-subs"
+              >
+                <div
+                  v-for="sa in subAgents[conv.id]"
+                  :key="sa.id"
+                  :class="['sub-line', sa.status]"
+                  :title="sa.goal"
+                >
+                  <StatusDot :status="sa.status" :size="8" class="sub-dot" />
+                  <span class="sub-goal">{{ sa.goal }}</span>
+                </div>
               </div>
             </div>
-          </div>
+          </template>
         </template>
 
         <div
@@ -296,9 +309,12 @@ const props = defineProps({
 })
 const emit = defineEmits(['select', 'newChat', 'rename', 'delete', 'togglePin'])
 
-const open = ref(false)
+const open = ref(window.innerWidth >= 768)
 const searchQuery = ref('')
 const hoveredConv = ref<string | null>(null)
+
+// ── Time group collapse ──
+const collapsedGroups = ref(new Set<string>()) // collapsed group labels (today is never collapsed)
 
 // ── Context menu ──
 const menuVisible = ref(false)
@@ -364,6 +380,8 @@ const groupedConversations = computed<TimeGroup[]>(() => {
   ]
 
   for (const conv of props.conversations) {
+    // Skip invalid sessions (empty ID from frontend race condition)
+    if (!(conv as any).id) continue
     // Skip pinned — they display in separate section
     if ((conv as any).pinned) continue
 
@@ -420,6 +438,18 @@ const filteredItems = computed(() => {
 
 // Filtered time groups (reactive to searchQuery)
 const filteredGroups = computed(() => groupedConversations.value)
+
+function toggleGroup(label: string) {
+  if (collapsedGroups.value.has(label)) collapsedGroups.value.delete(label)
+  else collapsedGroups.value.add(label)
+}
+
+function isGroupCollapsed(label: string): boolean {
+  // "Today" is never collapsed
+  if (label === '今天') return false
+  // Other groups default collapsed when there are more than 3 items
+  return collapsedGroups.value.has(label)
+}
 
 // ── Context menu logic ──
 function openMenu(convId: string, event?: MouseEvent) {
@@ -645,11 +675,29 @@ function fmtTime(t: string): string {
 }
 .sidebar-search::placeholder { color: var(--text-muted); }
 
+/* Search shortcut kbd */
+.search-kbd {
+  font-size: 9px; color: var(--text-muted);
+  background: var(--border-subtle); padding: 1px 5px; border-radius: 3px;
+  font-family: var(--font-mono); flex-shrink: 0;
+  letter-spacing: 0.5px;
+}
+
 /* Time group labels */
 .time-group-label {
   font-size: 10.5px; font-weight: 600; color: var(--text-muted);
   text-transform: uppercase; letter-spacing: 0.6px;
   padding: 10px 10px 4px; margin-top: 2px;
+  display: flex; align-items: center; gap: 4px;
+  user-select: none;
+}
+.time-group-label.collapsible { cursor: pointer; }
+.time-group-label.collapsible:hover { color: var(--text-secondary); }
+.group-toggle-arrow { font-size: 8px; width: 10px; color: var(--text-muted); }
+.group-count {
+  margin-left: auto; font-size: 9px; font-weight: 500;
+  color: var(--text-muted); background: var(--border-subtle);
+  padding: 0 5px; border-radius: 8px; min-width: 14px; text-align: center;
 }
 
 /* List */

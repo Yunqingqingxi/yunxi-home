@@ -663,6 +663,30 @@ export const useChatStore = defineStore('chat', () => {
     msg._v = ++_msgVersion
   }
 
+  const _titleRequested = new Set<string>()
+
+  async function requestTitle(sid: string) {
+    if (_titleRequested.has(sid)) return
+    _titleRequested.add(sid)
+    // Find first user message
+    const msgs = _sessionMsgs[sid] || messages.value
+    const firstUser = msgs.find((m: ChatMessage) => m.role === 'user' && m.content)
+    if (!firstUser) return
+    try {
+      const resp = await fetch('/api/chat/title', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify({ session_id: sid, message: firstUser.content }),
+      })
+      const data = await resp.json()
+      const title = data?.data?.title || data?.title
+      if (title && title !== '新对话') {
+        const conv = conversations.value.find((c: any) => c.id === sid)
+        if (conv) conv.title = title
+      }
+    } catch (_) { /* silent */ }
+  }
+
   function finalizeStream(): void {
     const last = currentStreamingMsg()
     if (last && last.streaming) {
@@ -675,6 +699,15 @@ export const useChatStore = defineStore('chat', () => {
       return true
     })
     resetStreaming()
+
+    // Auto-generate title after first exchange
+    const sid = sessionId.value
+    if (sid) {
+      const conv = conversations.value.find((c: any) => c.id === sid)
+      if (!conv || conv.title === '新对话') {
+        requestTitle(sid)
+      }
+    }
   }
 
   function buildBlocksLegacy(role: string, content: string, reasoning: string, toolCalls: ToolCall[]): ChatBlock[] {

@@ -164,11 +164,11 @@
       </router-view>
     </main>
 
-    <!-- Floating AI chat widget (hidden on /chat, Sidebar handles nav) -->
+    <!-- Floating AI page analyzer (hidden on /chat) -->
     <div
       v-if="currentRoute !== '/chat' && !currentRoute.startsWith('/chat/')"
       class="floating-chat-widget"
-      :class="{ expanded: chatWidgetOpen }"
+      :class="{ expanded: analyzerOpen }"
       :style="
         widgetPos.x || widgetPos.y
           ? { left: widgetPos.x + 'px', top: widgetPos.y + 'px', right: 'auto', bottom: 'auto' }
@@ -177,70 +177,34 @@
     >
       <button
         class="chat-widget-toggle"
-        :title="chatWidgetOpen ? '收起' : 'AI 对话'"
-        @click="toggleChatWidget"
+        :title="analyzerOpen ? '收起' : 'AI 页面分析'"
+        @click="toggleAnalyzer"
         @touchstart="onWidgetDragStart"
         @touchmove="onWidgetDragMove"
         @touchend="onWidgetDragEnd"
       >
+        <!-- Brain / AI analyze icon -->
         <svg
-          v-if="!chatWidgetOpen"
+          v-if="!analyzerOpen"
           width="22"
           height="22"
-          viewBox="0 0 22 22"
+          viewBox="0 0 24 24"
           fill="none"
+          stroke="var(--brand-400)"
+          stroke-width="1.6"
+          stroke-linecap="round"
+          stroke-linejoin="round"
         >
-          <!-- Chat bubble with dots -->
-          <path
-            d="M16 1H6C3.8 1 2 2.8 2 5v8c0 2.2 1.8 4 4 4h2l3.5 3L15 17h1c2.2 0 4-1.8 4-4V5c0-2.2-1.8-4-4-4z"
-            stroke="var(--brand-400)"
-            stroke-width="1.3"
-            fill="none"
-          />
-          <circle
-            cx="7"
-            cy="9"
-            r="1.2"
-            fill="var(--brand-500)"
-            opacity="0.7"
-          >
-            <animate
-              attributeName="opacity"
-              values="0.3;0.9;0.3"
-              dur="2s"
-              repeatCount="indefinite"
-              begin="0s"
-            />
+          <path d="M12 2a4 4 0 0 1 4 4c0 2.5-3 4-4 8-1-4-4-5.5-4-8a4 4 0 0 1 4-4z" />
+          <path d="M8 14c-2 1-5 1-5 4 0 2 2.5 3 5 3M16 14c2 1 5 1 5 4 0 2-2.5 3-5 3" opacity="0.6" />
+          <circle cx="9" cy="6" r="0.8" fill="var(--brand-500)" opacity="0.8">
+            <animate attributeName="opacity" values="0.3;1;0.3" dur="2.5s" repeatCount="indefinite" begin="0s" />
           </circle>
-          <circle
-            cx="11"
-            cy="9"
-            r="1.2"
-            fill="var(--brand-500)"
-            opacity="0.4"
-          >
-            <animate
-              attributeName="opacity"
-              values="0.3;0.9;0.3"
-              dur="2s"
-              repeatCount="indefinite"
-              begin="0.4s"
-            />
+          <circle cx="12" cy="5" r="0.8" fill="var(--brand-500)" opacity="0.5">
+            <animate attributeName="opacity" values="0.3;1;0.3" dur="2.5s" repeatCount="indefinite" begin="0.6s" />
           </circle>
-          <circle
-            cx="15"
-            cy="9"
-            r="1.2"
-            fill="var(--brand-500)"
-            opacity="0.4"
-          >
-            <animate
-              attributeName="opacity"
-              values="0.3;0.9;0.3"
-              dur="2s"
-              repeatCount="indefinite"
-              begin="0.8s"
-            />
+          <circle cx="15" cy="6" r="0.8" fill="var(--brand-500)" opacity="0.5">
+            <animate attributeName="opacity" values="0.3;1;0.3" dur="2.5s" repeatCount="indefinite" begin="1.2s" />
           </circle>
         </svg>
         <svg
@@ -257,75 +221,15 @@
         </svg>
       </button>
       <div
-        v-if="chatWidgetOpen"
+        v-if="analyzerOpen"
         class="chat-widget-body"
       >
-        <div class="chat-widget-header">
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 16 16"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="1.5"
-          >
-            <path d="M14 11c0 1.1-.9 2-2 2h-2l-3 3.5V13H5c-1.1 0-2-.9-2-2V5c0-1.1.9-2 2-2h8c1.1 0 2 .9 2 2v6z" />
-          </svg>
-          <span>AI 对话</span>
-          <span class="chat-widget-badge">{{ chatSessions.length }}</span>
-        </div>
-        <div class="chat-widget-sessions">
-          <div
-            v-if="chatSessions.length === 0"
-            class="chat-widget-empty"
-          >
-            暂无对话记录
-          </div>
-          <button
-            v-for="s in chatSessions"
-            :key="s.id"
-            :class="['chat-widget-session', { active: activeSessionId === s.id }]"
-            @click="navigateChat(s.id)"
-          >
-            <span class="cws-name">{{ s.title || '新对话' }}</span>
-            <span class="cws-time">{{ sessionTime(s.updated_at) }}</span>
-            <button
-              class="cws-del"
-              title="Delete"
-              @click.stop="deleteSession(s.id)"
-            >
-              <svg
-                width="10"
-                height="10"
-                viewBox="0 0 10 10"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.6"
-              >
-                <path d="M2 2l6 6M8 2l-6 6" />
-              </svg>
-            </button>
-          </button>
-        </div>
-        <div class="chat-widget-footer">
-          <button
-            class="chat-widget-new-btn"
-            @click="navigate('/chat')"
-          >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 14 14"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.8"
-              stroke-linecap="round"
-            >
-              <path d="M7 2v10M2 7h10" />
-            </svg>
-            新对话
-          </button>
-        </div>
+        <PageAnalyzer
+          :page-name="sectionName"
+          :visible="analyzerOpen"
+          @analyze="analyzePage"
+          @go-chat="navigate('/chat')"
+        />
       </div>
     </div>
 
@@ -416,6 +320,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from './stores/auth'
 import { useThemeStore } from './stores/theme'
 import { useUploadStore } from './stores/upload'
+import PageAnalyzer from './components/chat/PageAnalyzer.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -474,6 +379,8 @@ const sectionName = computed(() => {
     '/files': 'files',
     '/domains': 'domains',
     '/market': 'market',
+    '/logs': 'logs',
+    '/chat': 'chat',
     '/system': 'system',
     '/terminal': 'terminal',
     '/settings': 'settings',
@@ -517,6 +424,11 @@ const allNavItems = [
     icon: '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 4h12M3 8h8M3 12h10M3 16h6"/></svg>',
   },
   {
+    path: '/chat',
+    label: 'AI 助手',
+    icon: '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M14 10c0 1.1-.9 2-2 2H8l-3.5 3.5V12H3c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2v6z"/><circle cx="5.5" cy="7" r="1" fill="currentColor" opacity="0.6"/><circle cx="9" cy="7" r="1" fill="currentColor" opacity="0.6"/><circle cx="12.5" cy="7" r="1" fill="currentColor" opacity="0.6"/></svg>',
+  },
+  {
     path: '/system',
     label: '系统控制',
     icon: '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="2" y="3" width="14" height="10" rx="2"/><path d="M6 16h6M9 13v3"/></svg>',
@@ -530,7 +442,21 @@ const allNavItems = [
 
 const navItems = computed(() => allNavItems.filter((item) => item.path !== '/system' && item.path !== '/terminal'))
 
-// Chat sessions for floating widget
+// Page analyzer for floating widget
+const analyzerOpen = ref(false)
+
+function toggleAnalyzer() {
+  analyzerOpen.value = !analyzerOpen.value
+}
+
+function analyzePage(prompt: string) {
+  analyzerOpen.value = false
+  const context = sectionName.value
+  const encoded = encodeURIComponent(prompt)
+  router.push({ path: '/chat', query: { prompt: encoded, context } })
+}
+
+// Legacy session list functions (keep for compatibility)
 const chatSessions = ref([])
 const activeSessionId = ref('')
 
@@ -548,14 +474,8 @@ async function loadChatSessions() {
 }
 
 function navigateChat(sessionId) {
-  chatWidgetOpen.value = false
   activeSessionId.value = sessionId
   router.push({ path: '/chat/' + sessionId })
-}
-
-function toggleChatWidget() {
-  chatWidgetOpen.value = !chatWidgetOpen.value
-  if (chatWidgetOpen.value) loadChatSessions()
 }
 
 function sessionTime(t) {
@@ -602,12 +522,12 @@ function doLogout() {
   router.push('/login')
 }
 
-// Auto-collapse chat widget when leaving chat page
+// Auto-collapse analyzer when navigating to chat page
 watch(
   () => route.path,
   (newPath) => {
-    if (newPath === '/chat') {
-      chatWidgetOpen.value = false
+    if (newPath === '/chat' || newPath.startsWith('/chat/')) {
+      analyzerOpen.value = false
     }
   },
 )
@@ -1071,6 +991,7 @@ watch(
   background: rgba(14, 165, 233, 0.1);
   border-color: rgba(14, 165, 233, 0.2);
 }
+
 
 /* ============================================
    Global Upload Bar (floating center bottom)

@@ -524,6 +524,9 @@
         </div>
       </div>
 
+      <!-- Prompts -->
+      <PromptsCard />
+
       <!-- Users -->
       <div class="setting-card full-width">
         <div class="card-head">
@@ -706,6 +709,7 @@ import { onBeforeRouteLeave } from 'vue-router'
 import api from '../services/api'
 import { useToast } from '../composables/useToast.js'
 import ConfirmDialog from '../components/ui/ConfirmDialog.vue'
+import PromptsCard from '../components/settings/PromptsCard.vue'
 import { useSettingsStore } from '../stores/settings'
 
 const toast = useToast()

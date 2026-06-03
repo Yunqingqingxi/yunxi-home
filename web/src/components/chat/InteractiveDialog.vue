@@ -72,6 +72,18 @@
           {{ req.message }}
         </div>
 
+        <!-- v3.3: 操作链接（如 GitHub Token 页面） -->
+        <a
+          v-if="req.action_url"
+          :href="req.action_url"
+          target="_blank"
+          rel="noopener"
+          class="interact-action-link"
+        >
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M11 7.5v4a.5.5 0 01-.5.5h-8a.5.5 0 01-.5-.5v-8A.5.5 0 012.5 3h4M9 2h3v3M6.5 7.5L12 2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          {{ req.action_label || '打开链接' }}
+        </a>
+
         <!-- confirm 模式 -->
         <div
           v-if="req.type === 'confirm'"
@@ -283,6 +295,8 @@ onUnmounted(() => clearInterval(timer))
 .interact-head { display: flex; align-items: center; gap: 10px; }
 .interact-title { font-size: 15px; font-weight: 700; color: var(--text-primary); }
 .interact-msg { font-size: 13px; color: var(--text-secondary); line-height: 1.6; white-space: pre-wrap; }
+.interact-action-link { display: inline-flex; align-items: center; gap: 6px; padding: 8px 14px; border-radius: 8px; background: rgba(6,182,212,0.08); border: 1px solid rgba(6,182,212,0.2); color: var(--brand-500); font-size: 13px; font-weight: 500; text-decoration: none; transition: all 0.15s; width: fit-content; }
+.interact-action-link:hover { background: rgba(6,182,212,0.15); border-color: var(--brand-400); }
 .interact-body { display: flex; flex-direction: column; gap: 10px; }
 
 .interact-field { display: flex; flex-direction: column; gap: 3px; }

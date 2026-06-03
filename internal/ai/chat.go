@@ -993,7 +993,14 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 			s.chatLogger.LogRoundEnd(sessionID, state.round, finalContent, len(roundBlocks), "completed")
 			log.Debug("对话轮次结束", "会话", sessionID, "总轮次", state.round, "AI回复", truncateStr(finalContent, 300), "块数量", len(roundBlocks))
 			if st.Title == "" || st.Title == "新对话" {
-				s.sessions.UpdateTitle(sessionID, truncateStr(userMessage, 40))
+				// Fallback: first 15 chars of user message
+				title := userMessage
+				if runes := []rune(title); len(runes) > 15 {
+					title = string(runes[:15])
+				}
+				s.sessions.UpdateTitle(sessionID, title)
+				// Async: generate AI-summarized title (max 15 chars)
+				go s.generateTitleAsync(sessionID, userMessage)
 			}
 			s.chatLogger.LogSessionSave(sessionID)
 			// 发射总耗时事件（前端显示用）
@@ -1158,7 +1165,8 @@ func (s *Service) RequestUserInput(ctx context.Context, req base.InteractiveRequ
 	streamCh, hasStream := s.activeStreamChs[sessionID]
 	s.activeStreamsMu.Unlock()
 
-	log.Info("interactive_request 发送", "sessionID", sessionID, "hasStream", hasStream, "reqID", req.ID)
+	log.Info("interactive_request 发送", "sessionID", sessionID, "hasStream", hasStream, "reqID", req.ID,
+			"type", req.Type, "hasActionURL", req.ActionURL != "", "actionURL", req.ActionURL)
 	if !hasStream || streamCh == nil {
 		log.Warn("interactive_request: 无活跃 SSE 通道，尝试 event bus fallback", "sessionID", sessionID)
 		// fallback: 仅发送到 event bus
@@ -1351,6 +1359,53 @@ func (s *Service) generateSummary(ctx context.Context, messages []base.Message, 
 	if result == "" {
 		return "", fmt.Errorf("empty summary returned")
 	}
+	return result, nil
+}
+
+// GenerateTitle generates a short conversation title from the first user message.
+// Uses a lightweight prompt and returns a title of max 20 characters.
+func (s *Service) GenerateTitle(ctx context.Context, sessionID, userMessage string) (string, error) {
+	if s.provider == nil {
+		return "", fmt.Errorf("AI provider not available")
+	}
+
+	titleMsgs := []base.Message{
+		{Role: "system", Content: "你是一个标题生成器。根据用户的第一条消息生成一个简短的对话标题。" +
+			"规则：1) 不超过20个字 2) 只返回标题本身，不要引号、不要解释、不要标点 3) 提取核心话题"},
+		{Role: "user", Content: userMessage},
+	}
+
+	titleCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	stream, err := s.provider.ChatStream(titleCtx, titleMsgs, nil)
+	if err != nil {
+		return "", fmt.Errorf("title generation failed: %w", err)
+	}
+
+	var title strings.Builder
+	for ev := range stream {
+		if ev.Type == "content" {
+			title.WriteString(ev.Content)
+		}
+		if ev.Type == "error" {
+			return "", fmt.Errorf("title generation error: %s", ev.Content)
+		}
+	}
+
+	result := strings.TrimSpace(title.String())
+	// Strip quotes and excessive punctuation
+	result = strings.Trim(result, "\"'「」\"\"''，。.！!？?：:；;、")
+	if len([]rune(result)) > 20 {
+		result = string([]rune(result)[:20])
+	}
+	if result == "" {
+		result = "新对话"
+	}
+
+	// Update session title in DB
+	s.sessions.UpdateTitle(sessionID, result)
+
 	return result, nil
 }
 
@@ -2156,6 +2211,8 @@ func (s *Service) RegisterAgentTools() {
 				"type":        {Type: "string", Description: "弹窗类型", Enum: []string{"confirm", "input", "form", "wizard"}},
 				"variant":     {Type: "string", Description: "视觉风格", Enum: []string{"danger", "warning", "info"}},
 				"timeout_sec": {Type: "integer", Description: "超时秒数，默认 120"},
+				"action_url": {Type: "string", Description: "操作链接（可选），如 GitHub Token 页面 https://github.com/settings/tokens。前端渲染为可点击的链接"},
+				"action_label": {Type: "string", Description: "链接文字（可选），如「前往 GitHub 创建 Token」"},
 				"fields": {Type: "array", Description: "表单字段列表（type=input/form 时使用）", Items: &base.ParamProp{Type: "object", Properties: map[string]base.ParamProp{
 					"name":        {Type: "string", Description: "字段名（英文）"},
 					"label":       {Type: "string", Description: "字段标签（中文）"},
@@ -2253,13 +2310,15 @@ func (s *Service) RegisterAgentTools() {
 			}
 
 			resp := s.RequestUserInput(ctx, base.InteractiveRequest{
-				Type:       reqType,
-				Title:      title,
-				Message:    fullMsg,
-				Fields:     fields,
-				Pages:      pages,
-				TimeoutSec: timeoutSec,
-				Variant:    variant,
+				Type:        reqType,
+				Title:       title,
+				Message:     fullMsg,
+				Fields:      fields,
+				Pages:       pages,
+				TimeoutSec:  timeoutSec,
+				Variant:     variant,
+				ActionURL:   strVal(args, "action_url"),
+				ActionLabel: strVal(args, "action_label"),
 			})
 			if resp == nil || !resp.Approved {
 				return "❌ 用户拒绝了确认请求。操作已取消。请勿重试，改为询问用户是否愿意更改方案或降低风险。", nil
@@ -2812,6 +2871,49 @@ func truncateStr(s string, maxLen int) string {
 		return string(runes[:headLen]) + fmt.Sprintf("...[truncated %d chars]...", len(runes)-maxLen) + string(runes[len(runes)-tailLen:])
 	}
 	return string(runes[:headLen]) + "..."
+}
+
+// generateTitleAsync 异步调用 AI 生成会话标题摘要（不超过15字）。
+// 失败时保留之前已设置的 fallback 标题（取自用户消息前15字）。
+func (s *Service) generateTitleAsync(sessionID, userMessage string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	msgs := []base.Message{
+		{Role: "system", Content: "你是一个标题生成器。根据用户的第一条请求，生成一个不超过15个字的简短标题，概括核心请求。只输出标题本身，不要解释、不要引号、不要标点。"},
+		{Role: "user", Content: userMessage},
+	}
+
+	stream, err := s.provider.ChatStream(ctx, msgs, nil)
+	if err != nil {
+		log.Debug("标题生成调用失败", "会话", sessionID, "error", err)
+		return
+	}
+
+	var titleBuilder strings.Builder
+	for ev := range stream {
+		if ev.Type == "content" && ev.Content != "" {
+			titleBuilder.WriteString(ev.Content)
+		}
+		if ev.Type == "error" || ev.Type == "done" {
+			break
+		}
+	}
+
+	title := strings.TrimSpace(titleBuilder.String())
+	if title == "" {
+		log.Debug("标题生成为空，使用默认标题", "会话", sessionID)
+		return
+	}
+
+	// 限制标题为15个 rune（汉字/字符）
+	runes := []rune(title)
+	if len(runes) > 15 {
+		title = string(runes[:15])
+	}
+
+	log.Info("AI 生成标题", "会话", sessionID, "标题", title)
+	s.sessions.UpdateTitle(sessionID, title)
 }
 
 func (s *Service) checkGoalResume(sessionID, userMessage string) string {

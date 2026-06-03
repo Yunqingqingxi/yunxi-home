@@ -249,6 +249,7 @@ func New(cfg *config.Config, configRepo database.ConfigRepository, domainRepo da
 		}()
 	}
 	api.POST("/chat", chatH.Chat)
+	api.POST("/chat/title", chatH.GenerateTitle)
 	api.POST("/chat/confirm", chatH.ConfirmAction)
 	api.POST("/chat/respond", chatH.RespondInteractive)
 	api.POST("/chat/inject", chatH.InjectMessage)
