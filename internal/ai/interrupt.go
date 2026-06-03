@@ -2,7 +2,7 @@ package ai
 
 import (
 	"fmt"
-	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
+
 
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/agent"
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/base"

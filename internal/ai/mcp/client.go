@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+var log = logger.ForComponent("mcp")
+
 // ServerConfig 单个 MCP 服务器的配置
 type ServerConfig struct {
 	Name    string            `json:"name"`

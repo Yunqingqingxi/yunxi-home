@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+var log = logger.ForComponent("collab")
+
 // Subscription 消息订阅（消费者接口）
 type Subscription struct {
 	AgentID string

@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+var log = logger.ForComponent("async")
+
 // Status 任务状态
 type Status string
 

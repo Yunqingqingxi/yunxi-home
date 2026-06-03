@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+var log = logger.ForComponent("topology")
+
 // ── TopologyTracker ───────────────────────────────────────────
 //
 // Central state machine that tracks AI trajectory, validates coordinates,

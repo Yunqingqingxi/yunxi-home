@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+var log = logger.ForComponent("cron")
+
 // InjectFunc 是注入消息到会话的回调函数类型
 type InjectFunc func(sessionID, prompt string)
 

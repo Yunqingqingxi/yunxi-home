@@ -52,6 +52,10 @@ type LogEvent struct {
 	TurnStatus     string         `json:"turn_status,omitempty"`
 	// DurationSec — tool_result 的总耗时（秒），替代冗余的 progress 日志
 	DurationSec    float64        `json:"duration_sec,omitempty"`
+	// RoundDurMs — 轮次耗时（毫秒），round_end 时记录
+	RoundDurMs     int64          `json:"round_dur_ms,omitempty"`
+	// LLMDurMs — LLM 调用耗时（毫秒），llm_call_done 时记录
+	LLMDurMs       int64          `json:"llm_dur_ms,omitempty"`
 	// RiskLevel — 工具风险等级: readonly | mutation | dangerous
 	RiskLevel      string         `json:"risk_level,omitempty"`
 	Extra          map[string]any `json:"extra,omitempty"`
@@ -70,6 +74,8 @@ type turnState struct {
 	strategies    []string // 本轮策略链 ["binary_first", "docker", "source_build"]
 	lastProgress  time.Time // 上次 tool_progress 时间（用于去重）
 	currentTool   string  // 当前正在执行的工具名（用于进度去重）
+	roundStartAt  time.Time // 本轮开始时间（用于计算耗时）
+	llmStartAt    time.Time // LLM 调用开始时间
 }
 
 // ChatLogger 会话追踪日志器
@@ -183,13 +189,17 @@ func (cl *ChatLogger) write(ev LogEvent) {
 	cl.broadcast(ev)
 }
 
-// bridgeToSlog 将关键事件同步到主 slog 日志，便于在主日志中追踪会话生命周期。
-// 高频事件（thinking、content、tool_progress）不桥接，避免日志噪音。
+// bridgeToSlog 将所有会话事件同步到主 slog 日志，保持与 ChatLogger 自身输出一致。
+// 高频事件（thinking、tool_progress）用 Debug 级别，其余按语义选择 Info/Warn/Error。
+// content/thinking 内容截断到 500 字符，避免日志膨胀。
 func (cl *ChatLogger) bridgeToSlog(ev LogEvent) {
 	base := []any{
 		slog.String(logger.KeyComponent, "ai"),
 		slog.String(logger.KeySessionID, ev.SessionID),
-		slog.Int(logger.KeyRound, ev.Round),
+	}
+
+	if ev.Round > 0 {
+		base = append(base, slog.Int(logger.KeyRound, ev.Round))
 	}
 
 	switch ev.Type {
@@ -197,33 +207,123 @@ func (cl *ChatLogger) bridgeToSlog(ev LogEvent) {
 		slog.Info("会话开始", append(base, slog.String(logger.KeyEvent, logger.EventSessionStart))...)
 	case "session_end":
 		slog.Info("会话结束", append(base, slog.String(logger.KeyEvent, logger.EventSessionEnd))...)
-	case "error":
-		slog.Error("会话错误", append(base,
-			slog.String(logger.KeyEvent, "error"),
-			slog.String(logger.KeyError, ev.Error),
+	case "session_save":
+		slog.Debug("会话保存", append(base, slog.String(logger.KeyEvent, logger.EventSessionSave))...)
+
+	case "round_start":
+		slog.Debug("轮次开始", append(base,
+			slog.String(logger.KeyEvent, logger.EventRoundStart),
+			slog.Int("msg_count", ev.MsgCount),
+			slog.Int("tool_count", ev.ToolCount),
 		)...)
+	case "round_end":
+		slog.Info("轮次结束", append(base,
+			slog.String(logger.KeyEvent, logger.EventRoundEnd),
+			slog.String("turn_status", ev.TurnStatus),
+			slog.Int64("round_dur_ms", ev.RoundDurMs),
+		)...)
+
+	case "user_message":
+		slog.Info("用户消息", append(base,
+			slog.String(logger.KeyEvent, logger.EventUserMessage),
+			slog.String("content", truncateStr(ev.Content, 300)),
+		)...)
+	case "inject":
+		slog.Debug("消息注入", append(base,
+			slog.String(logger.KeyEvent, logger.EventInject),
+			slog.String("content", truncateStr(ev.Content, 200)),
+		)...)
+
+	case "thinking":
+		slog.Debug("AI 思考", append(base,
+			slog.String(logger.KeyEvent, logger.EventThinking),
+			slog.String("content", truncateStr(ev.Content, 500)),
+		)...)
+	case "content":
+		slog.Info("AI 回复", append(base,
+			slog.String(logger.KeyEvent, logger.EventContent),
+			slog.String("content", truncateStr(ev.Content, 500)),
+		)...)
+	case "answer":
+		slog.Info("最终答案", append(base,
+			slog.String(logger.KeyEvent, logger.EventAnswer),
+			slog.String("content", truncateStr(ev.Content, 500)),
+		)...)
+
 	case "tool_call":
 		slog.Info("工具调用", append(base,
 			slog.String(logger.KeyEvent, logger.EventToolCall),
 			slog.String(logger.KeyTool, ev.ToolName),
 			slog.String(logger.KeyToolRisk, ev.RiskLevel),
 		)...)
+	case "tool_start":
+		slog.Debug("工具开始", append(base,
+			slog.String(logger.KeyEvent, logger.EventToolStart),
+			slog.String(logger.KeyTool, ev.ToolName),
+		)...)
+	case "tool_progress":
+		slog.Debug("工具进度", append(base,
+			slog.String(logger.KeyEvent, logger.EventToolProgress),
+			slog.String(logger.KeyTool, ev.ToolName),
+			slog.String("progress", truncateStr(ev.Content, 200)),
+		)...)
 	case "tool_result":
-		slog.Info("工具完成", append(base,
+		attrs := append(base,
 			slog.String(logger.KeyEvent, logger.EventToolResult),
 			slog.String(logger.KeyTool, ev.ToolName),
 			slog.String(logger.KeyToolStatus, ev.ToolStatus),
 			slog.Int64("tool_dur_ms", ev.ToolDurMs),
+			slog.Float64("duration_sec", ev.DurationSec),
+		)
+		if ev.ToolStatus == "error" {
+			slog.Error("工具失败", attrs...)
+		} else {
+			slog.Info("工具完成", attrs...)
+		}
+
+	case "strategy":
+		slog.Debug("策略决策", append(base,
+			slog.String(logger.KeyEvent, logger.EventStrategy),
+			slog.String("strategy", ev.Strategy),
+			slog.String("reason", ev.StrategyReason),
 		)...)
+
 	case "llm_call_done":
-		slog.Debug("LLM 调用完成", append(base,
+		slog.Info("LLM 调用完成", append(base,
 			slog.String(logger.KeyEvent, logger.EventLLMCall),
 			slog.String(logger.KeyModel, ev.Model),
 			slog.Int(logger.KeyTokensIn, ev.PromptTokens),
 			slog.Int(logger.KeyTokensOut, ev.OutputTokens),
 			slog.Bool(logger.KeyCacheHit, ev.CacheHit),
+			slog.Int("cache_tokens", ev.CacheTokens),
 			slog.Float64("cost_usd", ev.Cost),
+			slog.Int64("llm_dur_ms", ev.LLMDurMs),
 		)...)
+
+	case "error":
+		slog.Error("会话错误", append(base,
+			slog.String(logger.KeyEvent, "error"),
+			slog.String(logger.KeyError, ev.Error),
+		)...)
+
+	case "agent_result":
+		status := "done"
+		agentID := ""
+		if ev.Extra != nil {
+			if s, ok := ev.Extra["status"].(string); ok {
+				status = s
+			}
+			if id, ok := ev.Extra["agent_id"].(string); ok {
+				agentID = id
+			}
+		}
+		slog.Info("Agent 完成", append(base,
+			slog.String(logger.KeyEvent, logger.EventAgentResult),
+			slog.String("agent_id", agentID),
+			slog.String("status", status),
+			slog.String("summary", truncateStr(ev.Content, 300)),
+		)...)
+
 	case "compaction":
 		slog.Info("会话压缩", append(base,
 			slog.String(logger.KeyEvent, logger.EventCompaction),
@@ -511,6 +611,7 @@ func (cl *ChatLogger) formatHuman(ev LogEvent) string {
 		ts.strategies = nil
 		ts.lastProgress = time.Time{}
 		ts.currentTool = ""
+		ts.roundStartAt = time.Now()
 		return ""
 
 	case "user_message":
@@ -581,14 +682,17 @@ func (cl *ChatLogger) formatHuman(ev LogEvent) string {
 		return cl.formatWithHeader(ev, ts, fmt.Sprintf("[%d:%02d] INJECT: %s", ev.Round, ts.seq, truncateStr(ev.Content, 300)))
 
 	case "round_end":
-		// Footer with turn status
+		// Auto-calculate round duration if not already set
+		if ev.RoundDurMs == 0 && !ts.roundStartAt.IsZero() {
+			ev.RoundDurMs = time.Since(ts.roundStartAt).Milliseconds()
+		}
 		statusLine := ""
 		if ev.TurnStatus == "waiting_user" {
 			statusLine = fmt.Sprintf("\nWAITING: %s", truncateStr(ev.Content, 200))
 		} else if ev.TurnStatus == "error" {
 			statusLine = "\nBUILD FAILED"
 		}
-		return fmt.Sprintf("─── 第 %d 轮结束 (工具 %d 次) ───%s", ev.Round, ev.ToolCount, statusLine)
+		return fmt.Sprintf("─── 第 %d 轮结束 (工具 %d 次 · %dms) ───%s", ev.Round, ev.ToolCount, ev.RoundDurMs, statusLine)
 
 	case "llm_call_done":
 		return "" // JSONL only
@@ -733,8 +837,8 @@ func (cl *ChatLogger) LogStrategy(sessionID string, round int, strategy, reason 
 	})
 }
 
-func (cl *ChatLogger) LogLLMCallDone(sessionID string, round int, model string, promptTok, outputTok, cacheTok int, cacheHit bool, cost float64) {
-	cl.write(LogEvent{Timestamp: time.Now().UTC().Format(time.RFC3339Nano), SessionID: sessionID, Round: round, Type: "llm_call_done", Model: model, PromptTokens: promptTok, OutputTokens: outputTok, CacheTokens: cacheTok, CacheHit: cacheHit, Cost: cost})
+func (cl *ChatLogger) LogLLMCallDone(sessionID string, round int, model string, promptTok, outputTok, cacheTok int, cacheHit bool, cost float64, durMs int64) {
+	cl.write(LogEvent{Timestamp: time.Now().UTC().Format(time.RFC3339Nano), SessionID: sessionID, Round: round, Type: "llm_call_done", Model: model, PromptTokens: promptTok, OutputTokens: outputTok, CacheTokens: cacheTok, CacheHit: cacheHit, Cost: cost, LLMDurMs: durMs})
 }
 
 func (cl *ChatLogger) LogUserMessage(sessionID string, round int, content string) {

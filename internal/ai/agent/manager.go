@@ -11,6 +11,8 @@ import (
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/observability"
 )
 
+var log = logger.ForComponent("ai.agent")
+
 // Manager 管理子 Agent 的创建、执行和清理
 type Manager struct {
 	mu       sync.RWMutex
@@ -278,7 +280,7 @@ func (m *Manager) runAgent(agent *SubAgent, parentID string) {
 	}
 
 	m.updateStatus(agent, StatusRunning, "")
-	log.Info("子Agent启动", "id", agent.ID, "goal", agent.Goal, "tools", len(agent.ToolFilter), "parent", parentID)
+	log.Debug("子Agent上下文已创建", "id", agent.ID, "parent", parentID)
 
 	// 构建独立上下文（带超时）
 	agentTimeout := m.config.AgentTimeout
@@ -485,10 +487,17 @@ func (m *Manager) updateStatus(agent *SubAgent, status Status, summary string) {
 		eventType = "agent_result"
 	}
 	if agent != nil && agent.progressFn != nil {
-		agent.progressFn(agent, eventType)
+		func() {
+			defer func() { recover() }()
+			agent.progressFn(agent, eventType)
+		}()
 	}
 
-	log.Info("子Agent完成", "id", agent.ID, "status", status, "rounds", agent.Round, "summary", summary)
+	if status == StatusRunning {
+		log.Info("子Agent启动", "id", agent.ID, "goal", agent.Goal, "tools", len(agent.ToolFilter))
+	} else {
+		log.Info("子Agent完成", "id", agent.ID, "status", status, "rounds", agent.Round, "summary", summary)
+	}
 }
 
 func (m *Manager) updateProgress(agent *SubAgent, progress string) {

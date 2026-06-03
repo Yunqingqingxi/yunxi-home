@@ -9,7 +9,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
+
 )
 
 // ── /proc readers (Linux) ──────────────────────────────────────

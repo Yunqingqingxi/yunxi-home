@@ -2,7 +2,7 @@ package skill
 
 import (
 	"fmt"
-	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
+
 	"os"
 	"path/filepath"
 	"strings"

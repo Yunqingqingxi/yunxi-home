@@ -12,6 +12,8 @@ import (
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/register"
 )
 
+var log = logger.ForComponent("middleware")
+
 // Chain 工具调用中间件链
 type Chain struct {
 	registry *register.Registry

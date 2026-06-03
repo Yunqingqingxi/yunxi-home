@@ -3,9 +3,11 @@ package skill
 import (
 	"context"
 	"fmt"
-	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
+
 	"net/http"
 	"time"
+
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 )
 
 // ── SkillExecutor ───────────────────────────────────────────────────────
@@ -89,11 +91,11 @@ func (e *Executor) runYAML(ctx context.Context, m *Manifest, _ map[string]any) (
 
 // ── 辅助 ──────────────────────────────────────────────────────────────
 
-func (e *Executor) getLogger() *slog.Logger {
+func (e *Executor) getLogger() *logger.Logger {
 	if e.mcp != nil {
 		return e.mcp.Logger()
 	}
-	return slog.Default()
+	return logger.Default()
 }
 
 // validateParams 根据 JSON Schema 校验参数
@@ -141,20 +143,20 @@ func validateParams(params map[string]any, schema ParamSchema) error {
 
 // SimpleMCPContext 一个基础的 MCPContext 实现
 type SimpleMCPContext struct {
-	Log       *slog.Logger
+	Log       *logger.Logger
 	cache     map[string][]byte
 }
 
 // NewSimpleMCPContext 创建基础 MCP 上下文
-func NewSimpleMCPContext(logger *slog.Logger) MCPContext {
+func NewSimpleMCPContext(l *logger.Logger) MCPContext {
 	return &SimpleMCPContext{
-		Log:   logger,
+		Log:   l,
 		cache: make(map[string][]byte),
 	}
 }
 
 func (c *SimpleMCPContext) HTTPClient() *http.Client { return http.DefaultClient }
-func (c *SimpleMCPContext) Logger() *slog.Logger      { return c.Log }
+func (c *SimpleMCPContext) Logger() *logger.Logger      { return c.Log }
 func (c *SimpleMCPContext) GetCache(key string) ([]byte, error) {
 	if v, ok := c.cache[key]; ok { return v, nil }
 	return nil, fmt.Errorf("cache miss: %s", key)

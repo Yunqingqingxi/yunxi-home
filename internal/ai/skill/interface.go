@@ -4,9 +4,11 @@ package skill
 
 import (
 	"context"
-	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
+
 	"net/http"
 	"time"
+
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 )
 
 // ── MCPContext ──────────────────────────────────────────────────────────
@@ -18,7 +20,7 @@ type MCPContext interface {
 	// HTTPClient 返回带超时和重试的 HTTP 客户端
 	HTTPClient() *http.Client
 	// Logger 返回结构化日志器
-	Logger() *slog.Logger
+	Logger() *logger.Logger
 	// Cache 操作
 	GetCache(key string) ([]byte, error)
 	SetCache(key string, value []byte, ttl time.Duration) error

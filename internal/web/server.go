@@ -35,6 +35,8 @@ import (
 	filemw "github.com/Yunqingqingxi/yunxi-home/internal/middleware"
 )
 
+var log = logger.ForComponent("web")
+
 //go:embed all:static
 var staticFiles embed.FS
 

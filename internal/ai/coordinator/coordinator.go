@@ -9,6 +9,8 @@ import (
 	"time"
 )
 
+var log = logger.ForComponent("coordinator")
+
 // LockMode 锁模式
 type LockMode string
 

@@ -7,6 +7,8 @@ import (
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/base"
 )
 
+var log = logger.ForComponent("intent")
+
 // RouteResult is the outcome of the two-stage intent pipeline.
 type RouteResult struct {
 	Tool     string  // matched tool name

@@ -1,7 +1,7 @@
 package handlers
 
 import (
-	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
+
 	"net/http"
 
 	"github.com/labstack/echo/v4"

@@ -12,6 +12,8 @@ import (
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/register"
 )
 
+var log = logger.ForComponent("skill")
+
 // Runner 执行 Skill 的步骤序列
 type Runner struct {
 	registry *register.Registry

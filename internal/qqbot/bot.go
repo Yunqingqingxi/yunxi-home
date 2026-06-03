@@ -29,6 +29,8 @@ import (
 	"golang.org/x/time/rate"
 )
 
+var log = logger.ForComponent("qqbot")
+
 // Config QQ Bot 配置
 type Config struct {
 	AppID       string

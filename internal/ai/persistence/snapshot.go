@@ -10,6 +10,8 @@ import (
 	"time"
 )
 
+var log = logger.ForComponent("persistence")
+
 // AgentSnapshot Agent 完整上下文快照
 type AgentSnapshot struct {
 	Version      int               `json:"version"`

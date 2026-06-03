@@ -16,6 +16,8 @@ import (
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/topology"
 )
 
+var log = logger.ForComponent("orchestrator")
+
 // Config 编排器配置
 type Config struct {
 	MaxRounds        int                 // 最大推理轮次，默认 100

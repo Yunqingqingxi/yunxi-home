@@ -14,6 +14,8 @@ import (
 	"github.com/Yunqingqingxi/yunxi-home/internal/models"
 )
 
+var log = logger.ForComponent("session")
+
 // Manager manages chat sessions (CRUD + persistence).
 type Manager struct {
 	repo            database.ChatSessionRepository

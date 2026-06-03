@@ -36,6 +36,8 @@ import (
 	"github.com/Yunqingqingxi/yunxi-home/internal/toolreg"
 )
 
+var log = logger.ForComponent("ai")
+
 // ── Types ──
 
 type Service struct {
@@ -552,7 +554,7 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 		allTools := s.registry.All()
 		type qs struct{ round, maxRounds, loopCount, silentRounds int; lastToolSig string; taskAbandonCount int; taskStallCount int }
 		state := qs{maxRounds: 100}
-		silenceStart := time.Now()
+		_ = time.Now // silenceStart placeholder
 		topoActive := s.isTopologyActive(sessionID) // 一次性读取，每轮复用
 		for state.round = 0; state.round < state.maxRounds; state.round++ {
 			// ── 优先级批量消费 injectCh（支持中断信号）──
@@ -814,19 +816,17 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 						// Save after each tool so crash doesn't lose results
 						s.sessions.Save(sessionID, history)
 					}
-					// 静默检测：无用户可见文本时累计，≥2轮或>30秒自动注入进度
-				if contentBuf.Len() == 0 {
+					// 静默检测：无用户可见文本时累计，≥1轮后强制 AI 输出
+				if contentBuf.Len() == 0 && reasoningBuf.Len() > 0 {
 					state.silentRounds++
-				} else {
+				} else if contentBuf.Len() > 0 {
 					state.silentRounds = 0
-					silenceStart = time.Now()
 				}
-				if state.silentRounds >= 2 || time.Since(silenceStart) > 30*time.Second {
-					progressMsg := fmt.Sprintf("[系统] AI 正在后台执行任务（第 %d 轮，已静默 %.0f 秒）。你可以发送「进度」查询状态，或发送新指令打断。",
-						state.round, time.Since(silenceStart).Seconds())
-					s.InjectWithPriority(sessionID, progressMsg, "info", "silence_detector")
+				if state.silentRounds >= 1 {
+					history = append(history, base.Message{Role: "system", Content:
+						"你已连续多轮只调用工具没有给用户任何文字说明。用户看到的是空白屏幕，不知道你在做什么。" +
+						"下一轮必须在调用工具的同时，用一两句话告诉用户你正在做什么、发现了什么。"})
 					state.silentRounds = 0
-					silenceStart = time.Now()
 				}
 				// ── 拓扑验证 + SSE 事件发射 ──
 				s.emitTopologyUpdate(sessionID, topoActive, parsedTopo, toolCalls, contentBuf.String(), state.round, emit)

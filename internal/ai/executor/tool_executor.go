@@ -12,6 +12,8 @@ import (
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/register"
 )
 
+var log = logger.ForComponent("executor")
+
 // ConfirmFunc 确认回调（由上层注入，等待用户确认）
 type ConfirmFunc func(toolName string, args map[string]any) (approved bool, fields map[string]string)
 

@@ -8,6 +8,8 @@ import (
 	"time"
 )
 
+var log = logger.ForComponent("resilience")
+
 // ErrCircuitOpen 熔断器打开时返回的错误
 var ErrCircuitOpen = errors.New("circuit breaker is open")
 

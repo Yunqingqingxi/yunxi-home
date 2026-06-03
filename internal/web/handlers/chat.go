@@ -19,6 +19,8 @@ import (
 	"github.com/Yunqingqingxi/yunxi-home/internal/toolreg"
 )
 
+var log = logger.ForComponent("handlers")
+
 // ChatHandler AI 聊天 Handler
 type ChatHandler struct {
 	aiService     *ai.Service

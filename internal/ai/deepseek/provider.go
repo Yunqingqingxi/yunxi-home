@@ -15,6 +15,8 @@ import (
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/base"
 )
 
+var log = logger.ForComponent("deepseek")
+
 // ── API Types ──────────────────────────────────────────────
 
 type dsMessage struct {

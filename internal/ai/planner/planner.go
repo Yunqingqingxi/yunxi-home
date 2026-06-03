@@ -14,6 +14,8 @@ import (
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/register"
 )
 
+var log = logger.ForComponent("planner")
+
 // Engine 计划执行引擎
 type Engine struct {
 	registry *register.Registry

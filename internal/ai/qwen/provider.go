@@ -14,6 +14,8 @@ import (
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/base"
 )
 
+var log = logger.ForComponent("qwen")
+
 // ── API Types ──────────────────────────────────────────────
 
 type qwenMessage struct {

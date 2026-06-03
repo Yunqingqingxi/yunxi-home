@@ -11,6 +11,8 @@ import (
 	"sync"
 )
 
+var log = logger.ForComponent("ai.base")
+
 // ── PromptStore — 提示词外置存储 ─────────────────────────────
 //
 // 三层架构：

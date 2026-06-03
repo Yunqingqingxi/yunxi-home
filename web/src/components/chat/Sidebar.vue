@@ -484,12 +484,13 @@ function onTogglePin() {
 
 function onDelete() {
   if (!menuConvId.value) return
-  closeMenu()
   showDeleteConfirm.value = true
 }
 function confirmDelete() {
+  const id = menuConvId.value
   showDeleteConfirm.value = false
-  emit('delete', menuConvId.value)
+  closeMenu()
+  if (id) emit('delete', id)
 }
 
 function onClearAll() {
