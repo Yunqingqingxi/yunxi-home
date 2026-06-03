@@ -605,6 +605,7 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 			taskStallCount                            int
 			consecutiveEmptyResults                   int        // rounds where all tool results were empty/error
 			noProgressToolRounds                      int        // rounds where topology X didn't increase
+			consecutiveToolFailures                   int        // consecutive tool failures (reset on success)
 			infoGainHistory                           [5]float64 // rolling window of per-round avg info gain
 			infoGainPtr                               int
 			lastCoordX                                float64 // topology X from previous round
@@ -642,7 +643,7 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 
 			// ── ForceTools 检查（拓扑激活时）──
 			if topoActive && s.tracker != nil {
-				if forcedTool := s.tracker.ShouldForceTools(sessionID, s.recentToolNames(history, 10)); forcedTool != "" {
+				if forcedTool := s.tracker.ShouldForceTools(sessionID, s.recentToolNames(history, 10), state.consecutiveToolFailures); forcedTool != "" {
 					log.Info("ForceTools 触发", "会话", sessionID, "工具", forcedTool, "轮次", state.round)
 					s.chatLogger.LogRoundStart(sessionID, state.round, len(history), len(allTools))
 					// 直接执行强制工具，跳过 LLM 调用
@@ -660,7 +661,7 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 			// ── ForceTools：进度过半且关键工具缺失时跳过 LLM ──
 			if topoActive && s.tracker != nil {
 				recentTools := s.extractRecentToolNames(history, 10)
-				if forceTool := s.tracker.ShouldForceTools(sessionID, recentTools); forceTool != "" {
+				if forceTool := s.tracker.ShouldForceTools(sessionID, recentTools, state.consecutiveToolFailures); forceTool != "" {
 					trackerSt := s.tracker.GetState(sessionID)
 					progress := 0.0
 					if trackerSt != nil {
@@ -1056,7 +1057,7 @@ func (s *Service) InjectMessage(sessionID, content string) {
 		return
 	}
 	select {
-	case ch <- InjectedMessage{Content: content, Priority: "info", Timestamp: time.Now()}:
+	case ch <- InjectedMessage{Content: content, Priority: "system", Source: "inject", Timestamp: time.Now()}:
 	default:
 	}
 }
@@ -1082,7 +1083,7 @@ func (s *Service) InjectUserMessage(sessionID, content string) {
 	history, _ := s.sessions.GetOrCreate(sessionID, sessionType, content)
 	history = append(history, base.Message{Role: "user", Content: content})
 	s.sessions.Save(sessionID, history)
-	s.InjectWithPriority(sessionID, "[用户消息] "+content, "info", "user")
+	s.InjectWithPriority(sessionID, "[用户消息] "+content, "user", "user")
 }
 
 // SaveSystemMessage 直接将系统消息持久化到会话历史（不依赖 StreamChat injectCh）
@@ -2001,9 +2002,9 @@ func (s *Service) emitTopologyUpdate(sessionID string, topoActive bool, parsed t
 	}
 
 	// 转换轨迹坐标
-	traj := make([]base.Coordinate, len(st.Trajectory))
+	traj := make([]base.TrajectoryNode, len(st.Trajectory))
 	for i, n := range st.Trajectory {
-		traj[i] = base.Coordinate{X: n.Coord.X, Y: n.Coord.Y, Z: n.Coord.Z}
+		traj[i] = base.TrajectoryNode{X: n.Coord.X, Y: n.Coord.Y, Z: n.Coord.Z, ToolCall: n.ToolCall, Status: string(n.Status)}
 	}
 
 	// 发射 topology_update SSE 事件

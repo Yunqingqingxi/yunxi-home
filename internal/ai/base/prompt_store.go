@@ -209,6 +209,10 @@ func (ps *PromptStore) MatchContexts(userMessage string) []string {
 func (ps *PromptStore) BuildSystemPrompt(sessionID, userMessage string, recentToolCalls []string) string {
 	ps.mu.RLock()
 	generalPrompt := ps.generalPrompt
+	generalNames := make([]string, len(ps.general))
+	for i, p := range ps.general {
+		generalNames[i] = p.ID
+	}
 	activated := make(map[string]bool)
 	if m := ps.activatedContexts[sessionID]; m != nil {
 		for k, v := range m {
@@ -221,12 +225,22 @@ func (ps *PromptStore) BuildSystemPrompt(sessionID, userMessage string, recentTo
 	sb.WriteString(generalPrompt)
 
 	// Append activated specialized prompts
+	var activeSpecialized []string
 	for contextID := range activated {
 		if content := ps.GetSpecializedPrompt(contextID); content != "" {
 			sb.WriteString("\n\n")
 			sb.WriteString(content)
+			activeSpecialized = append(activeSpecialized, contextID)
 		}
 	}
+
+	log.Info("System Prompt 已组装",
+		"session", sessionID,
+		"general_count", len(generalNames),
+		"general_ids", strings.Join(generalNames, ","),
+		"specialized_activated", len(activeSpecialized),
+		"specialized_ids", strings.Join(activeSpecialized, ","),
+	)
 
 	return sb.String()
 }
@@ -248,10 +262,13 @@ func (ps *PromptStore) TryAutoActivate(sessionID, userMessage string) []string {
 		if !ps.activatedContexts[sessionID][id] {
 			ps.activatedContexts[sessionID][id] = true
 			newActivated = append(newActivated, id)
-			log.Debug("auto-activated context", "session", sessionID, "context", id)
 		}
 	}
 	ps.mu.Unlock()
+
+	if len(newActivated) > 0 {
+		log.Info("自动激活专用提示词", "session", sessionID, "matched_keywords", len(matched), "new_activated", strings.Join(newActivated, ","))
+	}
 	return newActivated
 }
 

@@ -2,6 +2,7 @@ package logger
 
 import (
 	"io"
+	"strings"
 	"sync"
 	"time"
 )
@@ -84,11 +85,21 @@ func (dw *DedupWriter) flushLoop() {
 	}
 }
 
-// flushLocked outputs the accumulated "[repeated N×]" summary if any.
-// Must be called with dw.mu held.
+// flushLocked outputs the accumulated repeat summary if any.
+// Formats as a proper log line so frontend log parser can handle it.
 func (dw *DedupWriter) flushLocked() {
 	if dw.lastLine != nil && dw.count > 0 {
-		summary := []byte("[repeated " + formatInt(dw.count) + "×]\n")
+		// Trim trailing newline, truncate, and escape quotes
+		last := dw.lastLine
+		if len(last) > 0 && last[len(last)-1] == '\n' {
+			last = last[:len(last)-1]
+		}
+		lastStr := string(last)
+		if len(lastStr) > 200 {
+			lastStr = lastStr[:200] + "..."
+		}
+		lastStr = strings.ReplaceAll(lastStr, "\"", "'")
+		summary := []byte("time=\"" + time.Now().Format("2006-01-02 15:04:05.000") + "\" level=WARN component=logger msg=\"重复日志折叠: 以下日志连续重复了 " + formatInt(dw.count) + " 次\" last_msg=\"" + lastStr + "\"\n")
 		dw.w.Write(summary)
 		dw.count = 0
 	}

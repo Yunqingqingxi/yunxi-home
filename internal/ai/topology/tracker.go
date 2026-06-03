@@ -474,13 +474,20 @@ func (t *Tracker) Rebase(sessionID string, atRound int) (int, error) {
 
 // ShouldForceTools checks if force tools should be triggered.
 // Returns the tool name to force, or empty string.
-func (t *Tracker) ShouldForceTools(sessionID string, recentHistory []string) string {
+// Triggers when: (a) progress stalled below threshold, or (b) stuck with consecutive failures.
+func (t *Tracker) ShouldForceTools(sessionID string, recentHistory []string, consecutiveFailures int) string {
 	st := t.GetSession(sessionID)
 	if st == nil || len(st.Constraint.ForceTools) == 0 {
 		return ""
 	}
 
-	if st.CurrentCoord.X < ForceToolsProgressThreshold {
+	// Trigger if stuck: consecutive failures >= threshold, regardless of X
+	stuck := consecutiveFailures >= ForceToolsStuckThreshold
+
+	// Trigger if progress stalled below threshold
+	progressStalled := st.CurrentCoord.X < ForceToolsProgressThreshold && len(st.Nodes) >= 3
+
+	if !stuck && !progressStalled {
 		return ""
 	}
 
@@ -494,6 +501,7 @@ func (t *Tracker) ShouldForceTools(sessionID string, recentHistory []string) str
 		if !recentSet[ft] {
 			t.mu.Lock()
 			st.ForceToolsTriggered = true
+			st.Warning = fmt.Sprintf("ForceTools: %s (stuck=%v, stalled=%v)", ft, stuck, progressStalled)
 			t.mu.Unlock()
 			return ft
 		}

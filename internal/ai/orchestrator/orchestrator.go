@@ -102,7 +102,7 @@ func (o *AgentOrchestrator) Run(ctx context.Context, sessionID string, history [
 
 		// 2. ForceTools 检查（拓扑激活时）
 		if state.topoActive && o.cfg.Tracker != nil {
-			if forcedTool := o.cfg.Tracker.ShouldForceTools(sessionID, o.recentToolNames(history, 10)); forcedTool != "" {
+			if forcedTool := o.cfg.Tracker.ShouldForceTools(sessionID, o.recentToolNames(history, 10), 0); forcedTool != "" {
 				log.Info("ForceTools 触发", "会话", sessionID, "工具", forcedTool)
 				o.executeForcedTool(sessionID, forcedTool, ctx, &history, &state.round)
 				continue

@@ -2,6 +2,8 @@ export interface TopologyCoord {
   x: number
   y: number
   z: number
+  tool_call?: string
+  status?: string
 }
 
 export interface TopologyConstraint {

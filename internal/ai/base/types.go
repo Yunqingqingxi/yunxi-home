@@ -277,10 +277,18 @@ type ChatStreamEvent struct {
 }
 
 // TopologyUpdateEvent is emitted after each topology validation round.
+type TrajectoryNode struct {
+	X        float64 `json:"x"`
+	Y        float64 `json:"y"`
+	Z        float64 `json:"z"`
+	ToolCall string  `json:"tool_call"`
+	Status   string  `json:"status"` // "success" | "error" | "committed"
+}
+
 type TopologyUpdateEvent struct {
-	SessionID    string     `json:"session_id"`
-	Coord        Coordinate `json:"coord"`
-	Trajectory   []Coordinate `json:"trajectory"`
+	SessionID    string           `json:"session_id"`
+	Coord        Coordinate       `json:"coord"`
+	Trajectory   []TrajectoryNode `json:"trajectory"`
 	Constraint   TopologyConstraint `json:"constraint"`
 	Rejected     bool       `json:"rejected"`
 	RejectReason string     `json:"reject_reason,omitempty"`

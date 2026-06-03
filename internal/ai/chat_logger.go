@@ -276,7 +276,7 @@ func (cl *ChatLogger) bridgeToSlog(ev LogEvent) {
 			slog.Float64("duration_sec", ev.DurationSec),
 		)
 		if ev.ToolStatus == "error" {
-			slog.Error("工具失败", attrs...)
+			slog.Warn("工具失败", attrs...)
 		} else {
 			slog.Info("工具完成", attrs...)
 		}

@@ -537,7 +537,7 @@ export const useChatStore = defineStore('chat', () => {
           constraint: tu.constraint,
           trajectory: (tu.trajectory || []).map((c, i) => ({
             x: c.x, y: c.y, z: c.z, round: i,
-            tool_call: '', status: 'committed',
+            tool_call: c.tool_call || '', status: c.status || 'committed',
           })),
           reject_count: tu.reject_count,
           trust_lies: tu.trust_lies,

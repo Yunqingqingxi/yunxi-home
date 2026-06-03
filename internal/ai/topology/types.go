@@ -156,8 +156,10 @@ const (
 	// Recovery settings
 	RecoveryLoadNodes = 50
 
-	// Progress threshold for ForceTools
-	ForceToolsProgressThreshold = 5.0
+	// Progress threshold for ForceTools (lowered from 5.0 — most sessions never reached it)
+	ForceToolsProgressThreshold = 2.0
+	// Stuck detection: consecutive tool failures before ForceTools triggers
+	ForceToolsStuckThreshold = 3
 
 	// Recent history window for ForceTools check
 	ForceToolsHistoryWindow = 10

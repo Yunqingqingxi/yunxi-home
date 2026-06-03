@@ -450,16 +450,21 @@ func (h *LogHandler) scanSystemLogs() []map[string]any {
 	}
 	var result []map[string]any
 
-	// Walk year/month/day directories
+	// Walk year/month/day directories (skip chat/ session logs)
 	filepath.Walk(h.systemLogDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
+			return nil
+		}
+		// Skip chat session log files (they belong to 会话日志 tab)
+		rel, _ := filepath.Rel(h.systemLogDir, path)
+		if strings.HasPrefix(rel, "chat"+string(filepath.Separator)) {
 			return nil
 		}
 		if !strings.HasSuffix(info.Name(), ".log") && !strings.Contains(info.Name(), "yunxi") {
 			return nil
 		}
 		// Extract date from path: .../YYYY/MM/DD/file
-		rel, _ := filepath.Rel(h.systemLogDir, path)
+		
 		date := strings.ReplaceAll(filepath.Dir(rel), string(filepath.Separator), "-")
 		result = append(result, map[string]any{
 			"date": date, "path": rel, "size": info.Size(),
@@ -576,6 +581,11 @@ func readAllLinesFiltered(path string, levels map[string]bool, search string) ([
 	scanner.Buffer(make([]byte, 1024*1024), 1024*1024) // 单行最大 1MB
 	for scanner.Scan() {
 		line := scanner.Text()
+
+		// 跳过会话日志事件（component=ai 且含 event=）
+		if strings.Contains(line, "component=ai") && strings.Contains(line, "event=") {
+			continue
+		}
 
 		// Level 过滤
 		if len(levels) > 0 && !matchesLevel(line, levels) {
