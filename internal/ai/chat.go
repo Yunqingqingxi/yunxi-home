@@ -193,7 +193,7 @@ type ServiceConfig struct {
 }
 
 func DefaultServiceConfig() ServiceConfig {
-	return ServiceConfig{EnablePlanMode: true, MaxTokens: 128000, ReserveForReply: 4096, ReserveForTools: 16384, MCPConfigPath: "mcp.json"}
+	return ServiceConfig{EnablePlanMode: true, MaxTokens: 900000, ReserveForReply: 4096, ReserveForTools: 16384, MCPConfigPath: "mcp.json"}
 }
 
 func NewService(provider base.AIProvider, reg *register.Registry, sessionRepo database.ChatSessionRepository, cfg ServiceConfig) *Service {
@@ -902,6 +902,19 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 					state.infoGainPtr++
 					// Save after each tool so crash doesn't lose results
 					s.sessions.Save(sessionID, history)
+					// ── 拓扑计数器更新 ──
+					if result.Status == base.StatusError {
+						state.consecutiveToolFailures++
+					} else {
+						state.consecutiveToolFailures = 0
+					}
+					// 同工具重复检测（按工具名，非类别）
+					if tc.Function.Name == state.lastToolName {
+						state.sameToolRepetitions++
+					} else {
+						state.sameToolRepetitions = 0
+					}
+					state.lastToolName = tc.Function.Name
 				}
 				// 信息增益总结：计算本轮平均增益 + 更新连续空结果计数
 				var roundAvgGain float64
@@ -920,15 +933,10 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 				} else if roundAvgGain >= 0.2 {
 					state.consecutiveEmptyResults = 0
 				}
-				// 静默检测：无用户可见文本时累计，≥1轮后强制 AI 输出
-				if contentBuf.Len() == 0 && reasoningBuf.Len() > 0 {
+				// 静默检测：仅累计，不单独告警（纯工具会话是正常场景）
+				if contentBuf.Len() == 0 {
 					state.silentRounds++
-				} else if contentBuf.Len() > 0 {
-					state.silentRounds = 0
-				}
-				if state.silentRounds >= 1 {
-					history = append(history, base.Message{Role: "system", Content: "你已连续多轮只调用工具没有给用户任何文字说明。用户看到的是空白屏幕，不知道你在做什么。" +
-						"下一轮必须在调用工具的同时，用一两句话告诉用户你正在做什么、发现了什么。"})
+				} else {
 					state.silentRounds = 0
 				}
 				// ── 卡住检测：连续低信息增益 + 有工具调用 = 无效忙碌 ──
@@ -957,14 +965,20 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 				// ── 拓扑反馈注入：告知 AI 当前状态 ──
 			if topoActive {
 				var hints []string
+				if state.sameToolRepetitions >= 8 {
+					hints = append(hints, fmt.Sprintf("【严重】同一工具'%s'已连续使用%d次！必须立即换用其他工具（如 file_list/file_read/web_search），并给用户文字反馈", state.lastToolName, state.sameToolRepetitions))
+				} else if state.sameToolRepetitions >= 5 {
+					hints = append(hints, fmt.Sprintf("同一工具已连续使用%d次，请换策略并输出文字告知用户进度", state.sameToolRepetitions))
+				}
 				if state.noProgressToolRounds >= 3 {
 					hints = append(hints, fmt.Sprintf("进度停滞(X=%.1f)已%d轮，尝试不同方法", parsedTopo.Coord.X, state.noProgressToolRounds))
 				}
-				if state.sameToolRepetitions >= 5 {
-					hints = append(hints, fmt.Sprintf("同一工具已连续使用%d次，请换策略", state.sameToolRepetitions))
-				}
 				if state.consecutiveToolFailures >= 3 {
 					hints = append(hints, fmt.Sprintf("连续%d次工具失败，检查参数或换工具", state.consecutiveToolFailures))
+				}
+				// 静默提示仅在叠加其他问题时才注入（纯工具会话是正常的）
+				if state.silentRounds >= 5 && len(hints) > 0 {
+					hints = append(hints, fmt.Sprintf("连续%d轮无文字输出", state.silentRounds))
 				}
 				if len(hints) > 0 {
 					feedback := "[拓扑反馈] " + strings.Join(hints, "；") + "。"
@@ -1571,7 +1585,7 @@ func (s *Service) EditMessage(sessionID string, messageIndex int, newContent str
 // ── Budget ──
 
 func (s *Service) budgetCompactInPlace(history *[]base.Message) {
-	if s.budget == nil || len(*history) <= 15 {
+	if s.budget == nil || len(*history) <= 100 {
 		return
 	}
 	wrapped := make([]session.MessageWithContent, len(*history))
@@ -1586,10 +1600,22 @@ func (s *Service) budgetCompactInPlace(history *[]base.Message) {
 	}
 	compacted := s.budget.CompactHistory(wrapped)
 	newHistory := make([]base.Message, len(compacted))
+	origIdx := 0
 	for i := range compacted {
+		// 找到对应的原始消息，保留 ReasoningContent / ToolCalls / Blocks
+		var orig base.Message
+		if origIdx < len(*history) && (*history)[origIdx].Role == compacted[i].Role {
+			orig = (*history)[origIdx]
+			origIdx++
+		}
 		newHistory[i] = base.Message{
-			Role:    compacted[i].Role,
-			Content: compacted[i].Content,
+			Role:             compacted[i].Role,
+			Content:          compacted[i].Content,
+			ReasoningContent: orig.ReasoningContent,
+			ToolCalls:        orig.ToolCalls,
+			HasToolCalls:     orig.HasToolCalls,
+			ToolCallID:       orig.ToolCallID,
+			Blocks:           orig.Blocks,
 		}
 	}
 	*history = newHistory
@@ -1910,12 +1936,18 @@ func (s *Service) extractRecentToolNames(history []base.Message, n int) []string
 func (s *Service) executeForcedTool(sessionID, toolName string, bgCtx context.Context, emit func(base.ChatStreamEvent), history *[]base.Message, round int, stateRound *int) {
 	tool, ok := s.registry.Get(toolName)
 	if !ok || tool == nil {
-		log.Warn("ForceTools: 工具未注册", "工具", toolName)
+		log.Warn("ForceTools: 工具未注册，跳过并标记已尝试", "工具", toolName)
+		// 将失败的强制工具附加到 history，避免 ShouldForceTools 反复选同一工具
+		tcID := fmt.Sprintf("call_%d_force_miss", round)
+		missTC := base.ToolCall{ID: tcID, Type: "function", Function: base.FunctionCall{Name: toolName, Arguments: "{}"}}
+		*history = append(*history, base.Message{Role: "assistant", Content: "", ReasoningContent: "[ForceTools]", HasToolCalls: true, ToolCalls: []base.ToolCall{missTC}})
+		*history = append(*history, base.Message{Role: "tool", Content: "[ForceTools 跳过] 工具未注册: " + toolName, ToolCallID: tcID})
+		*stateRound++
 		return
 	}
 	tcID := fmt.Sprintf("call_%d_force", round)
 	tc := base.ToolCall{ID: tcID, Type: "function", Function: base.FunctionCall{Name: toolName, Arguments: "{}"}}
-	*history = append(*history, base.Message{Role: "assistant", Content: "", HasToolCalls: true, ToolCalls: []base.ToolCall{tc}})
+	*history = append(*history, base.Message{Role: "assistant", Content: "", ReasoningContent: "[ForceTools]", HasToolCalls: true, ToolCalls: []base.ToolCall{tc}})
 
 	// 执行工具
 	toolCtx, toolCancel := context.WithCancel(bgCtx)

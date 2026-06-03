@@ -161,10 +161,9 @@ func (p *Provider) ChatStream(ctx context.Context, messages []base.Message, tool
 			Role:    m.Role,
 			Content: m.Content,
 		}
-		if m.ReasoningContent != "" {
-			rc := m.ReasoningContent
-			dm.ReasoningContent = &rc
-		}
+		// 所有 assistant 消息都带 reasoning_content 字段（thinking 模式要求）
+		rc := m.ReasoningContent
+		dm.ReasoningContent = &rc
 		for _, tc := range m.ToolCalls {
 			dm.ToolCalls = append(dm.ToolCalls, dsTC{
 				ID:   tc.ID,

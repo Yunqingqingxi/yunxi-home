@@ -15,7 +15,7 @@ type BudgetManager struct {
 // NewBudgetManager 创建预算管理器
 func NewBudgetManager(maxTokens, reserveForReply, reserveForTools int) *BudgetManager {
 	if maxTokens <= 0 {
-		maxTokens = 128000
+		maxTokens = 900000 // DeepSeek V4 支持 1M 上下文，保留 100K 余量
 	}
 	if reserveForReply <= 0 {
 		reserveForReply = 4096

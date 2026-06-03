@@ -212,7 +212,7 @@ const router = useRouter()
 const store = useChatStore()
 
 // ── 发送按钮状态计算 ──
-const isBusy = computed(() => store.isStreaming || store.hasRunningAgents)
+const isBusy = computed(() => store.isStreaming || store.hasRunningAgents || !!store.currentToolName)
 const hasAgent = computed(() => store.hasRunningAgents && !store.isStreaming)
 const hasInput = computed(() => !!input.value.trim())
 

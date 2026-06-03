@@ -32,7 +32,16 @@ type Constraint struct {
 
 // DefaultConstraint returns the default constraint parameters.
 func DefaultConstraint() Constraint {
-	return Constraint{A: 0.8, R: 3.0, T: false}
+	return Constraint{
+		A: 0.8,
+		R: 3.0,
+		T: false,
+		ForceTools: []string{
+			"file_list", "file_read", "file_search",
+			"web_search",
+			"recall",
+		},
+	}
 }
 
 // NodeStatus is the status of a topology node.

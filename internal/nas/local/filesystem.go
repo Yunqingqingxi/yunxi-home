@@ -138,7 +138,7 @@ func (s *FileSystem) resolve(requestPath string) (string, error) {
 
 // ListDir 列出目录内容
 func (s *FileSystem) ListDir(requestPath string) ([]base.FileInfo, error) {
-	log.Info("列出目录", "路径", requestPath)
+	log.Debug("列出目录", "路径", requestPath)
 	absPath, err := s.resolve(requestPath)
 	if err != nil {
 		return nil, err

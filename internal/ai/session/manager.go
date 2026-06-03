@@ -207,7 +207,17 @@ func (m *Manager) GetOrCreate(sessionID, sessionType, userMessage string) ([]bas
 		}
 	} else {
 		// Repair incomplete tool calls from previous crash
-		st.history = repairIncompleteToolCalls(st.history)
+		fixedHistory, repairCount := repairIncompleteToolCalls(st.history)
+		st.history = fixedHistory
+		if repairCount > 0 {
+			st.history = append(st.history, base.Message{
+				Role: "system",
+				Content: fmt.Sprintf(
+					"[系统通知] 服务曾异常重启，%d 个工具调用未完成（已标记为中断）。请检查已成功获取的结果，判断哪些步骤已完成、哪些需要重新执行，然后继续推进任务。直接向用户说明发生了什么，并继续工作，不要反复道歉。",
+					repairCount,
+				),
+			})
+		}
 		// Ensure QQ Bot sessions use the correct prompt (migration from old CorePrompt)
 		if st.info.Type == models.SessionTypeQQBot && len(st.history) > 0 &&
 			st.history[0].Role == "system" && !strings.Contains(st.history[0].Content, "QQ 聊天模式") {
@@ -586,10 +596,11 @@ func (m *Manager) loadFromDB() {
 // repairIncompleteToolCalls 修复因服务崩溃导致的不完整工具调用。
 // 如果 assistant 消息有 HasToolCalls=true 但缺少对应的 tool 结果消息，
 // 插入合成错误结果，使对话历史格式有效，避免后续 LLM API 调用被拒绝。
-func repairIncompleteToolCalls(history []base.Message) []base.Message {
+func repairIncompleteToolCalls(history []base.Message) ([]base.Message, int) {
 	if len(history) == 0 {
-		return history
+		return history, 0
 	}
+	repairCount := 0
 	// Work on a copy
 	fixed := make([]base.Message, 0, len(history)+4)
 	for i, msg := range history {
@@ -620,10 +631,11 @@ func repairIncompleteToolCalls(history []base.Message) []base.Message {
 					ToolCallID: tc.ID,
 					Content:    fmt.Sprintf("[%s 执行中断] 服务异常重启，工具调用未完成", tc.Function.Name),
 				})
+				repairCount++
 			}
 		}
 	}
-	return fixed
+	return fixed, repairCount
 }
 
 func truncateStr(s string, maxLen int) string {
