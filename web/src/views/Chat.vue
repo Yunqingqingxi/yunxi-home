@@ -542,7 +542,9 @@ function loadSessionFromRoute(sid) {
       (last.tools && last.tools.some(t => !t.result)) ||
       (last.blocks && last.blocks.some(b => b.type === 'tool' && !b.result))
     )
-    if (hasPendingTools) { store.connectStream(sid) }
+    const conv = store.conversations.find((c: any) => c.id === sid)
+	    const isActive = conv?.isActive || false
+	    if (hasPendingTools || isActive) { store.connectStream(sid) }
     // Scroll to bottom — instant first, then smooth re-check
     nextTick(() => { scrollToEnd(false) })
     setTimeout(() => { scrollToEnd(true) }, 150)

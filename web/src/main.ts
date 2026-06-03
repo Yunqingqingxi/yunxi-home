@@ -12,9 +12,9 @@ import { useThemeStore } from './stores/theme'
 import type { RouteRecordRaw } from 'vue-router'
 
 const routes: RouteRecordRaw[] = [
-  { path: '/', name: 'dashboard', component: () => import('./views/Dashboard.vue'), meta: { requiresAuth: true } },
+  { path: '/', name: 'files', component: () => import('./views/Files.vue'), meta: { requiresAuth: true } },
+  { path: '/dashboard', name: 'dashboard', component: () => import('./views/Dashboard.vue'), meta: { requiresAuth: true } },
   { path: '/domains', name: 'domains', component: () => import('./views/Domains.vue'), meta: { requiresAuth: true } },
-  { path: '/files', name: 'files', component: () => import('./views/Files.vue'), meta: { requiresAuth: true } },
   { path: '/history', name: 'history', component: () => import('./views/History.vue'), meta: { requiresAuth: true } },
   { path: '/system', name: 'system', component: () => import('./views/System.vue'), meta: { requiresAuth: true } },
   {

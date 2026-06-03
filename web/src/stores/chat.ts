@@ -136,10 +136,10 @@ export const useChatStore = defineStore('chat', () => {
 
   // ── Lifecycle helpers ──
   function loadLifecycles(): Record<string, Lifecycle> {
-    try { const raw = sessionStorage.getItem(STORAGE_KEY); return raw ? JSON.parse(raw) : {} } catch { return {} }
+    try { const raw = localStorage.getItem(STORAGE_KEY); return raw ? JSON.parse(raw) : {} } catch { return {} }
   }
   function saveLifecycles(): void {
-    try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(lifecycles.value)) } catch {}
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(lifecycles.value)) } catch {}
   }
   function setLifecycle(sid: string, lc: Lifecycle): void {
     if (lc === 'closed' || lc === 'idle') { delete lifecycles.value[sid]; delete streamingSessions.value[sid] }
@@ -175,6 +175,24 @@ export const useChatStore = defineStore('chat', () => {
   // Tool progress tracking
   const currentToolName = ref('')
   const currentToolProgress = ref('')
+
+  // 从当前消息中恢复工具进度（刷新/切换后重连用）
+  function restoreToolProgress(): void {
+    const msgs = messages.value
+    if (!msgs.length) return
+    // 从后往前找第一个有未完成 tool block 的 assistant 消息
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i]
+      if (m.role !== 'assistant' && m.role !== 'agent') continue
+      if (!m.blocks?.length) continue
+      const running = m.blocks.find(b => b.type === 'tool' && !b.result)
+      if (running) {
+        currentToolName.value = running.name || ''
+        currentToolProgress.value = running.progress || ''
+        return
+      }
+    }
+  }
 
   // Interrupt state (for InterruptBanner)
   const interruptSnapshot = ref<{ progress: number; last_task: string } | null>(null)
@@ -726,6 +744,8 @@ export const useChatStore = defineStore('chat', () => {
       name: b.name || b.tool_name || '',
       args: b.args || b.tool_args || '',
       result: b.result || b.tool_result || '',
+      status: b.status || '',
+      progress: b.progress || '',
     }
   }
 
@@ -787,6 +807,7 @@ export const useChatStore = defineStore('chat', () => {
 
         return msg
       })
+    restoreToolProgress()
   }
 
   async function fetchSessionMessages(sid: string): Promise<boolean> {
@@ -1148,6 +1169,7 @@ export const useChatStore = defineStore('chat', () => {
     const cached = _sessionMsgs[id]
     if (cached && cached.length > 0) {
       messages.value = [...cached]
+      restoreToolProgress()
       if (token === _switchToken) debouncedReconnect(id)
       return true
     }

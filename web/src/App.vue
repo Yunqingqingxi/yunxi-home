@@ -58,7 +58,7 @@
           :title="theme.theme === 'dark' ? '切换到亮色模式' : '切换到暗色模式'"
           @click="theme.toggle()"
         >
-          <!-- 显示当前主题的图标 -->
+          <!-- 主题切换：暗色显示月亮，亮色显示齿轮 -->
           <svg
             v-if="theme.theme === 'dark'"
             width="15"
@@ -78,15 +78,11 @@
             viewBox="0 0 16 16"
             fill="none"
             stroke="currentColor"
-            stroke-width="1.8"
+            stroke-width="1.6"
             stroke-linecap="round"
           >
-            <circle
-              cx="8"
-              cy="8"
-              r="4"
-            />
-            <path d="M8 2v1M8 13v1M2 8h1M13 8h1M3.8 3.8l.7.7M11.5 11.5l.7.7M3.8 12.2l.7-.7M11.5 4.5l.7-.7" />
+            <circle cx="8" cy="8" r="2.5"/>
+            <path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.5 3.5l1.5 1.5M11 11l1.5 1.5M3.5 12.5l1.5-1.5M11 5l1.5-1.5"/>
           </svg>
         </button>
         <button
@@ -375,8 +371,8 @@ const isLoginPage = computed(() => route.path === '/login')
 
 const sectionName = computed(() => {
   const name = {
-    '/': 'dashboard',
-    '/files': 'files',
+    '/': 'files',
+    '/dashboard': 'dashboard',
     '/domains': 'domains',
     '/market': 'market',
     '/logs': 'logs',
@@ -400,13 +396,13 @@ const isAdmin = computed(() => authStore_.user?.role === 'admin')
 const allNavItems = [
   {
     path: '/',
-    label: '仪表盘',
-    icon: '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="1" y="1" width="6" height="7" rx="1.5"/><rect x="11" y="1" width="6" height="4" rx="1.5"/><rect x="1" y="12" width="6" height="5" rx="1.5"/><rect x="11" y="9" width="6" height="8" rx="1.5"/></svg>',
-  },
-  {
-    path: '/files',
     label: '文件管理',
     icon: '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 3.5h4l1.5 1.5H15a1 1 0 011 1v8a1 1 0 01-1 1H3a1 1 0 01-1-1v-10a1 1 0 011-1z"/></svg>',
+  },
+  {
+    path: '/dashboard',
+    label: '仪表盘',
+    icon: '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="1" y="1" width="6" height="7" rx="1.5"/><rect x="11" y="1" width="6" height="4" rx="1.5"/><rect x="1" y="12" width="6" height="5" rx="1.5"/><rect x="11" y="9" width="6" height="8" rx="1.5"/></svg>',
   },
   {
     path: '/domains',
@@ -436,7 +432,7 @@ const allNavItems = [
   {
     path: '/settings',
     label: '设置',
-    icon: '<svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="9" cy="9" r="2.5"/><path d="M9 1.5v2M9 14.5v2M1.5 9h2M14.5 9h2M3.5 3.5l1.5 1.5M13 13l1.5 1.5M3.5 14.5l1.5-1.5M13 5l1.5-1.5"/></svg>',
+    icon: '<svg width="18" height="18" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="8" cy="8" r="4"/><path d="M8 2v1M8 13v1M2 8h1M13 8h1M3.8 3.8l.7.7M11.5 11.5l.7.7M3.8 12.2l.7-.7M11.5 4.5l.7-.7"/></svg>',
   },
 ]
 

@@ -429,7 +429,7 @@ function fmtDur(ms) {
 }
 .role-tag {
   display: inline-block; font-size: 11px; font-weight: 600;
-  color: var(--text-muted); padding-bottom: 4px; user-select: none;
+  color: var(--brand-500); padding-bottom: 4px; user-select: none;
 }
 .msg-duration { display: inline-block; font-size: 10px; color: var(--text-muted); margin-left: 6px; user-select: none; }
 

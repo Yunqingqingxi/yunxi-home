@@ -92,14 +92,14 @@
       <button
         class="tb-send"
         :class="{
-          stop: isBusy && !hasInput,
+          stop: isBusy,
           active: !isBusy && (hasInput || attachedFiles.length)
         }"
         :disabled="!isBusy && !hasInput && !attachedFiles.length"
-        :title="isBusy && !hasInput ? '停止' : '发送'"
+        :title="isBusy ? '停止' : '发送'"
         @click="handleSend"
       >
-        <svg v-if="isBusy && !hasInput" width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+        <svg v-if="isBusy" width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
           <rect x="2" y="2" width="8" height="8" rx="1.5"/>
         </svg>
         <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
@@ -127,7 +127,7 @@
         <button
           v-for="r in reasoningLevels" :key="r.key"
           :class="['seg-item', { active: reasoning === r.key }]"
-          @click="reasoning = r.key"
+          @click="onReasoningChange(r.key)"
         >
           {{ r.label }}
         </button>
@@ -324,9 +324,20 @@ function findModelKey(modelName) {
   return m ? m.key : 'flash'
 }
 
-const modelKey = ref(findModelKey(getDefaultModel()))
+// Persist model/reasoning choice across page refreshes
+const STORAGE_KEY_MODEL = 'yunxi_chat_model'
+const STORAGE_KEY_REASONING = 'yunxi_chat_reasoning'
+
+function getStoredOrDefault(key, defaultVal) {
+  try { return localStorage.getItem(key) || defaultVal } catch { return defaultVal }
+}
+function setStored(key, val) {
+  try { localStorage.setItem(key, val) } catch { /* ignore */ }
+}
+
+const modelKey = ref(findModelKey(getStoredOrDefault(STORAGE_KEY_MODEL, getDefaultModel())))
 const modelMenuOpen = ref(false)
-const reasoning = ref(getDefaultReasoning())
+const reasoning = ref(getStoredOrDefault(STORAGE_KEY_REASONING, getDefaultReasoning()))
 
 const currentModelLabel = computed(() => {
   const m = allModelDefs.find(o => o.key === modelKey.value)
@@ -338,10 +349,16 @@ const reasoningLevels = [
   { key: 'high',   label: '深度' },
 ]
 
+function onReasoningChange(key) {
+  reasoning.value = key
+  setStored(STORAGE_KEY_REASONING, key)
+}
+
 function onModelChange(key) {
   modelKey.value = key
+  setStored(STORAGE_KEY_MODEL, key)
   const m = allModelDefs.find(o => o.key === key)
-  if (m) reasoning.value = m.reasoning
+  if (m) { reasoning.value = m.reasoning; setStored(STORAGE_KEY_REASONING, m.reasoning) }
 }
 
 const currentModelName = computed(() => {
@@ -441,7 +458,7 @@ function onKeydown(e) {
 
 // ── Unified send/stop handler ──
 function handleSend() {
-  if (isBusy.value && !hasInput.value) {
+  if (isBusy.value) {
     stopGeneration()
   } else {
     doSend()
@@ -659,20 +676,21 @@ onMounted(() => {
 /* 发送按钮 */
 .tb-send {
   width: 28px; height: 28px; border-radius: 8px; border: none;
-  background: transparent; color: var(--text-muted); cursor: pointer;
+  background: #dcfce7; color: #16a34a; cursor: pointer;
   display: flex; align-items: center; justify-content: center;
   transition: all 0.15s; flex-shrink: 0;
 }
+.tb-send:hover { background: #bbf7d0; }
 .tb-send.active {
-  background: var(--brand-500); color: #fff;
-  box-shadow: 0 2px 8px rgba(6,182,212,0.25);
+  background: #16a34a; color: #fff;
+  box-shadow: 0 2px 8px rgba(22,163,74,0.25);
 }
 .tb-send.active:hover {
-  background: var(--brand-600);
-  box-shadow: 0 4px 12px rgba(6,182,212,0.35);
+  background: #15803d;
+  box-shadow: 0 4px 12px rgba(22,163,74,0.35);
 }
 .tb-send.stop { background: var(--color-danger); color: #fff; }
-.tb-send:disabled { opacity: 0.3; cursor: default; }
+.tb-send:disabled { opacity: 0.5; cursor: default; }
 
 /* ── 模型下拉 ── */
 .model-dropdown {

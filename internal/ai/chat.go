@@ -606,6 +606,8 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 			consecutiveEmptyResults                   int        // rounds where all tool results were empty/error
 			noProgressToolRounds                      int        // rounds where topology X didn't increase
 			consecutiveToolFailures                   int        // consecutive tool failures (reset on success)
+			sameToolRepetitions                       int        // same tool repeated without progress
+			lastToolName                              string     // last tool called
 			infoGainHistory                           [5]float64 // rolling window of per-round avg info gain
 			infoGainPtr                               int
 			lastCoordX                                float64 // topology X from previous round
@@ -643,7 +645,7 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 
 			// ── ForceTools 检查（拓扑激活时）──
 			if topoActive && s.tracker != nil {
-				if forcedTool := s.tracker.ShouldForceTools(sessionID, s.recentToolNames(history, 10), state.consecutiveToolFailures); forcedTool != "" {
+				if forcedTool := s.tracker.ShouldForceTools(sessionID, s.recentToolNames(history, 10), state.consecutiveToolFailures + state.sameToolRepetitions); forcedTool != "" {
 					log.Info("ForceTools 触发", "会话", sessionID, "工具", forcedTool, "轮次", state.round)
 					s.chatLogger.LogRoundStart(sessionID, state.round, len(history), len(allTools))
 					// 直接执行强制工具，跳过 LLM 调用
@@ -661,7 +663,7 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 			// ── ForceTools：进度过半且关键工具缺失时跳过 LLM ──
 			if topoActive && s.tracker != nil {
 				recentTools := s.extractRecentToolNames(history, 10)
-				if forceTool := s.tracker.ShouldForceTools(sessionID, recentTools, state.consecutiveToolFailures); forceTool != "" {
+				if forceTool := s.tracker.ShouldForceTools(sessionID, recentTools, state.consecutiveToolFailures + state.sameToolRepetitions); forceTool != "" {
 					trackerSt := s.tracker.GetState(sessionID)
 					progress := 0.0
 					if trackerSt != nil {
@@ -939,17 +941,40 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 				// ── 拓扑验证 + SSE 事件发射 ──
 				s.emitTopologyUpdate(sessionID, topoActive, parsedTopo, toolCalls, contentBuf.String(), state.round, emit)
 				// 追踪拓扑进度速度：检测无进展的工具调用轮次
-				if topoActive && parsedTopo.Parsed {
-					if math.Abs(parsedTopo.Coord.X-state.lastCoordX) < 0.01 {
+				if topoActive {
+					// Track progress using estimated coordinate (works even without <topology> tag)
+					currentX := parsedTopo.Coord.X
+					if currentX == 0 {
+						currentX = float64(state.round) * 0.5 // fallback estimate
+					}
+					if math.Abs(currentX-state.lastCoordX) < 0.01 {
 						state.noProgressToolRounds++
 					} else {
 						state.noProgressToolRounds = 0
 					}
-					state.lastCoordX = parsedTopo.Coord.X
+					state.lastCoordX = currentX
 				}
-				s.chatLogger.LogRoundEndSimple(sessionID, state.round, contentBuf.String(), len(roundBlocks))
-				continue
+				// ── 拓扑反馈注入：告知 AI 当前状态 ──
+			if topoActive {
+				var hints []string
+				if state.noProgressToolRounds >= 3 {
+					hints = append(hints, fmt.Sprintf("进度停滞(X=%.1f)已%d轮，尝试不同方法", parsedTopo.Coord.X, state.noProgressToolRounds))
+				}
+				if state.sameToolRepetitions >= 5 {
+					hints = append(hints, fmt.Sprintf("同一工具已连续使用%d次，请换策略", state.sameToolRepetitions))
+				}
+				if state.consecutiveToolFailures >= 3 {
+					hints = append(hints, fmt.Sprintf("连续%d次工具失败，检查参数或换工具", state.consecutiveToolFailures))
+				}
+				if len(hints) > 0 {
+					feedback := "[拓扑反馈] " + strings.Join(hints, "；") + "。"
+					history = append(history, base.Message{Role: "system", Content: feedback})
+					log.Info("拓扑反馈注入", "session", sessionID, "hints", strings.Join(hints, " | "))
+				}
 			}
+			s.chatLogger.LogRoundEndSimple(sessionID, state.round, contentBuf.String(), len(roundBlocks))
+			continue
+		}
 			finalContent := contentBuf.String()
 			if finalContent == "" {
 				finalContent = reasoningBuf.String()
