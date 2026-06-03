@@ -190,6 +190,18 @@ func defaultRules() []IntentRule {
 		{Tool: "clean_history", Patterns: []string{
 			"清理历史", "清除记录", "clean history",
 		}, Strength: 0.83},
+
+		// ── Git ──────────────────────────────────────────
+		{Tool: "run_command", Patterns: []string{
+			"git clone", "git pull", "git fetch", "git push",
+			"拉取代码", "拉取仓库", "下载代码", "从git拉取",
+			"从github", "clone 仓库", "git 克隆", "git remote",
+			"同步代码", "git 更新", "git 提交", "git commit",
+			"git 分支", "git branch", "git checkout",
+			"git merge", "git rebase", "git status",
+			"git log", "git diff", "git stash",
+			"remote add", "git init",
+		}, Strength: 0.80},
 	}
 }
 

@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
+	"hash/fnv"
+	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -18,10 +20,11 @@ import (
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/agent"
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/async"
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/base"
-	"github.com/Yunqingqingxi/yunxi-home/internal/ai/intent"
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/coordinator"
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/cron"
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/goal"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai/intent"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai/memory"
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/mcp"
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/middleware"
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/planner"
@@ -41,43 +44,46 @@ var log = logger.ForComponent("ai")
 // ── Types ──
 
 type Service struct {
-	provider        base.AIProvider
-	registry        *register.Registry
-	sessions        *session.Manager
-	chain           *middleware.Chain
-	planEngine      *planner.Engine
-	budget          *session.BudgetManager
-	metrics         *MetricsCollector
-	planMode        bool
-	goals           *goal.Manager
-	coordinator     *coordinator.Coordinator
-	injections      map[string]chan InjectedMessage
-	asyncExec       *async.Executor
-	injectMu        sync.RWMutex
-	todoMgr         *todo.Manager
-	cronMgr         *cron.Manager
-	skillLoader     *skill.Loader
-	skillRunner     *skill.Runner
-	skillRegistry   *skill.Registry
-	skillExecutor   *skill.Executor
-	agentMgr        *agent.Manager
-	mcpManager      *mcp.Manager
-	mcpSubsystem    *mcp.Subsystem // new MCP subsystem (replaces direct manager usage)
-	mcpCfgPath      string         // mcp.json 路径（可配置）
-	tracker         *topology.Tracker      // 拓扑约束追踪器
-	promptStore     *base.PromptStore      // 提示词外置存储+缓存
-	intentPipeline  *intent.Pipeline        // 意图路由管线（nil=禁用）
-	topoActive      map[string]bool        // 会话级拓扑激活状态
-	topoMu          sync.RWMutex
-	confirmChannels      map[string]chan ConfirmResult
-	confirmMu            sync.Mutex
-	interactiveChannels  map[string]chan base.InteractiveResponse // 通用交互请求
-	interactiveMu        sync.Mutex
-	eventBus        *sessionEventBus
-	activeStreams   map[string]context.CancelFunc            // cancel func for active stream per session
-	activeStreamChs map[string]chan base.ChatStreamEvent      // active SSE channel per session (for tool-originated events)
-	activeStreamsMu sync.Mutex
-	chatLogger      *ChatLogger // 完整会话追踪日志
+	provider            base.AIProvider
+	registry            *register.Registry
+	sessions            *session.Manager
+	chain               *middleware.Chain
+	planEngine          *planner.Engine
+	budget              *session.BudgetManager
+	metrics             *MetricsCollector
+	planMode            bool
+	goals               *goal.Manager
+	coordinator         *coordinator.Coordinator
+	injections          map[string]chan InjectedMessage
+	asyncExec           *async.Executor
+	injectMu            sync.RWMutex
+	todoMgr             *todo.Manager
+	cronMgr             *cron.Manager
+	skillLoader         *skill.Loader
+	skillRunner         *skill.Runner
+	skillRegistry       *skill.Registry
+	skillExecutor       *skill.Executor
+	agentMgr            *agent.Manager
+	mcpManager          *mcp.Manager
+	mcpSubsystem        *mcp.Subsystem    // new MCP subsystem (replaces direct manager usage)
+	mcpCfgPath          string            // mcp.json 路径（可配置）
+	tracker             *topology.Tracker // 拓扑约束追踪器
+	promptStore         *base.PromptStore // 提示词外置存储+缓存
+	memoryManager       *memory.Manager   // 持久记忆管理器
+	intentPipeline      *intent.Pipeline  // 意图路由管线（nil=禁用）
+	topoActive          map[string]bool   // 会话级拓扑激活状态
+	topoMu              sync.RWMutex
+	seenResults         map[string]map[uint64]struct{} // sessionID -> set of tool result hashes (info gain dedup)
+	seenMu              sync.Mutex
+	confirmChannels     map[string]chan ConfirmResult
+	confirmMu           sync.Mutex
+	interactiveChannels map[string]chan base.InteractiveResponse // 通用交互请求
+	interactiveMu       sync.Mutex
+	eventBus            *sessionEventBus
+	activeStreams       map[string]context.CancelFunc        // cancel func for active stream per session
+	activeStreamChs     map[string]chan base.ChatStreamEvent // active SSE channel per session (for tool-originated events)
+	activeStreamsMu     sync.Mutex
+	chatLogger          *ChatLogger // 完整会话追踪日志
 }
 
 type ConfirmResult struct {
@@ -94,14 +100,14 @@ type InjectedMessage struct {
 
 // sessionEventBus buffers events per session and allows late subscribers to reconnect.
 type sessionEventBus struct {
-	mu       sync.RWMutex
-	buffers  map[string]*eventBuffer
+	mu      sync.RWMutex
+	buffers map[string]*eventBuffer
 }
 
 type eventBuffer struct {
-	events   []base.ChatStreamEvent
-	subs     map[chan base.ChatStreamEvent]struct{}
-	maxBuf   int
+	events []base.ChatStreamEvent
+	subs   map[chan base.ChatStreamEvent]struct{}
+	maxBuf int
 }
 
 func newSessionEventBus() *sessionEventBus {
@@ -178,12 +184,12 @@ type ServiceConfig struct {
 	Coordinator     *coordinator.Coordinator
 	CronRepo        cron.TaskRepository
 	SkillsDir       string
-	MCPConfigPath   string // mcp.json 路径，空则默认 "mcp.json"
+	MCPConfigPath   string                // mcp.json 路径，空则默认 "mcp.json"
 	MetricsSaveFn   func(CounterSnapshot) // 可选：每 30s 持久化计数器快照
 	Tracker         *topology.Tracker     // 拓扑约束追踪器（nil=禁用）
 	PromptStore     *base.PromptStore     // 提示词外置存储（nil=用 Go 常量）
-	ConfigGetter    base.ConfigGetter      // 提示词 DB 后端（用于 PromptStore）
-	IntentPipeline  *intent.Pipeline       // 意图路由管线（nil=禁用）
+	IntentPipeline  *intent.Pipeline      // 意图路由管线（nil=禁用）
+	MemoryManager   *memory.Manager       // 持久记忆管理器（nil=禁用）
 }
 
 func DefaultServiceConfig() ServiceConfig {
@@ -192,29 +198,30 @@ func DefaultServiceConfig() ServiceConfig {
 
 func NewService(provider base.AIProvider, reg *register.Registry, sessionRepo database.ChatSessionRepository, cfg ServiceConfig) *Service {
 	svc := &Service{
-		provider:        provider,
-		registry:        reg,
-		sessions:        session.NewManager(sessionRepo),
-		chain:           middleware.NewChain(reg),
-		planEngine:      planner.New(reg),
-		budget:          session.NewBudgetManager(cfg.MaxTokens, cfg.ReserveForReply, cfg.ReserveForTools),
-		metrics:         NewMetricsCollector(nil, cfg.MetricsSaveFn),
-		planMode:        cfg.EnablePlanMode,
-		goals:           goal.NewManager(),
-		coordinator:     cfg.Coordinator,
-		injections:      make(map[string]chan InjectedMessage),
-		todoMgr:         todo.NewManager(),
-		mcpCfgPath:      cfg.MCPConfigPath,
-		tracker:         cfg.Tracker,
-		promptStore:     cfg.PromptStore,
-		intentPipeline:  cfg.IntentPipeline,
-		topoActive:      make(map[string]bool),
+		provider:            provider,
+		registry:            reg,
+		sessions:            session.NewManager(sessionRepo),
+		chain:               middleware.NewChain(reg),
+		planEngine:          planner.New(reg),
+		budget:              session.NewBudgetManager(cfg.MaxTokens, cfg.ReserveForReply, cfg.ReserveForTools),
+		metrics:             NewMetricsCollector(nil, cfg.MetricsSaveFn),
+		planMode:            cfg.EnablePlanMode,
+		goals:               goal.NewManager(),
+		coordinator:         cfg.Coordinator,
+		injections:          make(map[string]chan InjectedMessage),
+		todoMgr:             todo.NewManager(),
+		mcpCfgPath:          cfg.MCPConfigPath,
+		tracker:             cfg.Tracker,
+		promptStore:         cfg.PromptStore,
+		memoryManager:       cfg.MemoryManager,
+		intentPipeline:      cfg.IntentPipeline,
+		topoActive:          make(map[string]bool),
 		confirmChannels:     make(map[string]chan ConfirmResult),
 		interactiveChannels: make(map[string]chan base.InteractiveResponse),
-		eventBus:        newSessionEventBus(),
-		activeStreams:   make(map[string]context.CancelFunc),
-		activeStreamChs: make(map[string]chan base.ChatStreamEvent),
-		chatLogger:      NewChatLogger("log/chat"),
+		eventBus:            newSessionEventBus(),
+		activeStreams:       make(map[string]context.CancelFunc),
+		activeStreamChs:     make(map[string]chan base.ChatStreamEvent),
+		chatLogger:          NewChatLogger("log/chat"),
 	}
 	svc.asyncExec = async.New(3, svc.injectCallback, svc.progressCallback)
 	svc.cronMgr = cron.NewManager(func(sessionID, prompt string) { svc.InjectMessage(sessionID, prompt) }, cfg.CronRepo)
@@ -248,7 +255,9 @@ func NewService(provider base.AIProvider, reg *register.Registry, sessionRepo da
 				eb := svc.eventBus.getOrCreate(sessionID)
 				for _, r := range results {
 					summary := r.Summary
-					if r.Status != agent.StatusDone { summary = r.Error }
+					if r.Status != agent.StatusDone {
+						summary = r.Error
+					}
 					ev := base.ChatStreamEvent{
 						Type:        "agent_result",
 						AgentID:     r.AgentID,
@@ -289,12 +298,18 @@ func NewService(provider base.AIProvider, reg *register.Registry, sessionRepo da
 		}
 	}()
 	// Wire all prompts through PromptStore (supports DB hot-reload)
-	svc.sessions.SystemPromptFn = func(userMessage string, recentToolCalls []string) string {
+	svc.sessions.SystemPromptFn = func(sessionID, userMessage string, recentToolCalls []string) string {
+		var p string
 		if svc.promptStore != nil {
-			p, _ := svc.promptStore.BuildSystemPrompt(userMessage, recentToolCalls)
-			return p
+			p = svc.promptStore.BuildSystemPrompt(sessionID, userMessage, recentToolCalls)
 		}
-		return base.BuildSystemPrompt(userMessage, recentToolCalls)
+		// 追加持久记忆摘要
+		if svc.memoryManager != nil {
+			if summary := svc.memoryManager.Summary(); summary != "" {
+				p += "\n\n## 持久记忆\n" + summary
+			}
+		}
+		return p
 	}
 	svc.sessions.QQBotPromptFn = func() string {
 		return svc.buildQQBotPrompt()
@@ -302,22 +317,21 @@ func NewService(provider base.AIProvider, reg *register.Registry, sessionRepo da
 	return svc
 }
 
-func (s *Service) GetRegistry() *register.Registry      { return s.registry }
-func (s *Service) PlanMode() bool                         { return s.planMode }
-func (s *Service) GetMetrics() *MetricsCollector          { return s.metrics }
+func (s *Service) GetRegistry() *register.Registry { return s.registry }
+func (s *Service) PlanMode() bool                  { return s.planMode }
+func (s *Service) GetMetrics() *MetricsCollector   { return s.metrics }
 
-// buildQQBotPrompt constructs the QQ Bot prompt entirely from PromptStore.
-// PromptStore.Get() internally falls back to Go defaults if DB has no override,
-// so this works even before InitDefaults() runs.
+// buildQQBotPrompt constructs the QQ Bot prompt entirely from PromptStore (DB only).
 func (s *Service) buildQQBotPrompt() string {
 	if s.promptStore == nil {
 		return base.QQBotPrompt // only if PromptStore completely unavailable
 	}
-	return s.promptStore.Get("prompt_core_compact") + s.promptStore.Get("prompt_qqbot_suffix")
+	// QQ Bot uses general prompts + QQ-specific suffix
+	return s.promptStore.BuildGeneralPrompt() + base.QQBotSuffix
 }
-func (s *Service) SetMCPSubsystem(sub *mcp.Subsystem)     { s.mcpSubsystem = sub }
-func (s *Service) GetMCPSubsystem() *mcp.Subsystem        { return s.mcpSubsystem }
-func (s *Service) ChatLogger() *ChatLogger                  { return s.chatLogger }
+func (s *Service) SetMCPSubsystem(sub *mcp.Subsystem) { s.mcpSubsystem = sub }
+func (s *Service) GetMCPSubsystem() *mcp.Subsystem    { return s.mcpSubsystem }
+func (s *Service) ChatLogger() *ChatLogger            { return s.chatLogger }
 func (s *Service) Shutdown() {
 	// Cancel all active LLM streams to prevent shutdown hang
 	s.activeStreamsMu.Lock()
@@ -328,7 +342,9 @@ func (s *Service) Shutdown() {
 	s.activeStreamsMu.Unlock()
 	log.Info("已取消所有活跃 LLM 流", "count", len(s.activeStreams))
 	s.chatLogger.Close()
-	if s.mcpManager != nil { s.mcpManager.CloseAll() }
+	if s.mcpManager != nil {
+		s.mcpManager.CloseAll()
+	}
 }
 
 // ── Goal ──
@@ -358,14 +374,20 @@ func (s *Service) AbandonGoal(goalID string) { s.goals.Abandon(goalID) }
 // ── Cross-Session ──
 
 func (s *Service) RegisterSession(sessionID, title string) {
-	if s.coordinator != nil { s.coordinator.RegisterSession(sessionID, title) }
+	if s.coordinator != nil {
+		s.coordinator.RegisterSession(sessionID, title)
+	}
 }
 func (s *Service) UnregisterSession(sessionID string) {
-	if s.coordinator != nil { s.coordinator.UnregisterSession(sessionID) }
+	if s.coordinator != nil {
+		s.coordinator.UnregisterSession(sessionID)
+	}
 }
 
 func (s *Service) subscribeCrossSession(sessionID string, ch chan<- base.ChatStreamEvent) {
-	if s.coordinator == nil { return }
+	if s.coordinator == nil {
+		return
+	}
 	evCh := s.coordinator.Subscribe(sessionID, 16)
 	go func() {
 		for ev := range evCh {
@@ -430,8 +452,8 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 		defer s.releaseAllLocks(sessionID)
 		defer s.closeInjectCh(sessionID)
 		defer s.eventBus.remove(sessionID)
-			s.chatLogger.LogSessionStart(sessionID)
-			defer s.chatLogger.LogSessionEnd(sessionID)
+		s.chatLogger.LogSessionStart(sessionID)
+		defer s.chatLogger.LogSessionEnd(sessionID)
 
 		// emit sends to both the client channel and the event buffer for reconnection
 		emit := func(ev base.ChatStreamEvent) {
@@ -443,7 +465,9 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 		}
 		startTime := time.Now()
 		modelOverride := ""
-		if len(modelOpt) > 0 { modelOverride = modelOpt[0] }
+		if len(modelOpt) > 0 {
+			modelOverride = modelOpt[0]
+		}
 		bgCtx := context.Background()
 		if modelOverride != "" {
 			bgCtx = context.WithValue(bgCtx, base.ModelOverrideKey{}, modelOverride)
@@ -491,22 +515,22 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 		}
 		history, st := s.sessions.GetOrCreate(sessionID, sessionType, userMessage)
 		if resumePrompt := s.checkGoalResume(sessionID, userMessage); resumePrompt != "" {
-		history = append(history, base.Message{Role: "system", Content: resumePrompt})
+			history = append(history, base.Message{Role: "system", Content: resumePrompt})
 		}
 
-	// Plan mode: guide LLM to use spawn_agent
-	if planMode, _ := bgCtx.Value(base.PlanModeKey{}).(bool); planMode && planner.ShouldPlan(userMessage) {
-		history = append(history, base.Message{Role: "system", Content: fmt.Sprintf(
-			"## Plan Mode 已启用\n"+
-				"请使用 spawn_agent 工具将任务分解为并行的子 Agent。\n"+
-				"每个子 Agent 有独立上下文，专注执行其子任务。\n"+
-				"- 可并行的独立子任务放入 tasks 数组\n"+
-				"- 为每个子任务指定合适的 tool_filter\n"+
-				"- 简单单一的问题无需分解，直接回答即可",
-		)})
-	}
+		// Plan mode: guide LLM to use spawn_agent
+		if planMode, _ := bgCtx.Value(base.PlanModeKey{}).(bool); planMode && planner.ShouldPlan(userMessage) {
+			history = append(history, base.Message{Role: "system", Content: fmt.Sprintf(
+				"## Plan Mode 已启用\n" +
+					"请使用 spawn_agent 工具将任务分解为并行的子 Agent。\n" +
+					"每个子 Agent 有独立上下文，专注执行其子任务。\n" +
+					"- 可并行的独立子任务放入 tasks 数组\n" +
+					"- 为每个子任务指定合适的 tool_filter\n" +
+					"- 简单单一的问题无需分解，直接回答即可",
+			)})
+		}
 
-	history = append(history, base.Message{Role: "user", Content: userMessage})
+		history = append(history, base.Message{Role: "user", Content: userMessage})
 		s.chatLogger.LogUserMessage(sessionID, 0, userMessage)
 
 		// ── 意图路由（v3.2）──
@@ -532,6 +556,18 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 			}
 		}
 
+		// ── 记忆匹配注入（v3.3）──
+		if s.memoryManager != nil {
+			matched := s.memoryManager.Match(userMessage)
+			for _, mem := range matched {
+				history = append(history, base.Message{
+					Role:    "system",
+					Content: fmt.Sprintf("[相关记忆: %s]\n%s", mem.Name, mem.Content),
+				})
+				log.Info("记忆匹配注入", "会话", sessionID, "记忆", mem.Name)
+			}
+		}
+
 		// ── 斜杠命令解析 ──
 		if cmdName, cmdArgs, ok := parseSlashCommand(userMessage); ok {
 			// /compact: AI 摘要 + 静默执行（不调 AI 回复）
@@ -551,10 +587,30 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 			}
 		}
 
+		// ── 主动激活拓扑追踪（不再依赖前端 API 惰性初始化）──
+		if s.tracker != nil {
+			s.topoMu.Lock()
+			if !s.topoActive[sessionID] {
+				s.tracker.InitSession(sessionID, topology.DefaultConstraint())
+				s.topoActive[sessionID] = true
+			}
+			s.topoMu.Unlock()
+		}
+
 		allTools := s.registry.All()
-		type qs struct{ round, maxRounds, loopCount, silentRounds int; lastToolSig string; taskAbandonCount int; taskStallCount int }
+		type qs struct {
+			round, maxRounds, loopCount, silentRounds int
+			lastToolSig                               string
+			taskAbandonCount                          int
+			taskStallCount                            int
+			consecutiveEmptyResults                   int        // rounds where all tool results were empty/error
+			noProgressToolRounds                      int        // rounds where topology X didn't increase
+			infoGainHistory                           [5]float64 // rolling window of per-round avg info gain
+			infoGainPtr                               int
+			lastCoordX                                float64 // topology X from previous round
+		}
 		state := qs{maxRounds: 100}
-		_ = time.Now // silenceStart placeholder
+		_ = time.Now                                // silenceStart placeholder
 		topoActive := s.isTopologyActive(sessionID) // 一次性读取，每轮复用
 		for state.round = 0; state.round < state.maxRounds; state.round++ {
 			// ── 优先级批量消费 injectCh（支持中断信号）──
@@ -625,7 +681,7 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 			stream, err := s.provider.ChatStream(bgCtx, history, allTools)
 			if err != nil {
 				s.chatLogger.LogError(sessionID, state.round, "LLM调用失败: "+err.Error())
-			log.Error("LLM调用失败", "会话", sessionID, "轮次", state.round, "错误", err.Error())
+				log.Error("LLM调用失败", "会话", sessionID, "轮次", state.round, "错误", err.Error())
 				emit(base.ChatStreamEvent{Type: "error", Content: "AI 服务异常: " + err.Error()})
 				s.sessions.Save(sessionID, history)
 				return
@@ -635,16 +691,24 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 			var roundBlocks []base.ContentBlock
 			for ev := range stream {
 				switch ev.Type {
-				case "thinking": reasoningBuf.WriteString(ev.Content); appendBlock(&roundBlocks, base.BlockTypeThinking, ev.Content, "", "", ""); emit(ev)
-				case "content": contentBuf.WriteString(ev.Content); appendBlock(&roundBlocks, base.BlockTypeContent, ev.Content, "", "", ""); emit(ev)
+				case "thinking":
+					reasoningBuf.WriteString(ev.Content)
+					appendBlock(&roundBlocks, base.BlockTypeThinking, ev.Content, "", "", "")
+					emit(ev)
+				case "content":
+					contentBuf.WriteString(ev.Content)
+					appendBlock(&roundBlocks, base.BlockTypeContent, ev.Content, "", "", "")
+					emit(ev)
 				case "tool_call":
 					tcID := fmt.Sprintf("call_%d_%d", state.round, len(toolCalls))
 					toolCalls = append(toolCalls, base.ToolCall{ID: tcID, Type: "function", Function: base.FunctionCall{Name: ev.Tool, Arguments: ev.Args}})
 					roundBlocks = append(roundBlocks, base.ContentBlock{Type: base.BlockTypeToolCall, ToolName: ev.Tool, ToolArgs: ev.Args, ToolCallID: tcID})
 					emit(ev)
 					toolRisk := ""
-				if t, ok := s.registry.Get(ev.Tool); ok { toolRisk = t.RiskLevel }
-				s.chatLogger.LogToolCall(sessionID, state.round, ev.Tool, ev.Args, toolRisk)
+					if t, ok := s.registry.Get(ev.Tool); ok {
+						toolRisk = t.RiskLevel
+					}
+					s.chatLogger.LogToolCall(sessionID, state.round, ev.Tool, ev.Args, toolRisk)
 				case "done":
 					if ev.Usage != nil {
 						s.metrics.RecordTokens(int64(ev.Usage.PromptTokens), int64(ev.Usage.CompletionTokens), ev.Usage.Cost)
@@ -659,7 +723,8 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 						Timestamp: time.Now(), Type: "llm_request",
 						Labels: map[string]string{"model": modelOverride, "session": sessionID, "status": "error"},
 					})
-					s.sessions.Save(sessionID, history); return
+					s.sessions.Save(sessionID, history)
+					return
 				}
 			}
 			// ── 批量记录本轮思考和正文（不在流中逐字记录）──
@@ -678,95 +743,99 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 					log.Debug("拓扑标签已解析", "会话", sessionID, "坐标", fmt.Sprintf("(%.1f,%.2f,%.2f)", parsedTopo.Coord.X, parsedTopo.Coord.Y, parsedTopo.Coord.Z), "工具", parsedTopo.Tools)
 				}
 			}
-			if reasoningBuf.Len() > 0 { s.chatLogger.LogThinking(sessionID, state.round, reasoningBuf.String()) }
-			if contentBuf.Len() > 0 { s.chatLogger.LogContent(sessionID, state.round, contentBuf.String()) }
+			if reasoningBuf.Len() > 0 {
+				s.chatLogger.LogThinking(sessionID, state.round, reasoningBuf.String())
+			}
+			if contentBuf.Len() > 0 {
+				s.chatLogger.LogContent(sessionID, state.round, contentBuf.String())
+			}
 			if len(toolCalls) > 0 {
-			log.Debug("检测到工具调用", "会话", sessionID, "轮次", state.round, "工具数", len(toolCalls),
-						"AI内容", truncateStr(contentBuf.String(), 200), "思考长度", reasoningBuf.Len())
-					for _, tc := range toolCalls {
-						log.Debug("工具调用详情", "会话", sessionID, "轮次", state.round, "工具", tc.Function.Name, "参数", truncateStr(tc.Function.Arguments, 300))
+				log.Debug("检测到工具调用", "会话", sessionID, "轮次", state.round, "工具数", len(toolCalls),
+					"AI内容", truncateStr(contentBuf.String(), 200), "思考长度", reasoningBuf.Len())
+				for _, tc := range toolCalls {
+					log.Debug("工具调用详情", "会话", sessionID, "轮次", state.round, "工具", tc.Function.Name, "参数", truncateStr(tc.Function.Arguments, 300))
+				}
+				history = append(history, base.Message{Role: "assistant", Content: contentBuf.String(), ReasoningContent: reasoningBuf.String(), ToolCalls: toolCalls, HasToolCalls: true, Blocks: roundBlocks})
+				for _, tc := range toolCalls {
+					args, _ := register.ParseArgs(tc.Function.Arguments)
+					tool, _ := s.registry.Get(tc.Function.Name)
+					if tool != nil && tool.RiskLevel == "dangerous" {
+						confirmID := fmt.Sprintf("confirm_%d_%d", state.round, len(toolCalls))
+						detail := formatConfirmDetail(tc.Function.Name, args)
+						s.sessions.SetState(sessionID, models.SessionStateWaitingUser, "", tc.Function.Name+":"+confirmID)
+						emit(base.ChatStreamEvent{Type: "confirm_required", ConfirmRequest: &base.ConfirmRequest{
+							ID:      confirmID,
+							Tool:    tc.Function.Name,
+							Message: detail,
+						}})
+						approved, _ := s.waitForConfirm(sessionID, confirmID)
+						s.sessions.SetState(sessionID, models.SessionStateExecuting, "", "")
+						if !approved {
+							// 告知 AI 操作被取消，不阻塞后续流程
+							obs := fmt.Sprintf("[%s 已取消] 用户未确认危险操作，工具未执行", tc.Function.Name)
+							emit(base.ChatStreamEvent{Type: "tool_result", Tool: tc.Function.Name, Content: obs})
+							history = append(history, base.Message{Role: "tool", Content: obs, ToolCallID: tc.ID})
+							s.sessions.Save(sessionID, history)
+							continue
+						}
 					}
-			history = append(history, base.Message{Role: "assistant", Content: contentBuf.String(), ReasoningContent: reasoningBuf.String(), ToolCalls: toolCalls, HasToolCalls: true, Blocks: roundBlocks})
-			for _, tc := range toolCalls {
-			args, _ := register.ParseArgs(tc.Function.Arguments)
-			tool, _ := s.registry.Get(tc.Function.Name)
-			if tool != nil && tool.RiskLevel == "dangerous" {
-			confirmID := fmt.Sprintf("confirm_%d_%d", state.round, len(toolCalls))
-			detail := formatConfirmDetail(tc.Function.Name, args)
-			s.sessions.SetState(sessionID, models.SessionStateWaitingUser, "", tc.Function.Name+":"+confirmID)
-			emit(base.ChatStreamEvent{Type: "confirm_required", ConfirmRequest: &base.ConfirmRequest{
-				ID:      confirmID,
-				Tool:    tc.Function.Name,
-				Message: detail,
-			}})
-			approved, _ := s.waitForConfirm(sessionID, confirmID)
-			s.sessions.SetState(sessionID, models.SessionStateExecuting, "", "")
-			if !approved {
-				// 告知 AI 操作被取消，不阻塞后续流程
-				obs := fmt.Sprintf("[%s 已取消] 用户未确认危险操作，工具未执行", tc.Function.Name)
-				emit(base.ChatStreamEvent{Type: "tool_result", Tool: tc.Function.Name, Content: obs})
-				history = append(history, base.Message{Role: "tool", Content: obs, ToolCallID: tc.ID})
-				s.sessions.Save(sessionID, history)
-				continue
-			}
-			}
 
-			// Create tool context AFTER confirm (so it's not cancelled)
-			toolCtx, toolCancel := context.WithCancel(bgCtx)
-			toolCtx = base.WithSessionID(toolCtx, sessionID)
-			toolCtx = todo.WithSessionID(toolCtx, sessionID)
-			toolCtx = cron.WithSessionID(toolCtx, sessionID)
-		toolCtx = agent.WithSessionID(toolCtx, sessionID)
+					// Create tool context AFTER confirm (so it's not cancelled)
+					toolCtx, toolCancel := context.WithCancel(bgCtx)
+					toolCtx = base.WithSessionID(toolCtx, sessionID)
+					toolCtx = todo.WithSessionID(toolCtx, sessionID)
+					toolCtx = cron.WithSessionID(toolCtx, sessionID)
+					toolCtx = agent.WithSessionID(toolCtx, sessionID)
 
-			// Send tool_start event so frontend knows what's executing
-			emit(base.ChatStreamEvent{Type: "tool_start", Tool: tc.Function.Name, Args: tc.Function.Arguments})
-			toolStartTime := time.Now()
-			log.Debug("开始执行工具", "工具", tc.Function.Name)
-				s.chatLogger.LogToolStart(sessionID, state.round, tc.Function.Name, tc.Function.Arguments)
+					// Send tool_start event so frontend knows what's executing
+					emit(base.ChatStreamEvent{Type: "tool_start", Tool: tc.Function.Name, Args: tc.Function.Arguments})
+					toolStartTime := time.Now()
+					log.Debug("开始执行工具", "工具", tc.Function.Name)
+					s.chatLogger.LogToolStart(sessionID, state.round, tc.Function.Name, tc.Function.Arguments)
 
-			// ── 后台异步执行：长时间任务不阻塞对话流 ──
-			isBg := false
-			if tool, ok := s.registry.Get(tc.Function.Name); ok {
-				if bg, _ := args["background"].(bool); bg {
-					isBg = true
-				}
-				if tool.Background {
-					isBg = true
-				}
-			}
-			if isBg {
-				tool, _ := s.registry.Get(tc.Function.Name)
-				if tool != nil {
-					s.dispatchBackground(tool, tc.Function.Name, args, sessionID, ch)
-				}
-				placeholder := fmt.Sprintf("[后台执行] 任务 '%s' 已提交，正在后台运行。完成后结果会自动注入对话。", tc.Function.Name)
-				history = append(history, base.Message{Role: "tool", Content: placeholder, ToolCallID: tc.ID})
-				s.sessions.Save(sessionID, history)
-				state.round++
-				continue
-			}
+					// ── 后台异步执行：长时间任务不阻塞对话流 ──
+					isBg := false
+					if tool, ok := s.registry.Get(tc.Function.Name); ok {
+						if bg, _ := args["background"].(bool); bg {
+							isBg = true
+						}
+						if tool.Background {
+							isBg = true
+						}
+					}
+					if isBg {
+						tool, _ := s.registry.Get(tc.Function.Name)
+						if tool != nil {
+							s.dispatchBackground(tool, tc.Function.Name, args, sessionID, ch)
+						}
+						placeholder := fmt.Sprintf("[后台执行] 任务 '%s' 已提交，正在后台运行。完成后结果会自动注入对话。", tc.Function.Name)
+						history = append(history, base.Message{Role: "tool", Content: placeholder, ToolCallID: tc.ID})
+						s.sessions.Save(sessionID, history)
+						state.round++
+						continue
+					}
 
-			// Execute tool with heartbeat to prevent frontend timeout
-			type toolDone struct {
-			result *base.ToolResult
-			}
-			doneCh := make(chan toolDone, 1)
-						go func() {
-							doneCh <- toolDone{result: s.chain.Execute(toolCtx, tc.Function.Name, args)}
-						}()
+					// Execute tool with heartbeat to prevent frontend timeout
+					type toolDone struct {
+						result *base.ToolResult
+					}
+					doneCh := make(chan toolDone, 1)
+					go func() {
+						doneCh <- toolDone{result: s.chain.Execute(toolCtx, tc.Function.Name, args)}
+					}()
 
-						// Heartbeat every 2s while tool runs — 附带 Agent 状态防止断连
-						var result *base.ToolResult
-						heartbeat := time.NewTicker(2 * time.Second)
-						waitLoop:
-						for {
+					// Heartbeat every 2s while tool runs — 附带 Agent 状态防止断连
+					var result *base.ToolResult
+					heartbeat := time.NewTicker(2 * time.Second)
+				waitLoop:
+					for {
 						select {
 						case d := <-doneCh:
-						result = d.result
-						break waitLoop
+							result = d.result
+							break waitLoop
 						case <-heartbeat.C:
-						elapsed := int(time.Since(toolStartTime).Seconds())
-						// 上报正在运行的子 Agent 状态
+							elapsed := int(time.Since(toolStartTime).Seconds())
+							// 上报正在运行的子 Agent 状态
 							runningAgents := s.agentMgr.ListAll()
 							agentInfo := ""
 							if len(runningAgents) > 0 {
@@ -782,102 +851,150 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 							}
 							emit(base.ChatStreamEvent{Type: "tool_progress", Tool: tc.Function.Name, Content: fmt.Sprintf("执行中... (%ds)%s", elapsed, agentInfo), Args: fmt.Sprintf("%d", elapsed)})
 							s.chatLogger.LogToolProgress(sessionID, state.round, tc.Function.Name, fmt.Sprintf("执行中... (%ds)", elapsed))
-							case <-bgCtx.Done():
-								toolCancel()
-								result = &base.ToolResult{
-									Status: base.StatusError,
-									Error:  &base.ToolError{Code: base.ErrCodeTimeout, Message: "会话已断开", Retryable: false},
-									Summary: fmt.Sprintf("[%s 执行中断] 客户端连接已断开", tc.Function.Name),
-								}
-								break waitLoop
+						case <-bgCtx.Done():
+							toolCancel()
+							result = &base.ToolResult{
+								Status:  base.StatusError,
+								Error:   &base.ToolError{Code: base.ErrCodeTimeout, Message: "会话已断开", Retryable: false},
+								Summary: fmt.Sprintf("[%s 执行中断] 客户端连接已断开", tc.Function.Name),
 							}
+							break waitLoop
 						}
-						heartbeat.Stop()
-						toolCancel()
-
-						obs := formatObservation(tc.Function.Name, result)
-					toolRiskLevel := ""
-				if tool != nil { toolRiskLevel = tool.RiskLevel }
-				s.chatLogger.LogToolResult(sessionID, state.round, tc.Function.Name, string(result.Status), obs, time.Since(toolStartTime).Milliseconds(), toolRiskLevel)
-						elapsed := time.Since(toolStartTime).Seconds()
-						toolStatus := "success"
-						if result.Status == base.StatusError { toolStatus = "error" }
-						s.metrics.Record(MetricEvent{
-							Timestamp: time.Now(), Type: "tool_call",
-							Labels: map[string]string{"tool": tc.Function.Name, "session": sessionID, "status": toolStatus},
-							Value: elapsed,
-						})
-						log.Debug("工具执行完成", "工具", tc.Function.Name, "状态", string(result.Status), "结果", truncateStr(obs, 200))
-						emit(base.ChatStreamEvent{Type: "tool_result", Tool: tc.Function.Name, Content: obs})
-						if len(history) > 0 && history[len(history)-1].Role == "assistant" {
-							history[len(history)-1].Blocks = append(history[len(history)-1].Blocks, base.ContentBlock{Type: base.BlockTypeToolResult, ToolName: tc.Function.Name, ToolResult: obs, ToolCallID: tc.ID})
-						}
-						history = append(history, base.Message{Role: "tool", Content: obs, ToolCallID: tc.ID})
-						// Save after each tool so crash doesn't lose results
-						s.sessions.Save(sessionID, history)
 					}
-					// 静默检测：无用户可见文本时累计，≥1轮后强制 AI 输出
+					heartbeat.Stop()
+					toolCancel()
+
+					obs := formatObservation(tc.Function.Name, result)
+					toolRiskLevel := ""
+					if tool != nil {
+						toolRiskLevel = tool.RiskLevel
+					}
+					s.chatLogger.LogToolResult(sessionID, state.round, tc.Function.Name, string(result.Status), obs, time.Since(toolStartTime).Milliseconds(), toolRiskLevel)
+					elapsed := time.Since(toolStartTime).Seconds()
+					toolStatus := "success"
+					if result.Status == base.StatusError {
+						toolStatus = "error"
+					}
+					s.metrics.Record(MetricEvent{
+						Timestamp: time.Now(), Type: "tool_call",
+						Labels: map[string]string{"tool": tc.Function.Name, "session": sessionID, "status": toolStatus},
+						Value:  elapsed,
+					})
+					log.Debug("工具执行完成", "工具", tc.Function.Name, "状态", string(result.Status), "结果", truncateStr(obs, 200))
+					emit(base.ChatStreamEvent{Type: "tool_result", Tool: tc.Function.Name, Content: obs})
+					if len(history) > 0 && history[len(history)-1].Role == "assistant" {
+						history[len(history)-1].Blocks = append(history[len(history)-1].Blocks, base.ContentBlock{Type: base.BlockTypeToolResult, ToolName: tc.Function.Name, ToolResult: obs, ToolCallID: tc.ID})
+					}
+					history = append(history, base.Message{Role: "tool", Content: obs, ToolCallID: tc.ID})
+					// 追踪信息增益：累积本轮所有工具结果的增益值
+					gain := s.computeInfoGain(obs, sessionID)
+					state.infoGainHistory[state.infoGainPtr%5] = gain
+					state.infoGainPtr++
+					// Save after each tool so crash doesn't lose results
+					s.sessions.Save(sessionID, history)
+				}
+				// 信息增益总结：计算本轮平均增益 + 更新连续空结果计数
+				var roundAvgGain float64
+				gainCount := 0
+				for _, g := range state.infoGainHistory {
+					if g > 0 || gainCount > 0 {
+						roundAvgGain += g
+						gainCount++
+					}
+				}
+				if gainCount > 0 {
+					roundAvgGain /= float64(gainCount)
+				}
+				if roundAvgGain < 0.2 && state.round > 0 {
+					state.consecutiveEmptyResults++
+				} else if roundAvgGain >= 0.2 {
+					state.consecutiveEmptyResults = 0
+				}
+				// 静默检测：无用户可见文本时累计，≥1轮后强制 AI 输出
 				if contentBuf.Len() == 0 && reasoningBuf.Len() > 0 {
 					state.silentRounds++
 				} else if contentBuf.Len() > 0 {
 					state.silentRounds = 0
 				}
 				if state.silentRounds >= 1 {
-					history = append(history, base.Message{Role: "system", Content:
-						"你已连续多轮只调用工具没有给用户任何文字说明。用户看到的是空白屏幕，不知道你在做什么。" +
+					history = append(history, base.Message{Role: "system", Content: "你已连续多轮只调用工具没有给用户任何文字说明。用户看到的是空白屏幕，不知道你在做什么。" +
 						"下一轮必须在调用工具的同时，用一两句话告诉用户你正在做什么、发现了什么。"})
 					state.silentRounds = 0
 				}
+				// ── 卡住检测：连续低信息增益 + 有工具调用 = 无效忙碌 ──
+				if state.consecutiveEmptyResults >= 3 && len(toolCalls) > 0 {
+					history = append(history, base.Message{Role: "system", Content: "[系统指令] 你已经连续多轮调用工具但没有获得新的有效信息。可能缺少关键前置信息（如URL、路径、权限）。" +
+						"如果缺少只有用户才能提供的信息，请直接告知用户你遇到了什么障碍，并询问必要的信息。"})
+					state.consecutiveEmptyResults = 0
+					log.Warn("卡住检测触发", "会话", sessionID, "连续空结果轮数", 3)
+				}
 				// ── 拓扑验证 + SSE 事件发射 ──
 				s.emitTopologyUpdate(sessionID, topoActive, parsedTopo, toolCalls, contentBuf.String(), state.round, emit)
-				s.chatLogger.LogRoundEndSimple(sessionID, state.round, contentBuf.String(), len(roundBlocks))
-					continue
+				// 追踪拓扑进度速度：检测无进展的工具调用轮次
+				if topoActive && parsedTopo.Parsed {
+					if math.Abs(parsedTopo.Coord.X-state.lastCoordX) < 0.01 {
+						state.noProgressToolRounds++
+					} else {
+						state.noProgressToolRounds = 0
+					}
+					state.lastCoordX = parsedTopo.Coord.X
 				}
-			finalContent := contentBuf.String()
-			if finalContent == "" { finalContent = reasoningBuf.String() }
-			if finalContent == "" { finalContent = "抱歉，我没有生成回复。" }
-
-		// ── 任务完成度检测：用几何距离替代启发式规则 ──
-		// 豁免条件（不拦截）：
-		//   1. AI 已生成有实质的回复（≥80字符）
-		//   2. 上一轮已派生后台 Agent/后台任务处理
-		shouldIntercept := len(finalContent) < 80 &&
-			!s.hasRecentBackgroundTool(history, 2)
-		if completed, dist := s.checkCompletionDistance(sessionID); !completed &&
-			len(toolCalls) == 0 && state.taskAbandonCount < 3 &&
-			shouldIntercept {
-			state.taskAbandonCount++
-			retryMsg := fmt.Sprintf(
-				"[系统指令] 任务未完成(差距=%.2f，目标X=10 Y=0 Z=0，当前X=%.1f Y=%.2f Z=%.2f)。"+
-					"不要用文本回复搪塞！换参数、换工具、换搜索词 — 第 %d/3 次机会。",
-				dist, parsedTopo.Coord.X, parsedTopo.Coord.Y, parsedTopo.Coord.Z,
-				state.taskAbandonCount,
-			)
-			history = append(history, base.Message{Role: "system", Content: retryMsg})
-			log.Warn("弃疗拦截(几何)", "会话", sessionID, "距离", fmt.Sprintf("%.3f", dist),
-				"次数", state.taskAbandonCount)
-			s.chatLogger.LogRoundEnd(sessionID, state.round, finalContent+" [拦截]", len(roundBlocks), "abandon_blocked")
-			state.round++
-			continue
-		}
-
-		// ── 最终输出前距离检查 ──
-		if topoActive && s.tracker != nil {
-			if completed, dist := s.checkCompletionDistance(sessionID); !completed {
-				finalContent += fmt.Sprintf(
-					"\n\n> ⚠️ 任务尚未完成。完成度 %.1f%%，差距 %.2f。",
-					parsedTopo.Coord.X*10, dist,
-				)
+				s.chatLogger.LogRoundEndSimple(sessionID, state.round, contentBuf.String(), len(roundBlocks))
+				continue
 			}
-		}
+			finalContent := contentBuf.String()
+			if finalContent == "" {
+				finalContent = reasoningBuf.String()
+			}
+			if finalContent == "" {
+				finalContent = "抱歉，我没有生成回复。"
+			}
 
-		history = append(history, base.Message{Role: "assistant", Content: finalContent, ReasoningContent: reasoningBuf.String(), Blocks: roundBlocks})
+			// ── 任务完成度检测：用几何距离替代启发式规则 ──
+			// 豁免条件（不拦截）：
+			//   1. AI 已生成有实质的回复（≥80字符）
+			//   2. 上一轮已派生后台 Agent/后台任务处理
+			shouldIntercept := len(finalContent) < 80 &&
+				!s.hasRecentBackgroundTool(history, 2)
+			isStuckWithTools := state.noProgressToolRounds >= 3 && len(toolCalls) > 0
+			if completed, dist := s.checkCompletionDistance(sessionID); !completed &&
+				(len(toolCalls) == 0 || isStuckWithTools) && state.taskAbandonCount < 3 &&
+				shouldIntercept {
+				state.taskAbandonCount++
+				retryMsg := fmt.Sprintf(
+					"[系统指令] 任务未完成(差距=%.2f，目标X=10 Y=0 Z=0，当前X=%.1f Y=%.2f Z=%.2f)。"+
+						"你调用了工具但没有推进进度。换参数、换工具、换搜索词，或者——"+
+						"如果缺少用户才能提供的信息，直接告知用户你遇到了什么障碍并请求帮助。第 %d/3 次机会。",
+					dist, parsedTopo.Coord.X, parsedTopo.Coord.Y, parsedTopo.Coord.Z,
+					state.taskAbandonCount,
+				)
+				history = append(history, base.Message{Role: "system", Content: retryMsg})
+				log.Warn("弃疗拦截(几何)", "会话", sessionID, "距离", fmt.Sprintf("%.3f", dist),
+					"次数", state.taskAbandonCount)
+				s.chatLogger.LogRoundEnd(sessionID, state.round, finalContent+" [拦截]", len(roundBlocks), "abandon_blocked")
+				state.round++
+				continue
+			}
+
+			// ── 最终输出前距离检查 ──
+			if topoActive && s.tracker != nil {
+				if completed, dist := s.checkCompletionDistance(sessionID); !completed {
+					finalContent += fmt.Sprintf(
+						"\n\n> ⚠️ 任务尚未完成。完成度 %.1f%%，差距 %.2f。",
+						parsedTopo.Coord.X*10, dist,
+					)
+				}
+			}
+
+			history = append(history, base.Message{Role: "assistant", Content: finalContent, ReasoningContent: reasoningBuf.String(), Blocks: roundBlocks})
 			// ── 拓扑验证 + 闭环检查（最后一轮纯文本回复）──
 			s.emitTopologyUpdate(sessionID, topoActive, parsedTopo, nil, finalContent, state.round, emit)
 			s.chatLogger.LogAnswer(sessionID, state.round, finalContent)
 			s.chatLogger.LogRoundEnd(sessionID, state.round, finalContent, len(roundBlocks), "completed")
 			log.Debug("对话轮次结束", "会话", sessionID, "总轮次", state.round, "AI回复", truncateStr(finalContent, 300), "块数量", len(roundBlocks))
-			if st.Title == "" || st.Title == "新对话" { s.sessions.UpdateTitle(sessionID, truncateStr(userMessage, 40)) }
+			if st.Title == "" || st.Title == "新对话" {
+				s.sessions.UpdateTitle(sessionID, truncateStr(userMessage, 40))
+			}
 			s.chatLogger.LogSessionSave(sessionID)
 			// 发射总耗时事件（前端显示用）
 			totalDur := time.Since(startTime).Milliseconds()
@@ -898,21 +1015,32 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 // ── Injection ──
 
 func (s *Service) getOrCreateInjectCh(sessionID string) chan InjectedMessage {
-	s.injectMu.Lock(); defer s.injectMu.Unlock()
-	if ch, ok := s.injections[sessionID]; ok { return ch }
+	s.injectMu.Lock()
+	defer s.injectMu.Unlock()
+	if ch, ok := s.injections[sessionID]; ok {
+		return ch
+	}
 	ch := make(chan InjectedMessage, 32)
 	s.injections[sessionID] = ch
 	return ch
 }
 
 func (s *Service) closeInjectCh(sessionID string) {
-	s.injectMu.Lock(); defer s.injectMu.Unlock()
-	if ch, ok := s.injections[sessionID]; ok { close(ch); delete(s.injections, sessionID) }
+	s.injectMu.Lock()
+	defer s.injectMu.Unlock()
+	if ch, ok := s.injections[sessionID]; ok {
+		close(ch)
+		delete(s.injections, sessionID)
+	}
 }
 
 func (s *Service) InjectMessage(sessionID, content string) {
-	s.injectMu.RLock(); ch, ok := s.injections[sessionID]; s.injectMu.RUnlock()
-	if !ok { return }
+	s.injectMu.RLock()
+	ch, ok := s.injections[sessionID]
+	s.injectMu.RUnlock()
+	if !ok {
+		return
+	}
 	select {
 	case ch <- InjectedMessage{Content: content, Priority: "info", Timestamp: time.Now()}:
 	default:
@@ -920,8 +1048,12 @@ func (s *Service) InjectMessage(sessionID, content string) {
 }
 
 func (s *Service) InjectWithPriority(sessionID, content, priority, source string) {
-	s.injectMu.RLock(); ch, ok := s.injections[sessionID]; s.injectMu.RUnlock()
-	if !ok { return }
+	s.injectMu.RLock()
+	ch, ok := s.injections[sessionID]
+	s.injectMu.RUnlock()
+	if !ok {
+		return
+	}
 	select {
 	case ch <- InjectedMessage{Content: content, Priority: priority, Source: source, Timestamp: time.Now()}:
 	default:
@@ -955,38 +1087,58 @@ func (s *Service) SaveSystemMessage(sessionID, content string) {
 
 func (s *Service) waitForConfirm(sessionID, confirmID string) (bool, map[string]string) {
 	ch := make(chan ConfirmResult, 1)
-	s.confirmMu.Lock(); s.confirmChannels[confirmID] = ch; s.confirmMu.Unlock()
+	s.confirmMu.Lock()
+	s.confirmChannels[confirmID] = ch
+	s.confirmMu.Unlock()
 	defer func() { s.confirmMu.Lock(); delete(s.confirmChannels, confirmID); s.confirmMu.Unlock() }()
 	select {
-	case result := <-ch: return result.Approved, result.Fields
-	case <-time.After(60 * time.Second): return false, nil
+	case result := <-ch:
+		return result.Approved, result.Fields
+	case <-time.After(60 * time.Second):
+		return false, nil
 	}
 }
 
 func (s *Service) ConfirmAction(confirmID string, approved bool, fields map[string]string) bool {
-	s.confirmMu.Lock(); ch, ok := s.confirmChannels[confirmID]; s.confirmMu.Unlock()
-	if !ok { return false }
+	s.confirmMu.Lock()
+	ch, ok := s.confirmChannels[confirmID]
+	s.confirmMu.Unlock()
+	if !ok {
+		return false
+	}
 	select {
-	case ch <- ConfirmResult{Approved: approved, Fields: fields}: return true
-	default: return false
+	case ch <- ConfirmResult{Approved: approved, Fields: fields}:
+		return true
+	default:
+		return false
 	}
 }
 
 // RespondInteractive 前端响应交互式请求
 func (s *Service) RespondInteractive(resp base.InteractiveResponse) bool {
-	s.interactiveMu.Lock(); ch, ok := s.interactiveChannels[resp.ID]; s.interactiveMu.Unlock()
-	if !ok { return false }
+	s.interactiveMu.Lock()
+	ch, ok := s.interactiveChannels[resp.ID]
+	s.interactiveMu.Unlock()
+	if !ok {
+		return false
+	}
 	select {
-	case ch <- resp: return true
-	default: return false
+	case ch <- resp:
+		return true
+	default:
+		return false
 	}
 }
 
 // RequestUserInput 工具：AI 暂停并请求用户输入（弹窗）
 func (s *Service) RequestUserInput(ctx context.Context, req base.InteractiveRequest) *base.InteractiveResponse {
 	req.ID = fmt.Sprintf("interact_%d", time.Now().UnixNano())
-	if req.TimeoutSec <= 0 { req.TimeoutSec = 120 }
-	if req.Type == "" { req.Type = "confirm" }
+	if req.TimeoutSec <= 0 {
+		req.TimeoutSec = 120
+	}
+	if req.Type == "" {
+		req.Type = "confirm"
+	}
 
 	// 通过 event bus 发送（需要 sessionID）
 	sessionID, _ := ctx.Value(base.SessionIDKey{}).(string)
@@ -1047,16 +1199,22 @@ func (s *Service) RequestUserInput(ctx context.Context, req base.InteractiveRequ
 
 // ── Session CRUD ──
 
-func (s *Service) ListSessions() []models.ChatSession                      { return s.sessions.List() }
-func (s *Service) ListSessionsByType(sessionType string) []models.ChatSession { return s.sessions.ListByType(sessionType) }
-func (s *Service) GetSessionHistory(sessionID string) (*models.ChatSessionDetail, error) { return s.sessions.GetHistory(sessionID) }
-func (s *Service) ClearSession(sessionID string)                 { s.sessions.Delete(sessionID) }
-func (s *Service) UpdateSessionMeta(sessionID string, title *string, pinned *bool) error { return s.sessions.UpdateMeta(sessionID, title, pinned) }
-func (s *Service) CompactSession(sessionID string) string          { return s.sessions.Compact(sessionID) }
+func (s *Service) ListSessions() []models.ChatSession { return s.sessions.List() }
+func (s *Service) ListSessionsByType(sessionType string) []models.ChatSession {
+	return s.sessions.ListByType(sessionType)
+}
+func (s *Service) GetSessionHistory(sessionID string) (*models.ChatSessionDetail, error) {
+	return s.sessions.GetHistory(sessionID)
+}
+func (s *Service) ClearSession(sessionID string) { s.sessions.Delete(sessionID) }
+func (s *Service) UpdateSessionMeta(sessionID string, title *string, pinned *bool) error {
+	return s.sessions.UpdateMeta(sessionID, title, pinned)
+}
+func (s *Service) CompactSession(sessionID string) string { return s.sessions.Compact(sessionID) }
 func (s *Service) CompactWithSummary(sessionID, summary string, keepRecent int) string {
 	return s.sessions.CompactWithSummary(sessionID, summary, keepRecent)
 }
-func (s *Service) ClearAllSessions()                             { s.sessions.DeleteAll() }
+func (s *Service) ClearAllSessions() { s.sessions.DeleteAll() }
 
 // ── /compact 命令处理 ──────────────────────────────────────────────
 
@@ -1295,22 +1453,30 @@ func (s *Service) UnsubscribeSession(sessionID string, ch chan base.ChatStreamEv
 }
 func (s *Service) ListActiveSessions() []string {
 	var ids []string
-	for _, s := range s.sessions.List() { ids = append(ids, s.ID) }
+	for _, s := range s.sessions.List() {
+		ids = append(ids, s.ID)
+	}
 	return ids
 }
 func (s *Service) GetRawHistory(sessionID string) ([]map[string]any, error) {
 	msgs, err := s.sessions.GetRawHistory(sessionID)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	return messagesToMaps(msgs), nil
 }
 func (s *Service) ForkAt(sessionID string, messageIndex int) ([]map[string]any, error) {
 	msgs, err := s.sessions.ForkAt(sessionID, messageIndex, "")
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	return messagesToMaps(msgs), nil
 }
 func (s *Service) EditMessage(sessionID string, messageIndex int, newContent string) ([]map[string]any, error) {
 	msgs, err := s.sessions.ForkAt(sessionID, messageIndex, newContent)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	return messagesToMaps(msgs), nil
 }
 
@@ -1352,45 +1518,54 @@ func (s *Service) progressCallback(sessionID string, ev async.ProgressEvent) {}
 func (s *Service) SubmitBackground(tool, sessionID string, args map[string]any, runner func(ctx *async.TaskContext) (string, error)) string {
 	return s.asyncExec.Submit(tool, sessionID, args, runner)
 }
-func (s *Service) ListBackgroundTasks(sessionID string) []*async.Task { return s.asyncExec.ListBySession(sessionID) }
-func (s *Service) CancelBackgroundTask(taskID string) error           { return s.asyncExec.Cancel(taskID) }
-func (s *Service) ListCronTasks(sessionID string) []*cron.ScheduledTask { return s.cronMgr.ListBySession(sessionID) }
-func (s *Service) DeleteCronTask(taskID string) bool                   { return s.cronMgr.Delete(taskID) }
+func (s *Service) ListBackgroundTasks(sessionID string) []*async.Task {
+	return s.asyncExec.ListBySession(sessionID)
+}
+func (s *Service) CancelBackgroundTask(taskID string) error { return s.asyncExec.Cancel(taskID) }
+func (s *Service) ListCronTasks(sessionID string) []*cron.ScheduledTask {
+	return s.cronMgr.ListBySession(sessionID)
+}
+func (s *Service) DeleteCronTask(taskID string) bool { return s.cronMgr.Delete(taskID) }
+
 // ── v3.1 拓扑约束 + 提示词管理 ──
 
-// GetAllPromptSections 返回所有提示词 section 及来源（db/builtin）
+// GetAllPromptSections 返回所有提示词（兼容旧 API 格式）
 func (s *Service) GetAllPromptSections() map[string]interface{} {
 	if s.promptStore == nil {
 		return nil
 	}
-	sections := s.promptStore.GetAllSections()
-	result := make(map[string]interface{}, len(sections))
-	for k, v := range sections {
-		result[k] = v
+	prompts := s.promptStore.GetAllPrompts()
+	result := make(map[string]interface{}, len(prompts))
+	for _, p := range prompts {
+		result[p.ID] = p
 	}
 	return result
 }
 
-// UpdatePromptSection 更新提示词 section 并热重载
-func (s *Service) UpdatePromptSection(ctx context.Context, section, data string) error {
+// UpdatePromptSection 更新提示词并热重载
+func (s *Service) UpdatePromptSection(ctx context.Context, id, data string) error {
 	if s.promptStore == nil {
 		return fmt.Errorf("promptStore not initialized")
 	}
-	return s.promptStore.UpdateSection(ctx, section, data)
+	return s.promptStore.UpdatePrompt(ctx, database.PromptRecord{
+		ID:      id,
+		Content: data,
+		Enabled: true,
+	})
 }
 
-// ResetPromptSection 删除 DB 覆盖，回退到 Go 默认
-func (s *Service) ResetPromptSection(ctx context.Context, section string) error {
+// ResetPromptSection 重置提示词（删除 DB 记录，下次 seed 恢复）
+func (s *Service) ResetPromptSection(ctx context.Context, id string) error {
 	if s.promptStore == nil {
 		return fmt.Errorf("promptStore not initialized")
 	}
-	return s.promptStore.ResetSection(ctx, section)
+	return s.promptStore.DeletePrompt(ctx, id)
 }
 
 // GetTopologyState 返回会话的完整拓扑状态（始终返回有效默认值，即使 tracker 未初始化）
 func (s *Service) GetTopologyState(sessionID string) interface{} {
 	def := base.TopologyState{
-		SessionID: sessionID,
+		SessionID:    sessionID,
 		CurrentCoord: base.Coordinate{X: 0, Y: 0, Z: 0},
 		StartCoord:   base.Coordinate{X: 0, Y: 0, Z: 0},
 		Constraint:   base.TopologyConstraint{A: 0.8, R: 3.0, T: false},
@@ -1421,7 +1596,7 @@ func (s *Service) GetTopologyState(sessionID string) interface{} {
 		}
 	}
 	return &base.TopologyState{
-		SessionID: st.SessionID,
+		SessionID:    st.SessionID,
 		CurrentCoord: base.Coordinate{X: st.CurrentCoord.X, Y: st.CurrentCoord.Y, Z: st.CurrentCoord.Z},
 		StartCoord:   base.Coordinate{X: st.StartCoord.X, Y: st.StartCoord.Y, Z: st.StartCoord.Z},
 		Constraint: base.TopologyConstraint{
@@ -1569,6 +1744,44 @@ func (s *Service) hasRecentBackgroundTool(history []base.Message, lookback int) 
 	return false
 }
 
+// computeInfoGain returns a heuristic score 0.0-1.0 indicating how much new
+// information a tool result provides compared to prior results in this session.
+// 0.0 = error/empty, 0.1 = too short, 0.3 = duplicate, 1.0 = novel useful info.
+func (s *Service) computeInfoGain(obs string, sessionID string) float64 {
+	if obs == "" {
+		return 0.0
+	}
+	// Check for error results: pattern "[xxx 执行失败]" or similar
+	if strings.Contains(obs, "执行失败") || strings.Contains(obs, "[error]") ||
+		strings.Contains(obs, "Error:") || strings.Contains(obs, "exit status") {
+		return 0.0
+	}
+	// Check for very short/empty results
+	if len(obs) < 20 {
+		return 0.1
+	}
+	// Deduplicate: if we've seen this exact result hash before, it's low gain
+	h := fnv.New64a()
+	h.Write([]byte(obs))
+	hash := h.Sum64()
+	s.seenMu.Lock()
+	if s.seenResults == nil {
+		s.seenResults = make(map[string]map[uint64]struct{})
+	}
+	if s.seenResults[sessionID] == nil {
+		s.seenResults[sessionID] = make(map[uint64]struct{})
+	}
+	_, seen := s.seenResults[sessionID][hash]
+	if !seen {
+		s.seenResults[sessionID][hash] = struct{}{}
+	}
+	s.seenMu.Unlock()
+	if seen {
+		return 0.3
+	}
+	return 1.0
+}
+
 // checkCompletionDistance returns whether the session has completed (dist < 0.05 from target).
 // Target is (X=10, Y=0, Z=0) — perfect task completion.
 func (s *Service) checkCompletionDistance(sessionID string) (completed bool, dist float64) {
@@ -1666,9 +1879,19 @@ func (s *Service) estimateFromRiskProfile(sessionID string, toolNames []string) 
 	newY := st.CurrentCoord.Y + avgDY
 	newZ := st.CurrentCoord.Z + avgDZ
 
+	// Clamp to constraint boundaries to avoid validation rejection on long sessions
+	if newY > st.Constraint.A {
+		newY = st.Constraint.A
+	} else if newY < -st.Constraint.A {
+		newY = -st.Constraint.A
+	}
+	if newZ > st.Constraint.R {
+		newZ = st.Constraint.R
+	}
+
 	return topoParseResult{
-		Coord: topology.Coordinate{X: newX, Y: newY, Z: newZ},
-		Tools: toolNames,
+		Coord:  topology.Coordinate{X: newX, Y: newY, Z: newZ},
+		Tools:  toolNames,
 		Parsed: true, // 标记为系统估算
 	}
 }
@@ -1723,8 +1946,8 @@ func (s *Service) emitTopologyUpdate(sessionID string, topoActive bool, parsed t
 	event := base.ChatStreamEvent{
 		Type: "topology_update",
 		TopologyUpdate: &base.TopologyUpdateEvent{
-			SessionID: sessionID,
-			Coord:     base.Coordinate{X: parsed.Coord.X, Y: parsed.Coord.Y, Z: parsed.Coord.Z},
+			SessionID:  sessionID,
+			Coord:      base.Coordinate{X: parsed.Coord.X, Y: parsed.Coord.Y, Z: parsed.Coord.Z},
 			Trajectory: traj,
 			Constraint: base.TopologyConstraint{
 				A: st.Constraint.A, R: st.Constraint.R, T: st.Constraint.T,
@@ -1792,8 +2015,10 @@ func (s *Service) ensureTopologyState(history []base.Message, sessionID string) 
 // topoParseResult is used to pass parsed topology through the loop (avoids import cycle).
 // Mirrors topology.ParseResult without importing the package in StreamChat signatures.
 type topoParseResult = topology.ParseResult
+
 func strVal(m map[string]any, key string) string { s, _ := m[key].(string); return s }
-func boolVal(m map[string]any, key string) bool { b, _ := m[key].(bool); return b }
+func boolVal(m map[string]any, key string) bool  { b, _ := m[key].(bool); return b }
+
 // RegisterAgentTools 注册子 Agent、Todo、Cron、Skill 工具。
 // 必须在 NewService 之后、StreamChat 之前调用。
 func (s *Service) RegisterAgentTools() {
@@ -1813,6 +2038,12 @@ func (s *Service) RegisterAgentTools() {
 	// Skill 工具（支持编程式 + YAML）
 	s.registry.Register(skill.ToolDefWithExecutor(s.skillLoader, s.skillRunner, s.skillExecutor))
 	s.registry.Register(skill.ListToolDefWithExecutor(s.skillLoader, s.skillExecutor))
+
+	// Memory 工具（remember / recall）
+	if s.memoryManager != nil {
+		s.registry.Register(s.memoryManager.RememberTool())
+		s.registry.Register(s.memoryManager.RecallTool())
+	}
 
 	// system — 技能系统内部工具，用于返回 SKILL.md 正文供 AI 阅读执行
 	s.registry.Register(&base.ToolDef{
@@ -1953,11 +2184,17 @@ func (s *Service) RegisterAgentTools() {
 			reqType, _ := args["type"].(string)
 			timeoutSec := toolreg.GetInt(args, "timeout_sec", 120)
 
-			if variant == "" { variant = "warning" }
-			if reqType == "" { reqType = "confirm" }
+			if variant == "" {
+				variant = "warning"
+			}
+			if reqType == "" {
+				reqType = "confirm"
+			}
 
 			fullMsg := message
-			if details != "" { fullMsg = message + "\n\n" + details }
+			if details != "" {
+				fullMsg = message + "\n\n" + details
+			}
 
 			// 解析 fields
 			var fields []base.InteractiveField
@@ -1973,7 +2210,9 @@ func (s *Service) RegisterAgentTools() {
 								Default:     strVal(m, "default"),
 								Required:    boolVal(m, "required"),
 							}
-							if f.Type == "" { f.Type = "text" }
+							if f.Type == "" {
+								f.Type = "text"
+							}
 							fields = append(fields, f)
 						}
 					}
@@ -1999,7 +2238,9 @@ func (s *Service) RegisterAgentTools() {
 												Type: strVal(fm, "type"), Placeholder: strVal(fm, "placeholder"),
 												Default: strVal(fm, "default"), Required: boolVal(fm, "required"),
 											}
-											if f.Type == "" { f.Type = "text" }
+											if f.Type == "" {
+												f.Type = "text"
+											}
 											p.Fields = append(p.Fields, f)
 										}
 									}
@@ -2036,7 +2277,44 @@ func (s *Service) RegisterAgentTools() {
 		},
 	})
 
+	// activate_specialized_context — AI 自主激活专用提示词上下文
+	s.registry.Register(s.activateSpecializedContextTool())
+
 	log.Info("agent/cron/todo/skill tools registered")
+}
+
+// activateSpecializedContextTool returns a tool definition that lets the AI activate
+// specialized prompt contexts. When the AI calls this tool, the corresponding specialized
+// prompt is injected into the system message for the current session.
+func (s *Service) activateSpecializedContextTool() *base.ToolDef {
+	return &base.ToolDef{
+		Name:        "activate_specialized_context",
+		Description: "激活特定领域的上下文规则。当你需要文件系统操作、项目运行、代码审查、MCP开发或文件发送等场景的详细规则时调用。可选上下文将在工具的context参数中列出。",
+		Category:    "system",
+		RiskLevel:   "readonly",
+		Parameters: base.ToolParams{
+			Type: "object",
+			Properties: map[string]base.ParamProp{
+				"context": {Type: "string", Description: "要激活的上下文ID"},
+			},
+			Required: []string{"context"},
+		},
+		Handler: func(ctx context.Context, args map[string]any) (string, error) {
+			contextID, _ := args["context"].(string)
+			if contextID == "" {
+				return "请指定要激活的上下文名称", nil
+			}
+			sessionID, _ := ctx.Value(base.SessionIDKey{}).(string)
+			if sessionID == "" {
+				return "无法获取当前会话", nil
+			}
+			if s.promptStore == nil {
+				return "提示词存储未初始化", nil
+			}
+			s.promptStore.ActivateContext(sessionID, contextID)
+			return "已激活 " + contextID + " 上下文规则", nil
+		},
+	}
 }
 
 // LoadMCPTools 从 mcp.json 加载 MCP 服务器配置，连接并注册其工具。
@@ -2085,11 +2363,15 @@ func (s *Service) GetMCPServer(ctx context.Context, query string) string {
 							hasEnv = true
 						}
 						val := p.Default
-						if val == "" { val = "<你的" + p.Label + ">" }
+						if val == "" {
+							val = "<你的" + p.Label + ">"
+						}
 						sb.WriteString(fmt.Sprintf("\"%s\": \"%s\"", p.Name, val))
 					}
 				}
-				if hasEnv { sb.WriteString("}") }
+				if hasEnv {
+					sb.WriteString("}")
+				}
 				sb.WriteString("}}\n3. /reload-mcp\n\n需要配置的参数：\n")
 				for _, p := range params {
 					sb.WriteString(fmt.Sprintf("  • %s=%s — %s\n", p.Name, p.Default, p.Description))
@@ -2301,7 +2583,9 @@ func (a MCPRegistryAdapter) Register(name string, td *base.ToolDef) {
 }
 
 func (s *Service) dispatchBackground(tool *base.ToolDef, funcName string, args map[string]any, sessionID string, ch chan<- base.ChatStreamEvent) bool {
-	if !tool.Background { return false }
+	if !tool.Background {
+		return false
+	}
 	log.Info("后台任务分发", "tool", funcName, "session", sessionID)
 	runner := func(ctx *async.TaskContext) (string, error) {
 		if tool.HandlerV2 != nil {
@@ -2514,7 +2798,9 @@ func cleanHTML(s string) string {
 
 func truncateStr(s string, maxLen int) string {
 	runes := []rune(s)
-	if len(runes) <= maxLen { return s }
+	if len(runes) <= maxLen {
+		return s
+	}
 	// Smart truncation: keep head 60% + [truncated] + tail 30%
 	headLen := maxLen * 60 / 100
 	tailLen := maxLen * 30 / 100
@@ -2531,7 +2817,9 @@ func truncateStr(s string, maxLen int) string {
 func (s *Service) checkGoalResume(sessionID, userMessage string) string {
 	// Use the new state-aware resume prompt builder
 	state, _, _ := s.sessions.GetState(sessionID)
-	if state == models.SessionStateIdle { return "" }
+	if state == models.SessionStateIdle {
+		return ""
+	}
 	// For any non-idle state (waiting_user, executing_tool, interrupted),
 	// generate a context-aware resume prompt
 	return s.sessions.BuildResumePrompt(sessionID, userMessage)

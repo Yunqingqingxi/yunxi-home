@@ -21,7 +21,7 @@ type Manager struct {
 	repo            database.ChatSessionRepository
 	sessions        map[string]*state
 	mu              sync.RWMutex
-	SystemPromptFn  func(userMessage string, recentToolCalls []string) string // PromptStore 动态 prompt
+	SystemPromptFn  func(sessionID string, userMessage string, recentToolCalls []string) string // PromptStore 动态 prompt
 	QQBotPromptFn   func() string                                             // 动态 QQBot prompt
 }
 
@@ -187,7 +187,7 @@ func (m *Manager) GetOrCreate(sessionID, sessionType, userMessage string) ([]bas
 			sessionType = models.SessionTypeChat
 		}
 		now := time.Now()
-		sysPrompt := m.systemPrompt(userMessage, nil)
+		sysPrompt := m.systemPrompt(sessionID, userMessage, nil)
 		if sessionType == models.SessionTypeQQBot {
 			sysPrompt = m.qqBotPrompt()
 		}
@@ -686,9 +686,9 @@ func (m *Manager) BuildResumePrompt(sessionID, userMessage string) string {
 }
 
 // systemPrompt returns the current system prompt via PromptStore (DB-backed).
-func (m *Manager) systemPrompt(userMessage string, recentToolCalls []string) string {
+func (m *Manager) systemPrompt(sessionID, userMessage string, recentToolCalls []string) string {
 	if m.SystemPromptFn != nil {
-		return m.SystemPromptFn(userMessage, recentToolCalls)
+		return m.SystemPromptFn(sessionID, userMessage, recentToolCalls)
 	}
 	return base.BuildSystemPrompt(userMessage, recentToolCalls)
 }

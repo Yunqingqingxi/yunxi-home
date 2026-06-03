@@ -44,6 +44,12 @@ type GoalRepository = base.GoalRepository
 // TodoRepository 待办事项仓库接口
 type TodoRepository = base.TodoRepository
 
+// PromptRepository 提示词仓库接口
+type PromptRepository = base.PromptRepository
+
+// PromptRecord 提示词记录
+type PromptRecord = base.PromptRecord
+
 // ── 共享类型 ─────────────────────────────────────────────────
 
 // ListParams 分页查询参数

@@ -1,7 +1,5 @@
 package base
 
-import "strings"
-
 // ── 提示词模块（每个模块都带范例）──
 
 // IdentityRules 身份铁律
@@ -78,6 +76,16 @@ const CommunicationRules = "\n\n## 沟通风格" +
 	"\n- **言行一致**：禁止一边说「请提供路径」一边自己调用工具尝试——要么完全自主，要么等待回复，二选一" +
 	"\n- **自动兜底**：操作失败后直接执行备选方案（如尝试其他文件名、列目录），不要问「需要我列一下吗？」——直接列" +
 	"\n- **报告结果不报告过程**：成功时直接给结果，无需叙述「我先试了X，又试了Y」的尝试过程" +
+	"\n\n### 核心例外：前置信息缺失" +
+	"\n- **当以下情况同时成立时，你必须直接向用户提问，不得继续盲目尝试**：" +
+	"\n  1. 你的目标是「获取/拉取/克隆」一个外部资源（如 git clone, git pull, curl, wget, 下载）" +
+	"\n  2. 你尝试了至少 3 种不同的探测方法（file_list, file_read, run_command, web_search）仍未找到资源地址" +
+	"\n  3. 缺少的信息只有用户能提供（URL、仓库地址、用户名、路径前缀、认证凭证）" +
+	"\n- **判断依据**：尝试了所有你能想到的探测方法都失败 → 说明缺少的信息不在文件系统中，只在用户脑中" +
+	"\n- **正确做法**：明确告诉用户你尝试了什么、缺少什么信息、请用户提供" +
+	"\n  例：「我尝试了 git remote、查找 go.mod、列出目录，都没有找到仓库地址。请提供 GitHub 仓库 URL。」" +
+	"\n- **错误做法**：继续用新工具组合重试、搜索网络猜测路径、用二进制字符串搜索——在第 3 次失败后只会浪费轮次" +
+	"\n- 此例外仅适用于**根本性前置信息缺失**，不适用于需要多步探索的正常任务" +
 	"\n\n### 汇报节奏" +
 	"\n- 每完成一个关键阶段（找到项目、确定运行方式、启动成功/失败），用 1-2 句话总结状态" +
 	"\n- 遇到必须用户决策的情况（sudo、安装软件包），明确列出选项并等待回复，不替用户做决定" +
@@ -243,7 +251,6 @@ const TaskBoundaryRules = "\n\n## 任务边界约束" +
 	"\n  ✅ T2: 用户提供信息 → 调用 request_confirmation(title='修改MCP配置') → 用户确认 → file_write 写入 mcp.json → reload_mcp" +
 	"\n  ❌ 错误做法：直接 sudo sed -i 写入虚构的 MYSQL_USER=yunxi, MYSQL_PASSWORD=yunxi123"
 
-
 // FileSendingRules 文件发送规则
 const FileSendingRules = "\n\n## 发送文件" +
 	"\n- 用 `[文件: 名称 (沙箱路径)]` 标记每个文件，系统自动发送" +
@@ -272,15 +279,15 @@ const MCPStatusRules = "\n\n## MCP 状态判断" +
 const SlashCommandRules = "\n\n## 斜杠命令处理" +
 	"\n- 用户消息以 `/` 开头时视为命令，按 `/命令名 参数1 参数2` 格式解析" +
 	"\n- **静默命令** `/compact`：由系统后台执行（AI 摘要 + 上下文替换），你**不会**在对话中看到它，" +
-		"\n  也**不需要**回复它。它不会出现在你收到的上下文里。" +
+	"\n  也**不需要**回复它。它不会出现在你收到的上下文里。" +
 	"\n- **内置命令**（/help /clear /get-mcp /reload-skills /reload-mcp）已由后台直接执行，" +
-		"\n  你会看到一条以「[系统] 用户执行了 /xxx」开头的系统消息，其中包含执行结果。" +
-		"\n  **你只需简短确认结果（1-2 句话），不要重复执行命令逻辑。**" +
+	"\n  你会看到一条以「[系统] 用户执行了 /xxx」开头的系统消息，其中包含执行结果。" +
+	"\n  **你只需简短确认结果（1-2 句话），不要重复执行命令逻辑。**" +
 	"\n- **技能命令**：`/<技能名> <参数>` → 用 run_skill 执行对应技能，参数传给技能" +
 	"\n- **未知命令** / 开头但不匹配任何内置命令或技能 → 当作普通文本简短回复，告知用户该命令不存在" +
 	"\n- **非命令**：以 / 开头但命令名后直接跟字母（如 /compactabc）→ 这不是命令，当作普通文本" +
 	"\n- 上下文中的 `[上下文压缩摘要]` 是系统自动生成的对话历史摘要，你可以用它了解之前的对话要点，" +
-		"\n  但不要评论它（如「根据摘要...」），自然地在回复中使用其中的信息即可。" +
+	"\n  但不要评论它（如「根据摘要...」），自然地在回复中使用其中的信息即可。" +
 	"\n\n例：" +
 	"\n  用户：/help → 系统消息已有命令列表 → 回复：以上是当前可用的命令和技能，输入 /命令名 即可使用" +
 	"\n  用户：/echo hello world → 调 run_skill(name=echo, params={message:\"hello world\"}) → 回复：hello world" +
@@ -402,102 +409,52 @@ const QQBotSuffix = "\n\n## QQ 聊天模式" +
 // 运行时 buildQQBotPrompt() 优先使用 PromptStore 的 DB 版本 CorePrompt。
 const QQBotPrompt = CorePrompt + QQBotSuffix
 
-// ScenarioBlocks 场景规则块，按需动态加载。
-// key 为场景名，value 为完整的规则文本。
-var ScenarioBlocks = map[string]string{
-	"filesystem":     FilesystemRules,
-	"project_runner": CommandExecutionRules + TimeoutGuide,
-	"mcp_dev":        MCPServerDevRules,
-	"file_sending":   FileSendingRules,
-}
+// TopologyPrompt 拓扑约束提示词（仅在拓扑激活时使用）。
+const TopologyPrompt = "\n\n## 拓扑几何约束" +
+	"\n你当前处于拓扑约束模式。每轮回复末尾必须输出拓扑坐标标签：" +
+	"\n<topology x=\"进度\" y=\"复杂度变化\" z=\"偏离度\" tools=\"工具1,工具2\" />" +
+	"\n\n坐标说明：" +
+	"\n- x: 任务进度 0-10（0=未开始, 10=完成）" +
+	"\n- y: 本轮操作复杂度变化 -1.0 到 1.0（负=降低复杂度如读取, 正=增加复杂度如写入/删除/执行命令）" +
+	"\n- z: 偏离起点的距离 0 到 R（由约束参数决定）" +
+	"\n\n约束参数（由系统设定）：" +
+	"\n- 振幅上限 A: |Δy| 每轮不超过此值" +
+	"\n- 半径上限 R: z 坐标不超过此值" +
+	"\n- 闭环要求 T: 任务完成时需回到原点附近" +
+	"\n\ntools 字段**仅列出本轮**你实际调用的工具名（逗号分隔），**不要**包含前几轮的工具。" +
+	"\n纯文本回复(无工具调用)时 tools=\"\"。X≥9.5 时 tools 声明会被忽略(任务已完成)。" +
+	"\n如果系统更新了约束参数，用 ack=\"constraint_updated\" 确认。"
 
-// DetectIntent 根据用户消息和最近工具调用检测场景意图。
-// 返回匹配的场景名列表（用于从 ScenarioBlocks 加载规则）。
-func DetectIntent(userMessage string, recentToolCalls []string) []string {
-	msg := strings.ToLower(userMessage)
-	var intents []string
+// CodeReviewPrompt 代码审查专用提示词（种子数据用）。
+const CodeReviewPrompt = "\n\n## 代码分析与优化" +
+	"\n\n### 聚焦原则" +
+	"\n- 只看代码，只谈代码。**禁止**讨论\"作为 AI 我应该...\"\"根据规则我需要...\"\"让我想想...\"等元思考" +
+	"\n- 思考内容仅限于：读哪个文件、发现了什么问题、怎么改。不写任务规划、不写步骤清单" +
+	"\n- 用户问的是项目代码，不是你的能力范围——**禁止**回复\"我可以帮你分析\"\"我能做的是\"等自我介绍" +
+	"\n\n### 探索策略" +
+	"\n- 分析项目时，**最多读取 5 个核心文件**后就必须开始输出结论" +
+	"\n- 核心文件指：入口文件(main.go/index.js)、依赖文件(go.mod/package.json)、README、主模块入口" +
+	"\n- **禁止**遍历所有子目录——列出顶层目录结构后，根据文件名判断模块职责即可" +
+	"\n- `file_list` 最多使用 3 次：根目录→internal/→最多再深入 1 层" +
+	"\n\n### 中断恢复" +
+	"\n- 用户说\"重新开始\"\"继续\"\"恢复\"\"接着做\"\"上次的\"时，**不是新任务**——是让你从上次中断处继续" +
+	"\n- 恢复时先检查上下文：如果历史里有之前的修改记录，直接基于那些记录继续，不要重新 file_list 分析" +
+	"\n- 如果无法确定从哪里恢复，用一句话确认即可——**禁止**写 300 字内心独白猜测含义" +
+	"\n\n### 输出要求" +
+	"\n- 每条优化建议必须包含：**问题描述** + **为什么是问题** + **具体改进方案**(含示例代码)" +
+	"\n- 按优先级排序：🥇 高优先(影响稳定性/安全) > 🥈 中优先(影响可维护性) > 🥉 低优先(代码风格)" +
+	"\n- 每条建议控制在 150 字以内，简洁有力" +
+	"\n\n### 避免的行为" +
+	"\n- **禁止**在 5 个核心文件之外继续 file_list 深层子目录" +
+	"\n- **禁止**读取 node_modules、vendor、.git、dist、build 等非源码目录" +
+	"\n- **禁止**对同一目录反复 file_list" +
+	"\n- **禁止**给出模糊建议如\"考虑重构\"\"可以优化性能\"——必须有具体文件和行级定位" +
+	"\n- **禁止**用户说\"重新开始\"后写 300 字内心独白——一句话确认，然后行动" +
+	"\n- **禁止**思考块中出现\"用户想要...\"\"我应该...\"\"根据规则...\"等非代码内容"
 
-	// 文件系统场景
-	fileKW := []string{"文件", "读取", "目录", "readme", "列表", "查看", "浏览",
-		"搜索", "查找", "删除", "创建", "写入", "编辑", "复制", "移动", "重命名",
-		"下载", "上传", "file", "read", "dir", "list", "ls", "cat", "mkdir", "rm", "cp", "mv"}
-	for _, kw := range fileKW {
-		if strings.Contains(msg, kw) {
-			intents = append(intents, "filesystem")
-			break
-		}
-	}
-
-	// 项目运行场景
-	runKW := []string{"运行", "启动", "编译", "构建", "部署", "安装", "执行",
-		"docker", "go build", "npm", "make", "build", "run", "start", "deploy",
-		"install", "compile", "restart", "stop", "测试", "test", "打包", "package"}
-	for _, kw := range runKW {
-		if strings.Contains(msg, kw) {
-			intents = append(intents, "project_runner")
-			break
-		}
-	}
-	// 最近工具调用也触发项目运行规则
-	for _, tc := range recentToolCalls {
-		tcLower := strings.ToLower(tc)
-		if strings.Contains(tcLower, "run_command") ||
-			strings.Contains(tcLower, "docker_") ||
-			strings.Contains(tcLower, "go_build") {
-			intents = append(intents, "project_runner")
-			break
-		}
-	}
-
-	// 代码分析场景（覆盖分析/修复/编译/恢复等编程上下文）
-	codeKW := []string{"分析", "优化", "代码", "重构", "项目结构", "模块划分", "建议", "review", "code", "架构",
-		"拆分", "解耦", "依赖", "main.go", "入口", "结构分析",
-		"编译", "报错", "错误", "修复", "bug", "error", "undefined", "go build",
-		"重新开始", "继续", "恢复", "上次", "回滚", "重置", "接着"}
-	for _, kw := range codeKW {
-		if strings.Contains(msg, kw) {
-			intents = append(intents, "code_review")
-			break
-		}
-	}
-
-	// MCP 服务器开发场景
-	mcpKW := []string{"mcp", "mcpserver", "mcpservers", "mcp服务器", "mcp工具", "mcp-server",
-		"mcp.json", "reload_mcp", "mcp 服务器", "mcp 工具"}
-	for _, kw := range mcpKW {
-		if strings.Contains(msg, kw) {
-			intents = append(intents, "mcp_dev")
-			break
-		}
-	}
-
-	// 文件发送场景
-	sendKW := []string{"发送", "分享", "send", "share"}
-	for _, kw := range sendKW {
-		if strings.Contains(msg, kw) {
-			intents = append(intents, "file_sending")
-			break
-		}
-	}
-
-	return intents
-}
-
-// BuildSystemPrompt 根据检测到的意图动态组装 SystemPrompt。
-// 始终包含 CorePrompt，按需拼接场景规则块。
+// BuildSystemPrompt is a minimal fallback when PromptStore is unavailable.
+// Returns only CorePrompt. In normal operation, PromptStore.BuildSystemPrompt()
+// is used instead (DB-driven: general prompts + activated specialized prompts).
 func BuildSystemPrompt(userMessage string, recentToolCalls []string) string {
-	intents := DetectIntent(userMessage, recentToolCalls)
-	var sb strings.Builder
-	sb.WriteString(CorePrompt)
-	seen := make(map[string]bool)
-	for _, intent := range intents {
-		if seen[intent] {
-			continue
-		}
-		seen[intent] = true
-		if block, ok := ScenarioBlocks[intent]; ok {
-			sb.WriteString(block)
-		}
-	}
-	return sb.String()
+	return CorePrompt
 }

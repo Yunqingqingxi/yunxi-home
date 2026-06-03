@@ -199,6 +199,7 @@ type SysctlConfig struct {
 type PathsConfig struct {
 	MCPConfig string `mapstructure:"mcp_config" json:"mcp_config"` // mcp.json 路径
 	Skills    string `mapstructure:"skills" json:"skills"`          // 技能 YAML/MD 目录
+	Memory    string `mapstructure:"memory" json:"memory"`          // 记忆 .md 文件目录
 }
 
 type Config struct {
@@ -267,6 +268,7 @@ func DefaultConfig() *Config {
 		Paths: PathsConfig{
 			MCPConfig: "mcp.json",
 			Skills:    "skills",
+			Memory:    "memory",
 		},
 	}
 }

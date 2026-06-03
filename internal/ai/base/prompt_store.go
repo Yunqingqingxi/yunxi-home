@@ -4,273 +4,328 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
-	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 	"sort"
 	"strings"
 	"sync"
+
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
+
+	dbase "github.com/Yunqingqingxi/yunxi-home/internal/database/base"
 )
 
 var log = logger.ForComponent("ai.base")
 
-// ── PromptStore — 提示词外置存储 ─────────────────────────────
+// ── PromptStore v4.0 — DB-first 提示词存储 ──────────────────────────
 //
-// 三层架构：
-//   1. Go 常量 (编译时 fallback，永不删除)
-//   2. DB 记录 (运行时加载，可热重载)
-//   3. 内存缓存 (合并策略：DB 有值用 DB，否则用 Go 常量)
-//
-// 复用现有 config 表（section + data 两列），section 命名空间 prompt_*。
-//
-// v3.1 缓存优化：
-//   - Intent hash cache: 跨会话共享，相同意图组合复用渲染结果。
-//   - BuildSystemPrompt 严格幂等，不含 time.Now()/random/UUID。
-//   - Topology prompt 不在此处——由 ensureTopologyState() 注入 message[1]
-//     (分层注入), 使 message[0] 保持静态，KV 缓存友好。
+// 架构：
+//   1. 所有提示词存储在 DB prompts 表中（category: general | specialized）
+//   2. 极少数特殊方法提示词保留为 Go 常量（CorePrompt, QQBotSuffix, TopologyPrompt）
+//   3. 通用提示词（general）：每轮对话自动注入 system message
+//   4. 专用提示词（specialized）：AI tool-call 激活优先，关键词匹配降级
+//   5. 内存缓存 + 热重载支持
 
-// PromptStore manages system prompt sections with DB-backed hot-reload support.
+// PromptStore manages system prompts with DB-backed hot-reload support.
 type PromptStore struct {
-	configRepo  ConfigGetter
-	defaults    map[string]string // Go 常量 fallback
-	cache       map[string]string // DB 记录缓存
-	promptCache sync.Map          // map[intentHash]cachedPrompt — cross-session cache
-	mu          sync.RWMutex
+	repo              dbase.PromptRepository
+	general           []dbase.PromptRecord // 通用提示词缓存
+	specialized       []dbase.PromptRecord // 专用提示词缓存
+	activatedContexts map[string]map[string]bool // sessionID -> contextID -> true
+	generalPrompt     string               // 预渲染的通用提示词（拼接所有 general）
+	mu                sync.RWMutex
 }
 
-type cachedPrompt struct {
-	prompt string
-}
-
-// ConfigGetter is the minimal interface PromptStore needs from a config repository.
-type ConfigGetter interface {
-	GetSection(ctx context.Context, section string) (string, error)
-	GetAll(ctx context.Context) (map[string]string, error)
-	SetSection(ctx context.Context, section, data string) error
-}
-
-// PromptSection maps section names to their Go fallback constants.
-type PromptSection struct {
-	Name    string // e.g. "prompt_identity"
-	Default string // Go constant value
-}
-
-// NewPromptStore creates a PromptStore with the given Go defaults and config repo.
-func NewPromptStore(repo ConfigGetter) *PromptStore {
-	ps := &PromptStore{
-		configRepo: repo,
-		defaults:   make(map[string]string),
-		cache:      make(map[string]string),
-	}
-	ps.registerDefaults()
-	return ps
-}
-
-// registerDefaults populates the Go fallback map from existing constants.
-func (ps *PromptStore) registerDefaults() {
-	ps.defaults = map[string]string{
-		"prompt_identity":      IdentityRules,
-		"prompt_environment":   EnvironmentRules,
-		"prompt_core":          CoreRules,
-		"prompt_communication": CommunicationRules,
-		"prompt_filesystem":    FilesystemRules,
-		"prompt_command_exec":  CommandExecutionRules,
-		"prompt_task_boundary": TaskBoundaryRules,
-		"prompt_mcp_status":    MCPStatusRules,
-		"prompt_slash_command": SlashCommandRules,
-		"prompt_file_sending":  FileSendingRules,
-		"prompt_tool_strategy": ToolStrategy,
-		"prompt_timeout_guide": TimeoutGuide,
-		"prompt_core_compact":  CorePrompt,
-		"prompt_topology":      TopologyPrompt,
-		"prompt_code_review":   CodeReviewPrompt,
-		"prompt_qqbot_suffix":  QQBotSuffix,
+// NewPromptStore creates a PromptStore backed by a PromptRepository.
+func NewPromptStore(repo dbase.PromptRepository) *PromptStore {
+	return &PromptStore{
+		repo:              repo,
+		activatedContexts: make(map[string]map[string]bool),
 	}
 }
 
-// LoadFromDB loads all prompt_* sections from the database into the cache.
-func (ps *PromptStore) LoadFromDB(ctx context.Context) error {
-	if ps.configRepo == nil {
+// SeedDefaults writes the built-in minimal prompts to DB on first run.
+func (ps *PromptStore) SeedDefaults(ctx context.Context) error {
+	if ps.repo == nil {
 		return nil
 	}
-	all, err := ps.configRepo.GetAll(ctx)
-	if err != nil {
-		return err
+	seeds := SeedPrompts()
+	return ps.repo.InitDefaults(ctx, seeds)
+}
+
+// LoadAll loads all prompts from DB into memory cache.
+func (ps *PromptStore) LoadAll(ctx context.Context) error {
+	if ps.repo == nil {
+		return nil
 	}
+	all, err := ps.repo.GetAll(ctx)
+	if err != nil {
+		return fmt.Errorf("load prompts: %w", err)
+	}
+
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
-	for section, data := range all {
-		if strings.HasPrefix(section, "prompt_") && data != "" {
-			ps.cache[section] = data
+
+	ps.general = nil
+	ps.specialized = nil
+
+	for _, p := range all {
+		if !p.Enabled {
+			continue
+		}
+		switch p.Category {
+		case "general":
+			ps.general = append(ps.general, p)
+		case "specialized":
+			ps.specialized = append(ps.specialized, p)
 		}
 	}
-	log.Info("PromptStore loaded from DB", "sections", len(ps.cache))
+
+	// Sort by priority (descending)
+	sort.Slice(ps.general, func(i, j int) bool { return ps.general[i].Priority > ps.general[j].Priority })
+	sort.Slice(ps.specialized, func(i, j int) bool { return ps.specialized[i].Priority > ps.specialized[j].Priority })
+
+	// Pre-render general prompt
+	ps.generalPrompt = ps.buildGeneralPromptLocked()
+
+	log.Info("PromptStore loaded from DB", "general", len(ps.general), "specialized", len(ps.specialized))
 	return nil
 }
 
-// Reload re-reads all prompt sections from DB and clears the intent cache.
+// Reload re-reads all prompts from DB and clears activated contexts.
 func (ps *PromptStore) Reload(ctx context.Context) error {
 	ps.mu.Lock()
-	ps.cache = make(map[string]string)
+	ps.general = nil
+	ps.specialized = nil
+	ps.generalPrompt = ""
+	ps.activatedContexts = make(map[string]map[string]bool)
 	ps.mu.Unlock()
-	ps.promptCache = sync.Map{} // Clear intent cache (prompts may have changed)
-	return ps.LoadFromDB(ctx)
+	return ps.LoadAll(ctx)
 }
 
-// Get returns the effective prompt text for a section.
-func (ps *PromptStore) Get(section string) string {
-	ps.mu.RLock()
-	if dbVal, ok := ps.cache[section]; ok && dbVal != "" {
-		ps.mu.RUnlock()
-		return dbVal
+// buildGeneralPromptLocked concatenates all general prompts. Caller must hold ps.mu.
+func (ps *PromptStore) buildGeneralPromptLocked() string {
+	var sb strings.Builder
+	for _, p := range ps.general {
+		sb.WriteString(p.Content)
+		sb.WriteString("\n\n")
 	}
-	ps.mu.RUnlock()
-	if def, ok := ps.defaults[section]; ok {
-		return def
+	return sb.String()
+}
+
+// BuildGeneralPrompt returns the pre-rendered general prompt (all enabled general prompts).
+func (ps *PromptStore) BuildGeneralPrompt() string {
+	ps.mu.RLock()
+	defer ps.mu.RUnlock()
+	return ps.generalPrompt
+}
+
+// ActivateContext activates a specialized context for a session.
+func (ps *PromptStore) ActivateContext(sessionID, contextID string) {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	if ps.activatedContexts[sessionID] == nil {
+		ps.activatedContexts[sessionID] = make(map[string]bool)
+	}
+	ps.activatedContexts[sessionID][contextID] = true
+	log.Debug("context activated", "session", sessionID, "context", contextID)
+}
+
+// DeactivateContext deactivates a specialized context for a session.
+func (ps *PromptStore) DeactivateContext(sessionID, contextID string) {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	if m := ps.activatedContexts[sessionID]; m != nil {
+		delete(m, contextID)
+	}
+}
+
+// GetActivatedContexts returns the list of activated context IDs for a session.
+func (ps *PromptStore) GetActivatedContexts(sessionID string) []string {
+	ps.mu.RLock()
+	defer ps.mu.RUnlock()
+	m := ps.activatedContexts[sessionID]
+	if m == nil {
+		return nil
+	}
+	var ids []string
+	for id := range m {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+// GetSpecializedPrompt returns the content for a specialized prompt by ID.
+func (ps *PromptStore) GetSpecializedPrompt(id string) string {
+	ps.mu.RLock()
+	defer ps.mu.RUnlock()
+	for _, p := range ps.specialized {
+		if p.ID == id {
+			return p.Content
+		}
 	}
 	return ""
 }
 
-// GetAllSections returns all prompt sections with their effective values and source.
-func (ps *PromptStore) GetAllSections() map[string]PromptSectionInfo {
+// GetAllSpecialized returns all specialized prompts (for tool enum generation).
+func (ps *PromptStore) GetAllSpecialized() []dbase.PromptRecord {
+	ps.mu.RLock()
+	defer ps.mu.RUnlock()
+	cp := make([]dbase.PromptRecord, len(ps.specialized))
+	copy(cp, ps.specialized)
+	return cp
+}
+
+// MatchContexts performs keyword matching to find relevant specialized contexts.
+// This is the fallback when AI doesn't call activate_specialized_context.
+func (ps *PromptStore) MatchContexts(userMessage string) []string {
 	ps.mu.RLock()
 	defer ps.mu.RUnlock()
 
-	result := make(map[string]PromptSectionInfo, len(ps.defaults))
-	for name, def := range ps.defaults {
-		if dbVal, ok := ps.cache[name]; ok && dbVal != "" {
-			result[name] = PromptSectionInfo{Name: name, Value: dbVal, Source: "db", HasDefault: true}
-		} else {
-			result[name] = PromptSectionInfo{Name: name, Value: def, Source: "builtin", HasDefault: true}
+	msg := strings.ToLower(userMessage)
+	var matched []string
+
+	for _, p := range ps.specialized {
+		if !p.Enabled {
+			continue
 		}
+		var keywords []string
+		if err := json.Unmarshal([]byte(p.Keywords), &keywords); err != nil {
+			continue
+		}
+		for _, kw := range keywords {
+			if strings.Contains(msg, strings.ToLower(kw)) {
+				matched = append(matched, p.ID)
+				break
+			}
+		}
+	}
+	return matched
+}
+
+// BuildSystemPrompt assembles the complete system prompt:
+// general prompts + activated specialized prompts.
+func (ps *PromptStore) BuildSystemPrompt(sessionID, userMessage string, recentToolCalls []string) string {
+	ps.mu.RLock()
+	generalPrompt := ps.generalPrompt
+	activated := make(map[string]bool)
+	if m := ps.activatedContexts[sessionID]; m != nil {
+		for k, v := range m {
+			activated[k] = v
+		}
+	}
+	ps.mu.RUnlock()
+
+	var sb strings.Builder
+	sb.WriteString(generalPrompt)
+
+	// Append activated specialized prompts
+	for contextID := range activated {
+		if content := ps.GetSpecializedPrompt(contextID); content != "" {
+			sb.WriteString("\n\n")
+			sb.WriteString(content)
+		}
+	}
+
+	return sb.String()
+}
+
+// TryAutoActivate runs keyword matching and activates matched contexts for a session.
+// Returns the newly activated context IDs.
+func (ps *PromptStore) TryAutoActivate(sessionID, userMessage string) []string {
+	matched := ps.MatchContexts(userMessage)
+	if len(matched) == 0 {
+		return nil
+	}
+
+	ps.mu.Lock()
+	if ps.activatedContexts[sessionID] == nil {
+		ps.activatedContexts[sessionID] = make(map[string]bool)
+	}
+	var newActivated []string
+	for _, id := range matched {
+		if !ps.activatedContexts[sessionID][id] {
+			ps.activatedContexts[sessionID][id] = true
+			newActivated = append(newActivated, id)
+			log.Debug("auto-activated context", "session", sessionID, "context", id)
+		}
+	}
+	ps.mu.Unlock()
+	return newActivated
+}
+
+// ── Prompt Management API ────────────────────────────────────────────
+
+// PromptInfo is the public representation of a prompt for the management API.
+type PromptInfo struct {
+	ID        string `json:"id"`
+	Category  string `json:"category"`
+	Name      string `json:"name"`
+	Content   string `json:"content"`
+	Keywords  string `json:"keywords"`
+	Priority  int    `json:"priority"`
+	Enabled   bool   `json:"enabled"`
+	Source    string `json:"source"` // "db" | "builtin" | "custom"
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+// GetAllPrompts returns all prompts as PromptInfo for the management API.
+func (ps *PromptStore) GetAllPrompts() []PromptInfo {
+	ps.mu.RLock()
+	defer ps.mu.RUnlock()
+
+	var result []PromptInfo
+	for _, p := range ps.general {
+		result = append(result, promptToInfo(p, "db"))
+	}
+	for _, p := range ps.specialized {
+		result = append(result, promptToInfo(p, "db"))
 	}
 	return result
 }
 
-// PromptSectionInfo holds the effective value and its source for a prompt section.
-type PromptSectionInfo struct {
-	Name       string `json:"name"`
-	Value      string `json:"value"`
-	Source     string `json:"source"` // "db" | "builtin"
-	HasDefault bool   `json:"has_default"`
+func promptToInfo(p dbase.PromptRecord, source string) PromptInfo {
+	return PromptInfo{
+		ID:        p.ID,
+		Category:  p.Category,
+		Name:      p.Name,
+		Content:   p.Content,
+		Keywords:  p.Keywords,
+		Priority:  p.Priority,
+		Enabled:   p.Enabled,
+		Source:    source,
+		CreatedAt: p.CreatedAt.Format("2006-01-02 15:04:05"),
+		UpdatedAt: p.UpdatedAt.Format("2006-01-02 15:04:05"),
+	}
 }
 
-// UpdateSection writes a new value for a prompt section to DB and refreshes cache.
-func (ps *PromptStore) UpdateSection(ctx context.Context, section, data string) error {
-	if ps.configRepo == nil {
+// UpdatePrompt updates a prompt in DB and refreshes cache.
+func (ps *PromptStore) UpdatePrompt(ctx context.Context, p dbase.PromptRecord) error {
+	if ps.repo == nil {
 		return nil
 	}
-	if !strings.HasPrefix(section, "prompt_") {
-		section = "prompt_" + section
-	}
-	if err := ps.configRepo.SetSection(ctx, section, data); err != nil {
+	if err := ps.repo.Upsert(ctx, &p); err != nil {
 		return err
 	}
-	ps.mu.Lock()
-	ps.cache[section] = data
-	ps.mu.Unlock()
-	ps.promptCache = sync.Map{} // Invalidate intent cache
-	log.Info("PromptStore section updated", "section", section, "len", len(data))
-	return nil
+	return ps.LoadAll(ctx)
 }
 
-// ResetSection removes the DB override for a section, falling back to Go default.
-func (ps *PromptStore) ResetSection(ctx context.Context, section string) error {
-	if ps.configRepo == nil {
+// DeletePrompt deletes a prompt from DB and refreshes cache.
+func (ps *PromptStore) DeletePrompt(ctx context.Context, id string) error {
+	if ps.repo == nil {
 		return nil
 	}
-	if !strings.HasPrefix(section, "prompt_") {
-		section = "prompt_" + section
-	}
-	if err := ps.configRepo.SetSection(ctx, section, ""); err != nil {
+	if err := ps.repo.Delete(ctx, id); err != nil {
 		return err
 	}
-	ps.mu.Lock()
-	delete(ps.cache, section)
-	ps.mu.Unlock()
-	ps.promptCache = sync.Map{}
-	log.Info("PromptStore section reset to default", "section", section)
-	return nil
+	return ps.LoadAll(ctx)
 }
 
-// InitDefaults writes all Go default values to DB so there is a complete baseline.
-func (ps *PromptStore) InitDefaults(ctx context.Context) error {
-	if ps.configRepo == nil {
-		return nil
-	}
-	existing, err := ps.configRepo.GetAll(ctx)
-	if err != nil {
-		return err
-	}
-	hasPrompts := false
-	for section := range existing {
-		if strings.HasPrefix(section, "prompt_") {
-			hasPrompts = true
-			break
-		}
-	}
-	if hasPrompts {
-		return nil
-	}
-	for section, data := range ps.defaults {
-		if err := ps.configRepo.SetSection(ctx, section, data); err != nil {
-			return err
-		}
-	}
-	log.Info("PromptStore defaults seeded to DB", "sections", len(ps.defaults))
-	return nil
-}
+// ── Utility ──────────────────────────────────────────────────────────
 
-// ── System Prompt Builder ─────────────────────────────────────
-//
-// v3.1 cache optimization:
-//   - Intent hash cache: cross-session shared, same intent combo → same prompt.
-//   - Strictly idempotent: same inputs → identical output. NO time.Now(), random, UUID.
-//   - Topology prompt NOT included here — lives in message[1] via ensureTopologyState()
-//     for KV cache friendliness (layered injection).
-
-// IntentDetector detects scenario intents from user message and recent tool calls.
-type IntentDetector func(userMessage string, recentToolCalls []string) []string
-
-// DefaultIntentDetector is the default intent detection function (from prompt.go).
-var DefaultIntentDetector IntentDetector = DetectIntent
-
-// BuildSystemPrompt assembles the system prompt from prompt sections based on
-// detected intents. Uses cross-session intent cache. Returns (prompt, intentHash).
-func (ps *PromptStore) BuildSystemPrompt(userMessage string, recentToolCalls []string) (string, string) {
-	detector := DefaultIntentDetector
-	if detector == nil {
-		detector = func(_ string, _ []string) []string { return nil }
-	}
-
-	intents := detector(userMessage, recentToolCalls)
-	intentHash := hashStrings(intents)
-
-	// Cross-session intent cache
-	if entry, ok := ps.promptCache.Load(intentHash); ok {
-		return entry.(cachedPrompt).prompt, intentHash
-	}
-
-	// Cache miss — render
-	var sb strings.Builder
-	sb.WriteString(ps.Get("prompt_core_compact"))
-
-	seen := make(map[string]bool)
-	for _, intent := range intents {
-		if seen[intent] {
-			continue
-		}
-		seen[intent] = true
-		if text := ps.Get("prompt_" + intent); text != "" {
-			sb.WriteString(text)
-		}
-	}
-
-	result := sb.String()
-	ps.promptCache.Store(intentHash, cachedPrompt{prompt: result})
-	return result, intentHash
-}
-
-// hashStrings returns a stable hash of sorted strings (for intent cache keying).
+// hashStrings returns a stable hash of sorted strings.
 func hashStrings(ss []string) string {
 	sorted := make([]string, len(ss))
 	copy(sorted, ss)
@@ -290,10 +345,10 @@ func SystemPromptHash(prompt string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// ── Topology State Message (layered injection) ────────────────
+// ── Topology State Message (layered injection) ──────────────────────
 
 // BuildTopologyMessage creates the compact topology state message for message[1].
-// Format: <t:x,y,z|A:a,R:r,T:t>  (~15 tokens vs ~40 for verbose Chinese text)
+// Format: <t:x,y,z|A:a,R:r,T:t>  (~15 tokens)
 func BuildTopologyMessage(x, y, z, a, r float64, t bool, acked bool) string {
 	tFlag := 0
 	if t {
@@ -309,51 +364,3 @@ func BuildTopologyMessage(x, y, z, a, r float64, t bool, acked bool) string {
 
 // TopologyMsgPrefix is the prefix used to identify topology state messages in history.
 const TopologyMsgPrefix = "<t:"
-
-// ── Code Review Prompt ─────────────────────────────────────────
-
-const CodeReviewPrompt = "\n\n## 代码分析与优化" +
-	"\n\n### 聚焦原则" +
-	"\n- 只看代码，只谈代码。**禁止**讨论\"作为 AI 我应该...\"\"根据规则我需要...\"\"让我想想...\"等元思考" +
-	"\n- 思考内容仅限于：读哪个文件、发现了什么问题、怎么改。不写任务规划、不写步骤清单" +
-	"\n- 用户问的是项目代码，不是你的能力范围——**禁止**回复\"我可以帮你分析\"\"我能做的是\"等自我介绍" +
-	"\n\n### 探索策略" +
-	"\n- 分析项目时，**最多读取 5 个核心文件**后就必须开始输出结论" +
-	"\n- 核心文件指：入口文件(main.go/index.js)、依赖文件(go.mod/package.json)、README、主模块入口" +
-	"\n- **禁止**遍历所有子目录——列出顶层目录结构后，根据文件名判断模块职责即可" +
-	"\n- `file_list` 最多使用 3 次：根目录→internal/→最多再深入 1 层" +
-	"\n\n### 中断恢复" +
-	"\n- 用户说\"重新开始\"\"继续\"\"恢复\"\"接着做\"\"上次的\"时，**不是新任务**——是让你从上次中断处继续" +
-	"\n- 恢复时先检查上下文：如果历史里有之前的修改记录，直接基于那些记录继续，不要重新 file_list 分析" +
-	"\n- 如果无法确定从哪里恢复，用一句话确认即可——**禁止**写 300 字内心独白猜测含义" +
-	"\n\n### 输出要求" +
-	"\n- 每条优化建议必须包含：**问题描述** + **为什么是问题** + **具体改进方案**(含示例代码)" +
-	"\n- 按优先级排序：🥇 高优先(影响稳定性/安全) > 🥈 中优先(影响可维护性) > 🥉 低优先(代码风格)" +
-	"\n- 每条建议控制在 150 字以内，简洁有力" +
-	"\n\n### 避免的行为" +
-	"\n- **禁止**在 5 个核心文件之外继续 file_list 深层子目录" +
-	"\n- **禁止**读取 node_modules、vendor、.git、dist、build 等非源码目录" +
-	"\n- **禁止**对同一目录反复 file_list" +
-	"\n- **禁止**给出模糊建议如\"考虑重构\"\"可以优化性能\"——必须有具体文件和行级定位" +
-	"\n- **禁止**用户说\"重新开始\"后写 300 字内心独白——一句话确认，然后行动" +
-	"\n- **禁止**思考块中出现\"用户想要...\"\"我应该...\"\"根据规则...\"等非代码内容"
-
-// ── Topology Prompt (Go fallback, for prompt_topology section) ─
-
-// TopologyPrompt is injected when the topology constraint system is active.
-// Note: with layered injection, this is only used when topologyActive=true in
-// the old inline mode. Normal operation uses BuildTopologyMessage() for message[1].
-const TopologyPrompt = "\n\n## 拓扑几何约束" +
-	"\n你当前处于拓扑约束模式。每轮回复末尾必须输出拓扑坐标标签：" +
-	"\n<topology x=\"进度\" y=\"复杂度变化\" z=\"偏离度\" tools=\"工具1,工具2\" />" +
-	"\n\n坐标说明：" +
-	"\n- x: 任务进度 0-10（0=未开始, 10=完成）" +
-	"\n- y: 本轮操作复杂度变化 -1.0 到 1.0（负=降低复杂度如读取, 正=增加复杂度如写入/删除/执行命令）" +
-	"\n- z: 偏离起点的距离 0 到 R（由约束参数决定）" +
-	"\n\n约束参数（由系统设定）：" +
-	"\n- 振幅上限 A: |Δy| 每轮不超过此值" +
-	"\n- 半径上限 R: z 坐标不超过此值" +
-	"\n- 闭环要求 T: 任务完成时需回到原点附近" +
-	"\n\ntools 字段**仅列出本轮**你实际调用的工具名（逗号分隔），**不要**包含前几轮的工具。" +
-	"\n纯文本回复(无工具调用)时 tools=\"\"。X≥9.5 时 tools 声明会被忽略(任务已完成)。" +
-	"\n如果系统更新了约束参数，用 ack=\"constraint_updated\" 确认。"

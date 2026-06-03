@@ -1,9 +1,10 @@
 // Package topology implements the geometric constraint system for AI agent navigation.
 //
 // Every AI step is mapped to a 3D coordinate space:
-//   X = progress (0-10)
-//   Y = complexity delta (-1.0 to 1.0)
-//   Z = deviation from origin (0 to R)
+//
+//	X = progress (0-10)
+//	Y = complexity delta (-1.0 to 1.0)
+//	Z = deviation from origin (0 to R)
 //
 // Validators enforce geometric constraints and truthfulness of AI self-reported coordinates.
 package topology
@@ -23,9 +24,9 @@ type Coordinate struct {
 
 // Constraint holds the topology constraint parameters.
 type Constraint struct {
-	A          float64  `json:"a"`                    // Amplitude cap 0.1-1.0, default 0.8
-	R          float64  `json:"r"`                    // Radius cap 0.5-5.0, default 3.0
-	T          bool     `json:"t"`                    // Closed-loop requirement, default false
+	A          float64  `json:"a"`                     // Amplitude cap 0.1-1.0, default 0.8
+	R          float64  `json:"r"`                     // Radius cap 0.5-5.0, default 3.0
+	T          bool     `json:"t"`                     // Closed-loop requirement, default false
 	ForceTools []string `json:"force_tools,omitempty"` // Tools to force when progress threshold met
 }
 
@@ -58,10 +59,10 @@ type Node struct {
 
 // ParseResult holds the parsed topology tag data from AI output.
 type ParseResult struct {
-	Coord       Coordinate `json:"coord"`
-	Tools       []string   `json:"tools"`        // Declared tools this round
-	AckUpdate   bool       `json:"ack_update"`   // AI acknowledges constraint update
-	Parsed      bool       `json:"parsed"`       // Whether tag was found and parsed
+	Coord     Coordinate `json:"coord"`
+	Tools     []string   `json:"tools"`      // Declared tools this round
+	AckUpdate bool       `json:"ack_update"` // AI acknowledges constraint update
+	Parsed    bool       `json:"parsed"`     // Whether tag was found and parsed
 }
 
 // ── Trust State ───────────────────────────────────────────────
@@ -76,24 +77,26 @@ type TrustState struct {
 
 // SessionState is the full topology state exposed to the frontend.
 type SessionState struct {
-	SessionID    string      `json:"session_id"`
-	CurrentCoord Coordinate  `json:"current_coord"`
-	StartCoord   Coordinate  `json:"start_coord"`
-	Constraint   Constraint  `json:"constraint"`
-	Trajectory   []Node      `json:"trajectory"`
-	Trust        TrustState  `json:"trust"`
-	RejectCount  int         `json:"reject_count"`
-	ClosedLoop   bool        `json:"closed_loop"`
-	ClosedDist   float64     `json:"closed_distance,omitempty"`
-	Warning      string      `json:"warning,omitempty"`
-	Active       bool        `json:"active"`
+	SessionID    string     `json:"session_id"`
+	CurrentCoord Coordinate `json:"current_coord"`
+	StartCoord   Coordinate `json:"start_coord"`
+	Constraint   Constraint `json:"constraint"`
+	Trajectory   []Node     `json:"trajectory"`
+	Trust        TrustState `json:"trust"`
+	RejectCount  int        `json:"reject_count"`
+	ClosedLoop   bool       `json:"closed_loop"`
+	ClosedDist   float64    `json:"closed_distance,omitempty"`
+	Warning      string     `json:"warning,omitempty"`
+	Active       bool       `json:"active"`
+	Velocity     float64    `json:"velocity,omitempty"`     // rolling average ΔX/round
+	StuckRounds  int        `json:"stuck_rounds,omitempty"` // consecutive rounds with velocity ≈ 0
 }
 
 // ── Risk Profile ──────────────────────────────────────────────
 
 // RiskProfile maps a tool pattern to expected coordinate changes.
 type RiskProfile struct {
-	Pattern  string  `json:"pattern"` // Tool name pattern (supports * wildcard)
+	Pattern   string  `json:"pattern"` // Tool name pattern (supports * wildcard)
 	DeltaYMin float64 `json:"delta_y_min"`
 	DeltaYMax float64 `json:"delta_y_max"`
 	DeltaZMin float64 `json:"delta_z_min"`
@@ -114,18 +117,18 @@ type ValidationResult struct {
 
 // EditResult holds the outcome of a message edit/delete operation.
 type EditResult struct {
-	DeletedNodes int            `json:"deleted_nodes"`
+	DeletedNodes int              `json:"deleted_nodes"`
 	NewMessages  []map[string]any `json:"new_messages"`
-	Message      string         `json:"message"`
+	Message      string           `json:"message"`
 }
 
 // ── Oscillation Detection ─────────────────────────────────────
 
 // OscillationState tracks pattern oscillation in the trajectory.
 type OscillationState struct {
-	Pattern   string `json:"pattern"`   // Detected oscillation pattern description
-	Detected  bool   `json:"detected"`  // Whether oscillation was detected
-	Round     int    `json:"round"`     // Round where detected
+	Pattern  string `json:"pattern"`  // Detected oscillation pattern description
+	Detected bool   `json:"detected"` // Whether oscillation was detected
+	Round    int    `json:"round"`    // Round where detected
 }
 
 // ── Constants ─────────────────────────────────────────────────

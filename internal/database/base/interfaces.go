@@ -127,6 +127,29 @@ type FilePermissionRepository interface {
 	Delete(ctx context.Context, id int64) error
 }
 
+// PromptRecord 提示词记录（跨后端通用类型）
+type PromptRecord struct {
+	ID        string    `json:"id"`
+	Category  string    `json:"category"` // "general" | "specialized"
+	Name      string    `json:"name"`
+	Content   string    `json:"content"`
+	Keywords  string    `json:"keywords"` // JSON array string
+	Priority  int       `json:"priority"`
+	Enabled   bool      `json:"enabled"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// PromptRepository 提示词仓库接口
+type PromptRepository interface {
+	GetByCategory(ctx context.Context, category string) ([]PromptRecord, error)
+	GetAll(ctx context.Context) ([]PromptRecord, error)
+	GetByID(ctx context.Context, id string) (*PromptRecord, error)
+	Upsert(ctx context.Context, p *PromptRecord) error
+	Delete(ctx context.Context, id string) error
+	InitDefaults(ctx context.Context, prompts []PromptRecord) error
+}
+
 // ShareRepository 分享数据仓库
 type ShareRepository interface {
 	Create(ctx context.Context, share *nas.Share) (int64, error)

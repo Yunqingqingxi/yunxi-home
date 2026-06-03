@@ -23,6 +23,7 @@ type Backend struct {
 	ShareRepo    ShareRepository
 	GoalRepo     GoalRepository
 	TodoRepo     TodoRepository
+	PromptRepo   PromptRepository
 	SQLiteDB     *DB // non-nil only for sqlite driver, for config storage
 	Close        func() error
 	Driver       string
@@ -66,6 +67,7 @@ func NewSQLiteBackendWithDB(db *DB) *Backend {
 		ShareRepo:    NewShareRepo(db.DB),
 		GoalRepo:     &sqliteGoalRepo{db: db},
 		TodoRepo:     &sqliteTodoRepo{db: db},
+		PromptRepo:   NewPromptRepo(db),
 		SQLiteDB:     db,
 		Close:        func() error { return nil },
 		Driver:       "sqlite",
@@ -94,6 +96,7 @@ func newSQLiteBackend(cfg BackendConfig) (*Backend, error) {
 		ShareRepo:    NewShareRepo(db.DB),
 		GoalRepo:     &sqliteGoalRepo{db: db},
 		TodoRepo:     &sqliteTodoRepo{db: db},
+		PromptRepo:   NewPromptRepo(db),
 		SQLiteDB:     db,
 		Close:        db.Close,
 		Driver:       "sqlite",
@@ -122,6 +125,7 @@ func newMySQLBackend(cfg BackendConfig) (*Backend, error) {
 		ShareRepo:    NewMySQLShareRepo(db),
 		GoalRepo:     &mysqlGoalRepo{db: db},
 		TodoRepo:     &mysqlTodoRepo{db: db},
+		PromptRepo:   NewMySQLPromptRepo(db),
 		Close:        db.Close,
 		Driver:       "mysql",
 	}, nil
@@ -152,6 +156,7 @@ func newFileBackend(cfg BackendConfig) (*Backend, error) {
 		ShareRepo:    NewFileShareRepo(store),
 		GoalRepo:     &fileGoalRepo{store: store},
 		TodoRepo:     &fileTodoRepo{store: store},
+		PromptRepo:   nil, // file backend doesn't support prompt management
 		Close:        func() error { return nil },
 		Driver:       "file",
 	}, nil

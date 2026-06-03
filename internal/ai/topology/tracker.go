@@ -24,22 +24,27 @@ type Tracker struct {
 
 // sessionTracker holds the topology state for a single session.
 type sessionTracker struct {
-	SessionID          string
-	StartCoord         Coordinate
-	CurrentCoord       Coordinate
-	Constraint         Constraint
-	Nodes              []Node
-	Trust              TrustState
-	RejectCount        int
+	SessionID           string
+	StartCoord          Coordinate
+	CurrentCoord        Coordinate
+	Constraint          Constraint
+	Nodes               []Node
+	Trust               TrustState
+	RejectCount         int
 	ForceToolsTriggered bool
-	ClosedLoop         bool
-	ClosedDist         float64
-	Warning            string
-	Active             bool
-	OverrideNext       bool        // Skip next validation
-	OverrideTarget     *Coordinate // Optional target coordinate for override
-	lastCheckpoint     time.Time
-	checkpointCount    int // Nodes added since last checkpoint
+	ClosedLoop          bool
+	ClosedDist          float64
+	Warning             string
+	Active              bool
+	OverrideNext        bool        // Skip next validation
+	OverrideTarget      *Coordinate // Optional target coordinate for override
+	lastCheckpoint      time.Time
+	checkpointCount     int        // Nodes added since last checkpoint
+	Velocity            float64    // rolling average ΔX/round over last 5 rounds
+	VelocityHistory     [5]float64 // circular buffer of per-round ΔX
+	VelocityIdx         int        // index into VelocityHistory
+	StuckRounds         int        // consecutive rounds with velocity ≈ 0
+	LastCoord           Coordinate // coordinate from previous round for delta calc
 }
 
 // Repository is the persistence interface for topology data.
@@ -55,20 +60,20 @@ type Repository interface {
 
 // SessionRecord is the database representation of a topology session.
 type SessionRecord struct {
-	SessionID          string     `json:"session_id"`
-	Status             string     `json:"status"`
-	StartCoord         Coordinate `json:"start_coord"`
-	CurrentCoord       Coordinate `json:"current_coord"`
-	ConstraintJSON     string     `json:"constraint_json"`
-	TrustLies          int        `json:"trust_lies"`
-	TrustLocked        bool       `json:"trust_locked"`
-	RejectCount        int        `json:"reject_count"`
-	ForceToolsTriggered bool      `json:"force_tools_triggered"`
-	ClosedLoop         bool       `json:"closed_loop"`
-	ClosedDist         float64    `json:"closed_distance"`
-	CreatedAt          time.Time  `json:"created_at"`
-	UpdatedAt          time.Time  `json:"updated_at"`
-	LastActiveAt       time.Time  `json:"last_active_at"`
+	SessionID           string     `json:"session_id"`
+	Status              string     `json:"status"`
+	StartCoord          Coordinate `json:"start_coord"`
+	CurrentCoord        Coordinate `json:"current_coord"`
+	ConstraintJSON      string     `json:"constraint_json"`
+	TrustLies           int        `json:"trust_lies"`
+	TrustLocked         bool       `json:"trust_locked"`
+	RejectCount         int        `json:"reject_count"`
+	ForceToolsTriggered bool       `json:"force_tools_triggered"`
+	ClosedLoop          bool       `json:"closed_loop"`
+	ClosedDist          float64    `json:"closed_distance"`
+	CreatedAt           time.Time  `json:"created_at"`
+	UpdatedAt           time.Time  `json:"updated_at"`
+	LastActiveAt        time.Time  `json:"last_active_at"`
 }
 
 // NewTracker creates a new topology tracker.
@@ -91,12 +96,12 @@ func (t *Tracker) InitSession(sessionID string, constraint Constraint) *sessionT
 	}
 
 	st := &sessionTracker{
-		SessionID:    sessionID,
-		StartCoord:   Coordinate{},
-		CurrentCoord: Coordinate{},
-		Constraint:   constraint,
-		Trust:        TrustState{},
-		Active:       true,
+		SessionID:      sessionID,
+		StartCoord:     Coordinate{},
+		CurrentCoord:   Coordinate{},
+		Constraint:     constraint,
+		Trust:          TrustState{},
+		Active:         true,
 		lastCheckpoint: time.Now(),
 	}
 	t.states[sessionID] = st
@@ -142,6 +147,8 @@ func (t *Tracker) GetState(sessionID string) *SessionState {
 		ClosedDist:   st.ClosedDist,
 		Warning:      st.Warning,
 		Active:       st.Active,
+		Velocity:     st.Velocity,
+		StuckRounds:  st.StuckRounds,
 	}
 }
 
@@ -176,6 +183,32 @@ func (t *Tracker) ValidateStep(sessionID string, proposed ParseResult, actualToo
 		}
 		st.Nodes = append(st.Nodes, node)
 		st.CurrentCoord = proposed.Coord
+
+		// Update velocity tracking
+		dx := proposed.Coord.X - st.LastCoord.X
+		st.VelocityHistory[st.VelocityIdx%5] = dx
+		st.VelocityIdx++
+		st.LastCoord = proposed.Coord
+
+		// Compute rolling average velocity over populated entries
+		var totalDx float64
+		count := 0
+		for _, v := range st.VelocityHistory {
+			if v != 0 || count > 0 {
+				totalDx += v
+				count++
+			}
+		}
+		if count > 0 {
+			st.Velocity = totalDx / float64(count)
+		}
+
+		// Detect stuck: velocity near zero for 3+ rounds
+		if st.Velocity < 0.05 && st.VelocityIdx >= 3 {
+			st.StuckRounds++
+		} else {
+			st.StuckRounds = 0
+		}
 		st.RejectCount = 0
 		st.Warning = ""
 		t.checkpointMaybe(sessionID, st, &node)
@@ -272,6 +305,31 @@ func (t *Tracker) ValidateStep(sessionID string, proposed ParseResult, actualToo
 	}
 	st.Nodes = append(st.Nodes, node)
 	st.CurrentCoord = proposed.Coord
+	// Update velocity tracking
+	dx := proposed.Coord.X - st.LastCoord.X
+	st.VelocityHistory[st.VelocityIdx%5] = dx
+	st.VelocityIdx++
+	st.LastCoord = proposed.Coord
+
+	// Compute rolling average velocity over populated entries
+	var totalDx float64
+	count := 0
+	for _, v := range st.VelocityHistory {
+		if v != 0 || count > 0 {
+			totalDx += v
+			count++
+		}
+	}
+	if count > 0 {
+		st.Velocity = totalDx / float64(count)
+	}
+
+	// Detect stuck: velocity near zero for 3+ rounds
+	if st.Velocity < 0.05 && st.VelocityIdx >= 3 {
+		st.StuckRounds++
+	} else {
+		st.StuckRounds = 0
+	}
 	t.checkpointMaybe(sessionID, st, &node)
 
 	return true, ""
