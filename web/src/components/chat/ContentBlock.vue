@@ -9,7 +9,21 @@
 import { computed } from 'vue'
 import { renderMarkdown } from '../../stores/chat'
 const props = defineProps<{ content?: string; streaming?: boolean }>()
-const displayHtml = computed(() => renderMarkdown(props.content || ''))
+
+const token = typeof localStorage !== 'undefined' ? localStorage.getItem('token') || '' : ''
+const fileLinkRe = /\[文件:\s*([^\]]+?)\s*\(([^)]+)\)\]/g
+
+const linkedText = computed(() => {
+  let text = props.content || ''
+  text = text.replace(fileLinkRe, (_m: string, name: string, path: string) => {
+    const streamUrl = '/api/nas/files/stream?path=' + encodeURIComponent(path.trim()) + '&token=' + token
+    return `[${name.trim()}](${streamUrl})`
+  })
+  text = text.replace(/\n{3,}/g, '\n\n')
+  return text.trim()
+})
+
+const displayHtml = computed(() => renderMarkdown(linkedText.value))
 </script>
 
 <style scoped>

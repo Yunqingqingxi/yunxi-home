@@ -54,14 +54,33 @@ const (
 	NodeOverridden NodeStatus = "overridden"
 )
 
+// ToolResultStatus is the execution result of a tool call (separate from topology status).
+type ToolResultStatus string
+
+const (
+	ToolResultSuccess ToolResultStatus = "success"
+	ToolResultError   ToolResultStatus = "error"
+	ToolResultNone    ToolResultStatus = "" // No result recorded
+)
+
+// ToolResultInfo holds the recorded execution outcome for a single tool call.
+type ToolResultInfo struct {
+	ToolName   string            `json:"tool_name"`
+	Success    bool              `json:"success"`
+	DurationMs int64             `json:"duration_ms"`
+	Status     ToolResultStatus  `json:"status"`
+	Timestamp  time.Time         `json:"timestamp"`
+}
+
 // Node is a single point in the topology trajectory.
 type Node struct {
-	Coord     Coordinate `json:"coord"`
-	Round     int        `json:"round"`
-	Timestamp time.Time  `json:"timestamp"`
-	ToolCall  string     `json:"tool_call"`
-	Status    NodeStatus `json:"status"`
-	Reason    string     `json:"reason,omitempty"`
+	Coord      Coordinate       `json:"coord"`
+	Round      int              `json:"round"`
+	Timestamp  time.Time        `json:"timestamp"`
+	ToolCall   string           `json:"tool_call"`
+	Status     NodeStatus       `json:"status"`
+	Reason     string           `json:"reason,omitempty"`
+	ToolResult ToolResultStatus `json:"tool_result,omitempty"` // Actual tool execution result
 }
 
 // ── Parse Result ──────────────────────────────────────────────
@@ -99,6 +118,8 @@ type SessionState struct {
 	Active       bool       `json:"active"`
 	Velocity     float64    `json:"velocity,omitempty"`     // rolling average ΔX/round
 	StuckRounds  int        `json:"stuck_rounds,omitempty"` // consecutive rounds with velocity ≈ 0
+	CommittedCount int     `json:"committed_count,omitempty"` // total committed nodes (for success rate)
+	TotalNodes     int     `json:"total_nodes,omitempty"`     // total nodes in trajectory
 }
 
 // ── Risk Profile ──────────────────────────────────────────────
@@ -147,7 +168,8 @@ const (
 	TruthfulnessTolerance = 0.2
 
 	// Trust thresholds
-	MaxLiesBeforeLock = 3
+	MaxLiesBeforeLock             = 3
+	ConsecutiveSuccessesForUnlock = 5 // Auto-unlock trust after N consecutive successful tool executions
 
 	// Rejection thresholds
 	MaxConsecutiveRejects = 5

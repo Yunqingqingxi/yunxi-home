@@ -17,8 +17,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai/adapt"
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/agent"
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/async"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai/query"
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/base"
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/coordinator"
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/cron"
@@ -48,6 +50,7 @@ type Service struct {
 	registry            *register.Registry
 	sessions            *session.Manager
 	chain               *middleware.Chain
+	queryClient         *query.Client     // 统一单轮查询客户端
 	planEngine          *planner.Engine
 	budget              *session.BudgetManager
 	metrics             *MetricsCollector
@@ -71,6 +74,7 @@ type Service struct {
 	promptStore         *base.PromptStore // 提示词外置存储+缓存
 	memoryManager       *memory.Manager   // 持久记忆管理器
 	intentPipeline      *intent.Pipeline  // 意图路由管线（nil=禁用）
+	adaptLayer          *adapt.Layer      // 用户适应层（nil=禁用）
 	topoActive          map[string]bool   // 会话级拓扑激活状态
 	topoMu              sync.RWMutex
 	seenResults         map[string]map[uint64]struct{} // sessionID -> set of tool result hashes (info gain dedup)
@@ -190,6 +194,7 @@ type ServiceConfig struct {
 	PromptStore     *base.PromptStore     // 提示词外置存储（nil=用 Go 常量）
 	IntentPipeline  *intent.Pipeline      // 意图路由管线（nil=禁用）
 	MemoryManager   *memory.Manager       // 持久记忆管理器（nil=禁用）
+	AdaptLayer      *adapt.Layer          // 用户适应层（nil=禁用）
 }
 
 func DefaultServiceConfig() ServiceConfig {
@@ -202,6 +207,7 @@ func NewService(provider base.AIProvider, reg *register.Registry, sessionRepo da
 		registry:            reg,
 		sessions:            session.NewManager(sessionRepo),
 		chain:               middleware.NewChain(reg),
+		queryClient:         query.New(provider),
 		planEngine:          planner.New(reg),
 		budget:              session.NewBudgetManager(cfg.MaxTokens, cfg.ReserveForReply, cfg.ReserveForTools),
 		metrics:             NewMetricsCollector(nil, cfg.MetricsSaveFn),
@@ -215,6 +221,7 @@ func NewService(provider base.AIProvider, reg *register.Registry, sessionRepo da
 		promptStore:         cfg.PromptStore,
 		memoryManager:       cfg.MemoryManager,
 		intentPipeline:      cfg.IntentPipeline,
+		adaptLayer:          cfg.AdaptLayer,
 		topoActive:          make(map[string]bool),
 		confirmChannels:     make(map[string]chan ConfirmResult),
 		interactiveChannels: make(map[string]chan base.InteractiveResponse),
@@ -309,11 +316,30 @@ func NewService(provider base.AIProvider, reg *register.Registry, sessionRepo da
 				p += "\n\n## 持久记忆\n" + summary
 			}
 		}
+		// 追加用户适应层摘要（从缓存读取）
+		if svc.adaptLayer != nil {
+			// userID is not available in this callback, skip
+		}
 		return p
 	}
 	svc.sessions.QQBotPromptFn = func() string {
 		return svc.buildQQBotPrompt()
 	}
+	// Register callback to feed tool execution results into the topology tracker
+	svc.chain.SetResultCallback(func(ctx context.Context, toolName string, result *base.ToolResult) {
+		if svc.tracker != nil {
+			sessionID := ""
+			if v := ctx.Value(base.SessionIDKey{}); v != nil {
+				if sid, ok := v.(string); ok {
+					sessionID = sid
+				}
+			}
+			if sessionID != "" {
+				success := result.Status != base.StatusError
+				svc.tracker.RecordToolResult(sessionID, toolName, success, result.Metadata.DurationMs)
+			}
+		}
+	})
 	return svc
 }
 
@@ -324,10 +350,17 @@ func (s *Service) GetMetrics() *MetricsCollector   { return s.metrics }
 // buildQQBotPrompt constructs the QQ Bot prompt entirely from PromptStore (DB only).
 func (s *Service) buildQQBotPrompt() string {
 	if s.promptStore == nil {
-		return base.QQBotPrompt // only if PromptStore completely unavailable
+		return ""
 	}
-	// QQ Bot uses general prompts + QQ-specific suffix
-	return s.promptStore.BuildGeneralPrompt() + base.QQBotSuffix
+	// QQ Bot uses general prompts + QQ-specific rules
+	general := s.promptStore.BuildGeneralPrompt()
+	qqSpecific := s.promptStore.GetSpecializedPrompt("spec_qqbot")
+	if qqSpecific != "" {
+		log.Warn("QQBot提示词组装", "general_len", len(general), "qq_specific", true, "qq_len", len(qqSpecific))
+		return general + "\n" + qqSpecific
+	}
+	log.Warn("QQBot提示词组装", "general_len", len(general), "qq_specific", false, "warning", "spec_qqbot 未找到")
+	return general
 }
 func (s *Service) SetMCPSubsystem(sub *mcp.Subsystem) { s.mcpSubsystem = sub }
 func (s *Service) GetMCPSubsystem() *mcp.Subsystem    { return s.mcpSubsystem }
@@ -412,7 +445,7 @@ func (s *Service) ReasoningFor(model string) string {
 
 // ── StreamChat ──
 
-func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string, modelOpt ...string) <-chan base.ChatStreamEvent {
+func (s *Service) StreamChat(ctx context.Context, sessionID, userID, userMessage string, modelOpt ...string) <-chan base.ChatStreamEvent {
 	ch := make(chan base.ChatStreamEvent, 64)
 	eb := s.eventBus.getOrCreate(sessionID)
 
@@ -557,6 +590,14 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 		}
 
 		// ── 记忆匹配注入（v3.3）──
+		// ── 专用提示词自动激活（关键词匹配）──
+		if s.promptStore != nil {
+			activated := s.promptStore.TryAutoActivate(sessionID, userMessage)
+			if len(activated) > 0 {
+				log.Warn("专用提示词已激活", "session", sessionID, "count", len(activated), "ids", strings.Join(activated, ","))
+			}
+		}
+
 		if s.memoryManager != nil {
 			matched := s.memoryManager.Match(userMessage)
 			for _, mem := range matched {
@@ -565,6 +606,29 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 					Content: fmt.Sprintf("[相关记忆: %s]\n%s", mem.Name, mem.Content),
 				})
 				log.Info("记忆匹配注入", "会话", sessionID, "记忆", mem.Name)
+			}
+		}
+
+		// ── 用户适应层：首次用户消息时注入 profile 摘要 ──
+		if s.adaptLayer != nil && userID != "" && len(history) <= 2 {
+			profileSummary := s.adaptLayer.OnSessionStart(bgCtx, userID, userMessage)
+			if profileSummary != "" {
+				history = append(history, base.Message{
+					Role:    "system",
+					Content: profileSummary,
+				})
+				log.Info("适应层注入", "会话", sessionID, "用户", userID)
+			}
+			// Detect re-ask / correction
+			if ev := s.adaptLayer.OnUserMessage(sessionID, userID, userMessage); ev != nil {
+				log.Info("隐式反馈检测", "会话", sessionID, "类型", string(ev.Type))
+				// Inject a hint for corrections
+				if ev.Type == adapt.FeedbackCorrection {
+					history = append(history, base.Message{
+						Role:    "system",
+						Content: "[系统提示] 用户指出之前的回复有误。请重新理解用户需求，给出正确的回答。",
+					})
+				}
 			}
 		}
 
@@ -612,7 +676,7 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 			infoGainPtr                               int
 			lastCoordX                                float64 // topology X from previous round
 		}
-		state := qs{maxRounds: 100}
+		state := qs{maxRounds: 1000}
 		_ = time.Now                                // silenceStart placeholder
 		topoActive := s.isTopologyActive(sessionID) // 一次性读取，每轮复用
 		for state.round = 0; state.round < state.maxRounds; state.round++ {
@@ -698,16 +762,30 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 					reasoningBuf.WriteString(ev.Content)
 					appendBlock(&roundBlocks, base.BlockTypeThinking, ev.Content, "", "", "")
 					emit(ev)
+					log.Debug("AI块输出", "session", sessionID, "round", state.round, "type", "thinking", "len", len([]rune(ev.Content)), "preview", truncateStr(ev.Content, 80))
 				case "content":
-					contentBuf.WriteString(ev.Content)
-					appendBlock(&roundBlocks, base.BlockTypeContent, ev.Content, "", "", "")
-					emit(ev)
+				contentBuf.WriteString(ev.Content)
+				appendBlock(&roundBlocks, base.BlockTypeContent, ev.Content, "", "", "")
+				emit(ev)
+					log.Debug("AI块输出", "session", sessionID, "round", state.round, "type", "content", "len", len([]rune(ev.Content)), "preview", truncateStr(ev.Content, 80))
+						// 流式持久化：每 500 字符保存一次，防止刷新丢失 AI 回复内容
+						contentRunes := []rune(contentBuf.String())
+						if len(contentRunes)%500 < len([]rune(ev.Content)) {
+							cp := make([]base.Message, len(history))
+							copy(cp, history)
+							cp = append(cp, base.Message{
+								Role: "assistant", Content: contentBuf.String(),
+								ReasoningContent: reasoningBuf.String(),
+								HasToolCalls: false, Blocks: roundBlocks,
+							})
+							s.sessions.Save(sessionID, cp)
+						}
 				case "tool_call":
 				tcID := fmt.Sprintf("call_%d_%d", state.round, len(toolCalls))
 				toolCalls = append(toolCalls, base.ToolCall{ID: tcID, Type: "function", Function: base.FunctionCall{Name: ev.Tool, Arguments: ev.Args}})
-				roundBlocks = append(roundBlocks, base.ContentBlock{Type: base.BlockTypeToolCall, ToolName: ev.Tool, ToolArgs: ev.Args, ToolCallID: tcID})
-				// Silent tools: don't emit to frontend (security — no data leakage)
+				// Silent tools: don't record in blocks or emit to frontend
 						if !isSilentTool(ev.Tool) {
+							roundBlocks = append(roundBlocks, base.ContentBlock{Type: base.BlockTypeToolCall, ToolName: ev.Tool, ToolArgs: ev.Args, ToolCallID: tcID})
 							emit(ev)
 						}
 					toolRisk := ""
@@ -888,12 +966,17 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 						Labels: map[string]string{"tool": tc.Function.Name, "session": sessionID, "status": toolStatus},
 						Value:  elapsed,
 					})
+					// ── 用户适应层：记录工具执行结果 ──
+					if s.adaptLayer != nil && userID != "" {
+						success := result.Status != base.StatusError
+						s.adaptLayer.OnToolResult(bgCtx, sessionID, userID, tc.Function.Name, success, result.Metadata.DurationMs, state.round)
+					}
 					log.Debug("工具执行完成", "工具", tc.Function.Name, "状态", string(result.Status), "结果", truncateStr(obs, 200))
 					if !isSilentTool(tc.Function.Name) {
-					 emit(base.ChatStreamEvent{Type: "tool_result", Tool: tc.Function.Name, Content: obs})
-				}
-				if len(history) > 0 && history[len(history)-1].Role == "assistant" {
-						history[len(history)-1].Blocks = append(history[len(history)-1].Blocks, base.ContentBlock{Type: base.BlockTypeToolResult, ToolName: tc.Function.Name, ToolResult: obs, ToolCallID: tc.ID})
+					emit(base.ChatStreamEvent{Type: "tool_result", Tool: tc.Function.Name, Content: obs})
+					   if len(history) > 0 && history[len(history)-1].Role == "assistant" {
+					   history[len(history)-1].Blocks = append(history[len(history)-1].Blocks, base.ContentBlock{Type: base.BlockTypeToolResult, ToolName: tc.Function.Name, ToolResult: obs, ToolCallID: tc.ID})
+					 }
 					}
 					history = append(history, base.Message{Role: "tool", Content: obs, ToolCallID: tc.ID})
 					// 追踪信息增益：累积本轮所有工具结果的增益值
@@ -908,8 +991,12 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 					} else {
 						state.consecutiveToolFailures = 0
 					}
-					// 同工具重复检测（按工具名，非类别）
-					if tc.Function.Name == state.lastToolName {
+					// 同工具重复检测：只计非 readonly 工具（连续读文件是正常行为）
+					toolRisk := ""
+					if t, _ := s.registry.Get(tc.Function.Name); t != nil {
+						toolRisk = t.RiskLevel
+					}
+					if toolRisk != "readonly" && tc.Function.Name == state.lastToolName {
 						state.sameToolRepetitions++
 					} else {
 						state.sameToolRepetitions = 0
@@ -980,6 +1067,16 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 				if state.silentRounds >= 5 && len(hints) > 0 {
 					hints = append(hints, fmt.Sprintf("连续%d轮无文字输出", state.silentRounds))
 				}
+				// ── X 值修正提示（注入AI系统消息，不渲染到前端）──
+				if s.tracker != nil {
+					trackerSt := s.tracker.GetSession(sessionID)
+					if trackerSt != nil && trackerSt.XCorrected && trackerSt.XCorrectedMsg != "" {
+						history = append(history, base.Message{Role: "system", Content: "[拓扑反馈] " + trackerSt.XCorrectedMsg})
+						trackerSt.XCorrected = false
+						trackerSt.XCorrectedMsg = ""
+						log.Info("X值修正已注入", "session", sessionID)
+					}
+				}
 				if len(hints) > 0 {
 					feedback := "[拓扑反馈] " + strings.Join(hints, "；") + "。"
 					history = append(history, base.Message{Role: "system", Content: feedback})
@@ -1001,8 +1098,10 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 			// 豁免条件（不拦截）：
 			//   1. AI 已生成有实质的回复（≥80字符）
 			//   2. 上一轮已派生后台 Agent/后台任务处理
+			//   3. 回复中已包含文件引用（发文件=任务完成）
 			shouldIntercept := len(finalContent) < 80 &&
-				!s.hasRecentBackgroundTool(history, 2)
+					!strings.Contains(finalContent, "[文件:") &&
+					!s.hasRecentBackgroundTool(history, 2)
 			isStuckWithTools := state.noProgressToolRounds >= 3 && len(toolCalls) > 0
 			if completed, dist := s.checkCompletionDistance(sessionID); !completed &&
 				(len(toolCalls) == 0 || isStuckWithTools) && state.taskAbandonCount < 3 &&
@@ -1024,14 +1123,15 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 			}
 
 			// ── 最终输出前距离检查 ──
+			// 拓扑完成度信息不再追加到用户可见内容中，改为系统消息注入
 			if topoActive && s.tracker != nil {
-				if completed, dist := s.checkCompletionDistance(sessionID); !completed {
-					finalContent += fmt.Sprintf(
-						"\n\n> ⚠️ 任务尚未完成。完成度 %.1f%%，差距 %.2f。",
-						parsedTopo.Coord.X*10, dist,
-					)
+			if completed, dist := s.checkCompletionDistance(sessionID); !completed {
+			history = append(history, base.Message{Role: "system", Content: fmt.Sprintf(
+			"[拓扑反馈] 任务未完成(完成度 %.1f%%，差距 %.2f)。继续执行或告知用户当前状态。",
+			 parsedTopo.Coord.X*10, dist,
+			 )})
+			 }
 				}
-			}
 
 			history = append(history, base.Message{Role: "assistant", Content: finalContent, ReasoningContent: reasoningBuf.String(), Blocks: roundBlocks})
 			// ── 拓扑验证 + 闭环检查（最后一轮纯文本回复）──
@@ -1053,6 +1153,38 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 			// 发射总耗时事件（前端显示用）
 			totalDur := time.Since(startTime).Milliseconds()
 			emit(base.ChatStreamEvent{Type: "done", Content: fmt.Sprintf("%d", totalDur)})
+
+			// ── 用户适应层：记录会话结束 ──
+			if s.adaptLayer != nil && userID != "" {
+				taskCat := s.adaptLayer.InferTaskCategory(userID, userMessage)
+				toolSuccesses := state.round - state.consecutiveToolFailures
+				if toolSuccesses < 0 {
+					toolSuccesses = 0
+				}
+				trustLocked := false
+				if s.tracker != nil {
+					if trackerSt := s.tracker.GetState(sessionID); trackerSt != nil {
+						trustLocked = trackerSt.Trust.Locked
+					}
+				}
+				summary := &adapt.SessionSummary{
+					SessionID:     sessionID,
+					UserID:        userID,
+					TaskCategory:  taskCat,
+					Rounds:        state.round,
+					ToolCalls:     state.round, // approximate
+					ToolSuccesses: toolSuccesses,
+					ToolFailures:  state.consecutiveToolFailures,
+					TokensIn:      0,
+					TokensOut:     0,
+					TrustLocked:   trustLocked,
+					Completed:     true,
+					DurationSec:   time.Since(startTime).Seconds(),
+					Timestamp:     time.Now().UTC(),
+				}
+				s.adaptLayer.OnSessionEnd(bgCtx, summary)
+			}
+
 			s.sessions.SetState(sessionID, models.SessionStateIdle, "", "")
 			s.sessions.Save(sessionID, history)
 			s.sessions.SetState(sessionID, models.SessionStateIdle, "", "")
@@ -1383,30 +1515,19 @@ func (s *Service) generateSummary(ctx context.Context, messages []base.Message, 
 		{Role: "user", Content: fmt.Sprintf("请总结以下对话历史：\n\n%s", sb.String())},
 	}
 
-	// Call AI (no tools, shorter timeout via context)
-	summaryCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	stream, err := s.provider.ChatStream(summaryCtx, summaryMsgs, nil)
-	if err != nil {
-		return "", fmt.Errorf("summarization call failed: %w", err)
+	// Call AI via unified query client (no tools, 30s timeout)
+	result := s.queryClient.Chat(ctx, summaryMsgs, query.WithTimeout(30*time.Second))
+	if result.Err != nil {
+		return "", fmt.Errorf("summarization failed: %w", result.Err)
 	}
-
-	var summary strings.Builder
-	for ev := range stream {
-		if ev.Type == "content" {
-			summary.WriteString(ev.Content)
-		}
-		if ev.Type == "error" {
-			return "", fmt.Errorf("summarization error: %s", ev.Content)
-		}
-	}
-
-	result := strings.TrimSpace(summary.String())
-	if result == "" {
+	if result.Content == "" {
 		return "", fmt.Errorf("empty summary returned")
 	}
-	return result, nil
+	// Track token usage
+	if result.Usage != nil {
+		s.metrics.RecordTokens(int64(result.Usage.PromptTokens), int64(result.Usage.CompletionTokens), result.Usage.Cost)
+	}
+	return result.Content, nil
 }
 
 // GenerateTitle generates a short conversation title from the first user message.
@@ -1422,38 +1543,29 @@ func (s *Service) GenerateTitle(ctx context.Context, sessionID, userMessage stri
 		{Role: "user", Content: userMessage},
 	}
 
-	titleCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-
-	stream, err := s.provider.ChatStream(titleCtx, titleMsgs, nil)
-	if err != nil {
-		return "", fmt.Errorf("title generation failed: %w", err)
+	result := s.queryClient.Chat(ctx, titleMsgs, query.WithTimeout(15*time.Second))
+	if result.Err != nil {
+		return "", fmt.Errorf("title generation failed: %w", result.Err)
 	}
 
-	var title strings.Builder
-	for ev := range stream {
-		if ev.Type == "content" {
-			title.WriteString(ev.Content)
-		}
-		if ev.Type == "error" {
-			return "", fmt.Errorf("title generation error: %s", ev.Content)
-		}
+	title := strings.TrimSpace(result.Content)
+	// Track token usage
+	if result.Usage != nil {
+		s.metrics.RecordTokens(int64(result.Usage.PromptTokens), int64(result.Usage.CompletionTokens), result.Usage.Cost)
 	}
-
-	result := strings.TrimSpace(title.String())
 	// Strip quotes and excessive punctuation
-	result = strings.Trim(result, "\"'「」\"\"''，。.！!？?：:；;、")
-	if len([]rune(result)) > 20 {
-		result = string([]rune(result)[:20])
+	title = strings.Trim(title, "\"'「」\"\"''，。.！!？?：:；;、")
+	if len([]rune(title)) > 20 {
+		title = string([]rune(title)[:20])
 	}
-	if result == "" {
-		result = "新对话"
+	if title == "" {
+		title = "新对话"
 	}
 
 	// Update session title in DB
-	s.sessions.UpdateTitle(sessionID, result)
+	s.sessions.UpdateTitle(sessionID, title)
 
-	return result, nil
+	return title, nil
 }
 
 // fallbackSummary generates a simple text-based summary when AI summarization fails.
@@ -1509,37 +1621,35 @@ func (s *Service) GetHints(ctx context.Context, sessionID string) []string {
 		toolsList,
 	)
 	messages := []base.Message{{Role: "user", Content: prompt}}
-	stream, err := s.provider.ChatStream(ctx, messages, nil)
-	if err != nil {
+	result := s.queryClient.Chat(ctx, messages, query.WithTimeout(10*time.Second))
+	if result.Err != nil || result.Content == "" {
 		return fallback
 	}
-	var content strings.Builder
-	for ev := range stream {
-		if ev.Type == "content" {
-			content.WriteString(ev.Content)
-		}
+	// Track token usage
+	if result.Usage != nil {
+		s.metrics.RecordTokens(int64(result.Usage.PromptTokens), int64(result.Usage.CompletionTokens), result.Usage.Cost)
 	}
-	text := strings.TrimSpace(content.String())
+	text := strings.TrimSpace(result.Content)
 	if text == "" {
 		return fallback
 	}
 	lines := strings.Split(text, "\n")
-	result := make([]string, 0, 4)
+	hints := make([]string, 0, 4)
 	for _, l := range lines {
 		l = strings.TrimSpace(l)
 		l = strings.TrimLeft(l, "0123456789. )-•·")
 		l = strings.TrimSpace(l)
 		if l != "" {
-			result = append(result, l)
+			hints = append(hints, l)
 		}
 	}
-	if len(result) < 3 {
+	if len(hints) < 3 {
 		return fallback
 	}
-	if len(result) > 5 {
-		result = result[:5]
+	if len(hints) > 5 {
+		hints = hints[:5]
 	}
-	return result
+	return hints
 }
 func (s *Service) GetToolsJSON() []byte {
 	tools := s.registry.All()
@@ -1656,16 +1766,26 @@ func (s *Service) GetAllPromptSections() map[string]interface{} {
 	return result
 }
 
-// UpdatePromptSection 更新提示词并热重载
+// UpdatePromptSection 更新提示词并热重载。保留已有元数据（category/name/keywords/priority）。
 func (s *Service) UpdatePromptSection(ctx context.Context, id, data string) error {
 	if s.promptStore == nil {
 		return fmt.Errorf("promptStore not initialized")
 	}
-	return s.promptStore.UpdatePrompt(ctx, database.PromptRecord{
-		ID:      id,
-		Content: data,
-		Enabled: true,
-	})
+	rec := database.PromptRecord{
+		ID:       id,
+		Content:  data,
+		Enabled:  true,
+		Category: "general",
+		Priority: 5,
+	}
+	// 保留已有元数据
+	if old := s.promptStore.GetPrompt(id); old != nil {
+		rec.Category = old.Category
+		rec.Name = old.Name
+		rec.Keywords = old.Keywords
+		rec.Priority = old.Priority
+	}
+	return s.promptStore.UpdatePrompt(ctx, rec)
 }
 
 // ResetPromptSection 重置提示词（删除 DB 记录，下次 seed 恢复）
@@ -1750,13 +1870,29 @@ func (s *Service) OverrideNextNode(sessionID string, targetCoord interface{}) {
 	s.tracker.OverrideNextNode(sessionID, tc)
 }
 
+// ResetTrust 重置信任状态（手动解锁）
+func (s *Service) ResetTrust(sessionID string) {
+	if s.tracker == nil {
+		return
+	}
+	s.tracker.ResetTrust(sessionID)
+}
+
 // EditMessageTopology 编辑/插入消息并同步拓扑轨迹
 func (s *Service) EditMessageTopology(sessionID, messageIndexStr, content string, insertMode bool) (interface{}, error) {
 	msgIdx, err := strconv.Atoi(messageIndexStr)
 	if err != nil {
 		return nil, fmt.Errorf("invalid message index: %s", messageIndexStr)
 	}
-	// 从会话管理获取历史，计算拓扑 round
+	if insertMode {
+		// 插入模式：在指定位置插入消息，保留后续上下文
+		_, err := s.sessions.InsertAt(sessionID, msgIdx, content)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{"message": "inserted"}, nil
+	}
+	// 编辑模式：从指定位置分叉，截断后续上下文
 	msgs, forkErr := s.sessions.ForkAt(sessionID, msgIdx, content)
 	if forkErr != nil {
 		return nil, forkErr
@@ -1946,7 +2082,8 @@ func (s *Service) executeForcedTool(sessionID, toolName string, bgCtx context.Co
 		return
 	}
 	tcID := fmt.Sprintf("call_%d_force", round)
-	tc := base.ToolCall{ID: tcID, Type: "function", Function: base.FunctionCall{Name: toolName, Arguments: "{}"}}
+	forceArgs := s.forceToolArgs(toolName)
+	tc := base.ToolCall{ID: tcID, Type: "function", Function: base.FunctionCall{Name: toolName, Arguments: forceArgs}}
 	*history = append(*history, base.Message{Role: "assistant", Content: "", ReasoningContent: "[ForceTools]", HasToolCalls: true, ToolCalls: []base.ToolCall{tc}})
 
 	// 执行工具
@@ -1954,8 +2091,9 @@ func (s *Service) executeForcedTool(sessionID, toolName string, bgCtx context.Co
 	defer toolCancel()
 	toolCtx = context.WithValue(toolCtx, base.SessionIDKey{}, sessionID)
 
-	emit(base.ChatStreamEvent{Type: "tool_start", Tool: toolName, Args: "{}"})
-	result := s.chain.Execute(toolCtx, toolName, map[string]any{})
+	emit(base.ChatStreamEvent{Type: "tool_start", Tool: toolName, Args: forceArgs})
+	parsedArgs, _ := register.ParseArgs(forceArgs)
+	result := s.chain.Execute(toolCtx, toolName, parsedArgs)
 	obs := formatObservation(toolName, result)
 	if !isSilentTool(toolName) {
 		emit(base.ChatStreamEvent{Type: "tool_result", Tool: toolName, Content: obs})
@@ -1965,9 +2103,25 @@ func (s *Service) executeForcedTool(sessionID, toolName string, bgCtx context.Co
 	// 记录为被覆盖的拓扑节点
 	if s.tracker != nil && s.isTopologyActive(sessionID) {
 		parsed := topology.ParseResult{Coord: topology.Coordinate{}, Tools: []string{toolName}, Parsed: true}
-		s.tracker.ValidateStep(sessionID, parsed, []string{toolName})
+		s.tracker.ValidateStep(sessionID, &parsed, []string{toolName})
 	}
 	*stateRound++
+}
+
+// forceToolArgs 返回 ForceTools 触发时工具的默认参数（避免空参数导致失败）
+func (s *Service) forceToolArgs(toolName string) string {
+	switch toolName {
+	case "web_search":
+		return `{"query":"yunxi-home"}`
+	case "file_search":
+		return `{"query":"main.go","path":"/","recursive":true,"max_depth":3}`
+	case "file_list":
+		return `{"path":"/"}`
+	case "recall":
+		return `{"query":"project"}`
+	default:
+		return "{}"
+	}
 }
 
 // estimateFromRiskProfile 当 AI 未自报 <topology> 标签时，用 RiskProfile 系统估算坐标。
@@ -2041,7 +2195,7 @@ func (s *Service) emitTopologyUpdate(sessionID string, topoActive bool, parsed t
 	}
 
 	// 运行拓扑验证
-	passed, reason := s.tracker.ValidateStep(sessionID, parsed, actualTools)
+	passed, reason := s.tracker.ValidateStep(sessionID, &parsed, actualTools)
 
 	// 闭环检查（T=true 且进度接近完成）
 	if parsed.Coord.X >= 9.5 {
@@ -2058,10 +2212,18 @@ func (s *Service) emitTopologyUpdate(sessionID string, topoActive bool, parsed t
 		return
 	}
 
-	// 转换轨迹坐标
+	// 转换轨迹坐标 (including tool result status)
 	traj := make([]base.TrajectoryNode, len(st.Trajectory))
 	for i, n := range st.Trajectory {
-		traj[i] = base.TrajectoryNode{X: n.Coord.X, Y: n.Coord.Y, Z: n.Coord.Z, ToolCall: n.ToolCall, Status: string(n.Status)}
+		traj[i] = base.TrajectoryNode{
+			X:          n.Coord.X,
+			Y:          n.Coord.Y,
+			Z:          n.Coord.Z,
+			ToolCall:   n.ToolCall,
+			Status:     string(n.Status),
+			ToolResult: string(n.ToolResult),
+			Reason:     n.Reason,
+		}
 	}
 
 	// 发射 topology_update SSE 事件
@@ -2075,17 +2237,61 @@ func (s *Service) emitTopologyUpdate(sessionID string, topoActive bool, parsed t
 				A: st.Constraint.A, R: st.Constraint.R, T: st.Constraint.T,
 				ForceTools: st.Constraint.ForceTools,
 			},
-			Rejected:     !passed,
-			RejectReason: reason,
-			RejectCount:  st.RejectCount,
-			TrustLies:    st.Trust.Lies,
-			TrustLocked:  st.Trust.Locked,
-			ClosedLoop:   st.ClosedLoop,
-			ClosedDist:   st.ClosedDist,
-			Warning:      st.Warning,
+			Rejected:       !passed,
+			RejectReason:   reason,
+			RejectCount:    st.RejectCount,
+			TrustLies:      st.Trust.Lies,
+			TrustLocked:    st.Trust.Locked,
+			ClosedLoop:     st.ClosedLoop,
+			ClosedDist:     st.ClosedDist,
+			Warning:        st.Warning,
+			CommittedCount: st.CommittedCount,
+			TotalNodes:     st.TotalNodes,
 		},
 	}
 	emit(event)
+
+	// ── Structured topology event for system log ──
+	// Log each validated step so the System Log Viewer can correlate topology events
+	// with middleware tool execution events by session_id.
+	topoLogger := logger.ForComponent("topology")
+	toolList := strings.Join(actualTools, ",")
+	topoStatus := "committed"
+	if !passed {
+		topoStatus = "rejected"
+	}
+	toolStatus := "none"
+	if len(actualTools) > 0 {
+		// Use the most recent result for the first actual tool
+		results := s.tracker.GetRecentResults(sessionID)
+		for i := len(results) - 1; i >= 0; i-- {
+			for _, tool := range actualTools {
+				if results[i].ToolName == tool {
+					if results[i].Success {
+						toolStatus = "success"
+					} else {
+						toolStatus = "error"
+					}
+					break
+				}
+			}
+			if toolStatus != "none" {
+				break
+			}
+		}
+	}
+	topoLogger.Info("拓扑验证",
+		logger.KeySessionID, sessionID,
+		logger.KeyRound, round,
+		"tool", toolList,
+		"topo_status", topoStatus,
+		"tool_status", toolStatus,
+		"x", fmt.Sprintf("%.2f", parsed.Coord.X),
+		"y", fmt.Sprintf("%.2f", parsed.Coord.Y),
+		"z", fmt.Sprintf("%.2f", parsed.Coord.Z),
+		"rejected", !passed,
+		"reason", reason,
+	)
 }
 
 // stripTopoFromBlocks 从 content blocks 中移除 <topology> 标签
@@ -2617,17 +2823,15 @@ func (s *Service) CreateSkill(ctx context.Context, description string) (string, 
 		existing, description, strings.Join(s.toolNames(), ", "))
 
 	messages := []base.Message{{Role: "user", Content: prompt}}
-	stream, err := s.provider.ChatStream(ctx, messages, nil)
-	if err != nil {
-		return "", fmt.Errorf("AI 调用失败: %w", err)
+	result := s.queryClient.Chat(ctx, messages, query.WithTimeout(60*time.Second))
+	if result.Err != nil {
+		return "", fmt.Errorf("AI 调用失败: %w", result.Err)
 	}
-	var yamlBuf strings.Builder
-	for ev := range stream {
-		if ev.Type == "content" {
-			yamlBuf.WriteString(ev.Content)
-		}
+	// Track token usage
+	if result.Usage != nil {
+		s.metrics.RecordTokens(int64(result.Usage.PromptTokens), int64(result.Usage.CompletionTokens), result.Usage.Cost)
 	}
-	yamlContent := strings.TrimSpace(yamlBuf.String())
+	yamlContent := strings.TrimSpace(result.Content)
 	if yamlContent == "" {
 		return "", fmt.Errorf("AI 未生成有效内容")
 	}
@@ -2954,36 +3158,20 @@ func truncateStr(s string, maxLen int) string {
 // generateTitleAsync 异步调用 AI 生成会话标题摘要（不超过15字）。
 // 失败时保留之前已设置的 fallback 标题（取自用户消息前15字）。
 func (s *Service) generateTitleAsync(sessionID, userMessage string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
+	ctx := context.Background()
 
 	msgs := []base.Message{
 		{Role: "system", Content: "你是一个标题生成器。根据用户的第一条请求，生成一个不超过15个字的简短标题，概括核心请求。只输出标题本身，不要解释、不要引号、不要标点。"},
 		{Role: "user", Content: userMessage},
 	}
 
-	stream, err := s.provider.ChatStream(ctx, msgs, nil)
-	if err != nil {
-		log.Debug("标题生成调用失败", "会话", sessionID, "error", err)
+	result := s.queryClient.Chat(ctx, msgs, query.WithTimeout(15*time.Second))
+	if result.Err != nil || result.Content == "" {
+		log.Debug("标题生成失败", "会话", sessionID, "error", result.Err)
 		return
 	}
 
-	var titleBuilder strings.Builder
-	for ev := range stream {
-		if ev.Type == "content" && ev.Content != "" {
-			titleBuilder.WriteString(ev.Content)
-		}
-		if ev.Type == "error" || ev.Type == "done" {
-			break
-		}
-	}
-
-	title := strings.TrimSpace(titleBuilder.String())
-	if title == "" {
-		log.Debug("标题生成为空，使用默认标题", "会话", sessionID)
-		return
-	}
-
+	title := strings.TrimSpace(result.Content)
 	// 限制标题为15个 rune（汉字/字符）
 	runes := []rune(title)
 	if len(runes) > 15 {

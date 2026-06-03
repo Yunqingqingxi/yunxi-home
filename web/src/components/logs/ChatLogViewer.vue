@@ -15,7 +15,7 @@
       </div>
     </div>
 
-    <!-- Filters (timeline mode only) -->
+    <!-- Filters + Pagination (timeline mode only) -->
     <ChatEventFilterBar
       v-if="viewMode === 'timeline'"
       :summary="summary"
@@ -24,6 +24,28 @@
       @update:filter="emit('update:filter', $event)"
       @update:checked="emit('update:checked', $event)"
     />
+
+    <!-- Pagination bar (timeline mode, top of card) -->
+    <div v-if="viewMode === 'timeline' && totalPages > 1" class="pagination-top">
+      <span class="pg-label">分页</span>
+      <div class="pg-controls">
+        <button class="pg-arrow" :disabled="currentPage <= 1" @click="$emit('go-page', 1)" title="首页">«</button>
+        <button class="pg-arrow" :disabled="currentPage <= 1" @click="$emit('go-page', currentPage - 1)" title="上一页">‹</button>
+        <template v-for="p in pageNumbers" :key="p">
+          <span v-if="p === -1" class="pg-dots">…</span>
+          <button v-else :class="['pg-num', { active: p === currentPage }]" @click="$emit('go-page', p)">{{ p }}</button>
+        </template>
+        <button class="pg-arrow" :disabled="currentPage >= totalPages" @click="$emit('go-page', currentPage + 1)" title="下一页">›</button>
+        <button class="pg-arrow" :disabled="currentPage >= totalPages" @click="$emit('go-page', totalPages)" title="末页">»</button>
+      </div>
+      <span class="pg-total">共 {{ totalEvents }} 条</span>
+      <select class="pg-size" :value="pageSize" @change="$emit('page-size', Number(($event.target as HTMLSelectElement).value))">
+        <option :value="50">50条/页</option>
+        <option :value="100">100条/页</option>
+        <option :value="200">200条/页</option>
+        <option :value="500">500条/页</option>
+      </select>
+    </div>
 
     <!-- Timeline -->
     <div v-if="viewMode === 'timeline'" class="viewer-body">
@@ -94,6 +116,10 @@ const props = defineProps<{
   selectedSession: string | null
   hasMore: boolean
   expandedJSON: Set<number>
+	currentPage: number
+	totalPages: number
+	totalEvents: number
+	pageSize: number
 }>()
 
 const emit = defineEmits<{
@@ -105,10 +131,25 @@ const emit = defineEmits<{
   'toggle-json': [index: number]
   'load-more': []
   'fetch-text': []
+	'go-page': [page: number]
+	'page-size': [size: number]
 }>()
 
 const viewMode = ref<ChatViewMode>(props.viewMode)
 watch(viewMode, v => emit('update:viewMode', v))
+
+// Generate page number buttons: show first, last, current±2, with ellipsis
+const pageNumbers = computed(() => {
+  const total = props.totalPages
+  const cur = props.currentPage
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1)
+  const pages: number[] = [1]
+  if (cur > 3) pages.push(-1)
+  for (let p = Math.max(2, cur - 1); p <= Math.min(total - 1, cur + 1); p++) pages.push(p)
+  if (cur < total - 2) pages.push(-1)
+  pages.push(total)
+  return pages
+})
 watch(() => props.viewMode, v => { viewMode.value = v })
 
 const splitLines = computed(() => props.text.split('\n'))
@@ -170,4 +211,30 @@ function toggleLive() {
   font-size: 11px; font-family: inherit;
 }
 .btn-mini:hover { background: var(--surface-hover); color: var(--text-primary); }
+
+/* ── Pagination ── */
+.pagination-top {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; margin: 4px 0;
+  background: var(--surface-card); border: 1px solid var(--border-subtle);
+  border-radius: 8px; font-size: 12px;
+}
+.pg-label { font-weight: 600; color: var(--text-muted); font-size: 11px; margin-right: 4px; }
+.pg-controls { display: flex; align-items: center; gap: 2px; }
+.pg-arrow, .pg-num {
+  min-width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border-default); border-radius: 5px;
+  background: transparent; color: var(--text-secondary); font-size: 12px;
+  font-family: inherit; cursor: pointer; transition: all 0.15s;
+}
+.pg-arrow:hover:not(:disabled), .pg-num:hover { background: var(--surface-hover); color: var(--text-primary); border-color: var(--border-strong); }
+.pg-arrow:disabled { opacity: 0.3; cursor: default; }
+.pg-num.active { background: var(--brand-500); color: #fff; border-color: transparent; font-weight: 600; }
+.pg-dots { width: 28px; text-align: center; color: var(--text-muted); }
+.pg-total { color: var(--text-muted); font-size: 11px; margin-left: 4px; }
+.pg-size {
+  margin-left: auto; padding: 4px 6px; border: 1px solid var(--border-default);
+  border-radius: 5px; background: transparent; color: var(--text-secondary);
+  font-size: 11px; font-family: inherit; cursor: pointer;
+}
 </style>

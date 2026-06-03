@@ -330,6 +330,40 @@ func (m *Manager) ForkAt(sessionID string, messageIndex int, newContent string) 
 	return cp, nil
 }
 
+// InsertAt 在指定位置插入一条用户消息，不截断后续上下文。
+func (m *Manager) InsertAt(sessionID string, messageIndex int, content string) ([]base.Message, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	st, ok := m.sessions[sessionID]
+	if !ok {
+		return nil, fmt.Errorf("session not found: %s", sessionID)
+	}
+	if messageIndex < 1 || messageIndex > len(st.history) {
+		return nil, fmt.Errorf("invalid insert index %d (history has %d messages)", messageIndex, len(st.history))
+	}
+
+	newMsg := base.Message{Role: "user", Content: content}
+	st.history = append(st.history[:messageIndex], append([]base.Message{newMsg}, st.history[messageIndex:]...)...)
+
+	st.info.UpdatedAt = time.Now()
+	if m.repo != nil {
+		messagesJSON, _ := json.Marshal(st.history)
+		st.info.MessagesJSON = string(messagesJSON)
+		go func() { _ = m.repo.Upsert(context.Background(), &st.info) }()
+	}
+
+	log.Info("message inserted",
+		"session", sessionID,
+		"at_index", messageIndex,
+		"new_length", len(st.history),
+	)
+
+	cp := make([]base.Message, len(st.history))
+	copy(cp, st.history)
+	return cp, nil
+}
+
 // GetRawHistory 返回原始消息历史（不含 system prompt）
 func (m *Manager) GetRawHistory(sessionID string) ([]base.Message, error) {
 	m.mu.RLock()
@@ -581,7 +615,7 @@ func (m *Manager) loadFromDB() {
 		return
 	}
 	for _, dbs := range dbSessions {
-		history := []base.Message{{Role: "system", Content: base.CorePrompt}}
+		history := []base.Message{{Role: "system", Content: ""}}
 		if dbs.MessagesJSON != "" && dbs.MessagesJSON != "[]" {
 			var msgs []base.Message
 			if err := json.Unmarshal([]byte(dbs.MessagesJSON), &msgs); err == nil {
@@ -702,7 +736,7 @@ func (m *Manager) systemPrompt(sessionID, userMessage string, recentToolCalls []
 	if m.SystemPromptFn != nil {
 		return m.SystemPromptFn(sessionID, userMessage, recentToolCalls)
 	}
-	return base.BuildSystemPrompt(userMessage, recentToolCalls)
+	return ""
 }
 
 // qqBotPrompt returns the current QQ Bot system prompt.
@@ -710,5 +744,6 @@ func (m *Manager) qqBotPrompt() string {
 	if m.QQBotPromptFn != nil {
 		return m.QQBotPromptFn()
 	}
-	return base.QQBotPrompt
+	// 全部提示词已迁移到 DB，hardcode 回退不再需要。
+	return ""
 }

@@ -37,7 +37,7 @@ type Config struct {
 // DefaultConfig 返回默认配置
 func DefaultConfig() Config {
 	return Config{
-		MaxRounds: 100,
+		MaxRounds: 1000,
 	}
 }
 
@@ -57,7 +57,7 @@ type AgentOrchestrator struct {
 // New 创建编排器
 func New(cfg Config) *AgentOrchestrator {
 	if cfg.MaxRounds <= 0 {
-		cfg.MaxRounds = 100
+		cfg.MaxRounds = 1000
 	}
 	return &AgentOrchestrator{cfg: cfg}
 }

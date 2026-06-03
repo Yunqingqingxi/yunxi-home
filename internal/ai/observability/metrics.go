@@ -321,3 +321,126 @@ agent_role_promotions_total %d
 		snap.RolePromotions,
 	)
 }
+
+// ── Per-User Metrics ───────────────────────────────────────────────────────────
+
+// UserMetricsSnapshot holds aggregated metrics for a single user.
+type UserMetricsSnapshot struct {
+	UserID          string  `json:"user_id"`
+	SessionCount    int     `json:"session_count"`
+	TotalRounds     int     `json:"total_rounds"`
+	TotalToolCalls  int     `json:"total_tool_calls"`
+	TotalFailures   int     `json:"total_failures"`
+	TotalRejects    int     `json:"total_rejects"`
+	TrustLockCount  int     `json:"trust_lock_count"`
+	SuccessRate     float64 `json:"success_rate"`
+	CorrectionCount int     `json:"correction_count"`
+	CancelCount     int     `json:"cancel_count"`
+}
+
+// UserMetricsStore maintains in-memory per-user metric counters.
+type UserMetricsStore struct {
+	mu     sync.RWMutex
+	users  map[string]*userCounters
+}
+
+type userCounters struct {
+	sessionCount    int64
+	totalRounds     int64
+	totalToolCalls  int64
+	totalFailures   int64
+	totalRejects    int64
+	trustLockCount  int64
+	correctionCount int64
+	cancelCount     int64
+}
+
+// NewUserMetricsStore creates a new per-user metrics store.
+func NewUserMetricsStore() *UserMetricsStore {
+	return &UserMetricsStore{
+		users: make(map[string]*userCounters),
+	}
+}
+
+// RecordSession records session-level metrics for a user.
+func (us *UserMetricsStore) RecordSession(userID string, rounds, toolCalls, failures, rejects int, trustLocked, cancelled bool) {
+	us.mu.Lock()
+	defer us.mu.Unlock()
+	uc, ok := us.users[userID]
+	if !ok {
+		uc = &userCounters{}
+		us.users[userID] = uc
+	}
+	uc.sessionCount++
+	uc.totalRounds += int64(rounds)
+	uc.totalToolCalls += int64(toolCalls)
+	uc.totalFailures += int64(failures)
+	uc.totalRejects += int64(rejects)
+	if trustLocked {
+		uc.trustLockCount++
+	}
+	if cancelled {
+		uc.cancelCount++
+	}
+}
+
+// RecordCorrection records a user correction event.
+func (us *UserMetricsStore) RecordCorrection(userID string) {
+	us.mu.Lock()
+	defer us.mu.Unlock()
+	if uc, ok := us.users[userID]; ok {
+		uc.correctionCount++
+	}
+}
+
+// GetSnapshot returns the current metrics snapshot for a user.
+func (us *UserMetricsStore) GetSnapshot(userID string) *UserMetricsSnapshot {
+	us.mu.RLock()
+	defer us.mu.RUnlock()
+	uc, ok := us.users[userID]
+	if !ok {
+		return nil
+	}
+	var successRate float64
+	if uc.totalToolCalls > 0 {
+		successRate = float64(uc.totalToolCalls-uc.totalFailures) / float64(uc.totalToolCalls)
+	}
+	return &UserMetricsSnapshot{
+		UserID:          userID,
+		SessionCount:    int(uc.sessionCount),
+		TotalRounds:     int(uc.totalRounds),
+		TotalToolCalls:  int(uc.totalToolCalls),
+		TotalFailures:   int(uc.totalFailures),
+		TotalRejects:    int(uc.totalRejects),
+		TrustLockCount:  int(uc.trustLockCount),
+		SuccessRate:     successRate,
+		CorrectionCount: int(uc.correctionCount),
+		CancelCount:     int(uc.cancelCount),
+	}
+}
+
+// AllSnapshots returns snapshots for all tracked users.
+func (us *UserMetricsStore) AllSnapshots() []UserMetricsSnapshot {
+	us.mu.RLock()
+	defer us.mu.RUnlock()
+	var results []UserMetricsSnapshot
+	for userID, uc := range us.users {
+		var sr float64
+		if uc.totalToolCalls > 0 {
+			sr = float64(uc.totalToolCalls-uc.totalFailures) / float64(uc.totalToolCalls)
+		}
+		results = append(results, UserMetricsSnapshot{
+			UserID:          userID,
+			SessionCount:    int(uc.sessionCount),
+			TotalRounds:     int(uc.totalRounds),
+			TotalToolCalls:  int(uc.totalToolCalls),
+			TotalFailures:   int(uc.totalFailures),
+			TotalRejects:    int(uc.totalRejects),
+			TrustLockCount:  int(uc.trustLockCount),
+			SuccessRate:     sr,
+			CorrectionCount: int(uc.correctionCount),
+			CancelCount:     int(uc.cancelCount),
+		})
+	}
+	return results
+}

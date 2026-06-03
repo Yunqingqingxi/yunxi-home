@@ -53,7 +53,7 @@ type SkillRunner interface {
 
 // AIService AI 对话服务接口（避免循环依赖）
 type AIService interface {
-		StreamChat(ctx context.Context, sessionID, userMessage string) <-chan AIEvent
+		StreamChat(ctx context.Context, sessionID, userID, userMessage string) <-chan AIEvent
 		InjectSystemMessage(sessionID, content string)
 		ClearSession(sessionID string)
 		CompactSession(sessionID string) string
@@ -349,7 +349,7 @@ func (b *Bot) handleAIChat(ctx context.Context, userID, message string) (string,
 		b.markFilePromptSent(userID)
 	}
 
-	stream := b.aiService.StreamChat(ctx, sessionID, message)
+	stream := b.aiService.StreamChat(ctx, sessionID, "", message)
 
 	var contentBuf strings.Builder
 
@@ -591,6 +591,12 @@ func (b *Bot) extractAndSendFiles(ctx context.Context, userID, text string) stri
 	for _, m := range matches {
 	name := m[1]
 	p := m[2]
+	// 自动补全扩展名：如果显示名没有后缀，从路径中提取
+	if filepath.Ext(name) == "" {
+		if ext := filepath.Ext(p); ext != "" {
+			name = name + ext
+		}
+	}
 	// 沙箱路径 → 真实文件系统路径（始终拼 SandboxRoot）
 	fullPath := filepath.Join(b.cfg.SandboxRoot, strings.TrimPrefix(p, "/")) // TrimPrefix 防止绝对路径覆盖
 	if _, err := os.Stat(fullPath); err == nil {

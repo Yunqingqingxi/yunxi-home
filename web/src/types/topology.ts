@@ -19,8 +19,9 @@ export interface TopologyNode {
   z: number
   round: number
   tool_call: string
-  status: string
+  status: string         // topology status: "committed" | "rejected" | "overridden"
   reason?: string
+  tool_result?: string    // actual tool execution result: "success" | "error" | ""
 }
 
 export interface TopologyUpdate {
@@ -38,6 +39,8 @@ export interface TopologyUpdate {
   warning?: string
   oscillation: boolean
   override: boolean
+  committed_count?: number
+  total_nodes?: number
 }
 
 export interface TopologyState {
@@ -53,6 +56,8 @@ export interface TopologyState {
   closed_distance?: number
   warning?: string
   active: boolean
+  committed_count?: number
+  total_nodes?: number
 }
 
 export interface PromptSection {

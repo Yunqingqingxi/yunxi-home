@@ -18,17 +18,23 @@
 
       <!-- Progress + Trust -->
       <div class="tp-progress">
-        <span class="tp-label">完成度</span>
+        <span class="tp-label">拓扑完成度</span>
         <span class="tp-val" :class="progressColor">{{ progressPct }}%</span>
         <span class="bar"><i :style="{ width: progressPct + '%', backgroundColor: progressBarColor }" /></span>
+      </div>
+      <div class="tp-progress secondary">
+        <span class="tp-label">操作成功率</span>
+        <span class="tp-val small" :class="successRateColor">{{ successRate }}%</span>
+        <span class="bar"><i :style="{ width: successRate + '%', backgroundColor: successRateBarColor }" /></span>
       </div>
       <div class="tp-meta">
         <span>偏离 <b :class="deviationLevel">{{ deviationLabel }}</b></span>
         <span>信任 <b :class="trustColor">{{ trustLabel }}</b></span>
-        <span v-if="successCount !== null" class="tp-stats">
+        <span v-if="successCount !== null || failCount !== null" class="tp-stats">
           <span class="ok">✓ {{ successCount }}</span>
           <span v-if="failCount" class="ng"> ✗ {{ failCount }}</span>
         </span>
+        <button v-if="topology?.trust_locked" class="tp-btn sm" @click="resetTrust" title="手动解锁信任">解锁信任</button>
       </div>
 
       <!-- Lock competition -->
@@ -41,13 +47,14 @@
         </div>
       </div>
 
-      <!-- Recent steps table — no "谁" column, full-width tool name, background tints -->
+      <!-- Recent steps table — dual status: topology + tool result -->
       <div v-if="topology.trajectory?.length" class="tp-table">
         <div class="tp-section-title">最近操作</div>
         <div v-for="n in displayNodes.slice(-10).reverse()" :key="n.round" class="tbl-row" :class="n.status">
           <span class="col-step">{{ n.round }}</span>
           <code class="col-tool">{{ n.tool_call || '思考' }}</code>
           <span class="col-result">{{ resultBadge(n.status) }}</span>
+          <span class="col-tool-result" :class="toolResultClass(n.tool_result)">{{ toolResultBadge(n.tool_result) }}</span>
         </div>
       </div>
 
@@ -80,9 +87,33 @@ const localTopology = ref<TopologyState | null>(null)
 const topology = computed(() => (chatStore.topology as any) || localTopology.value)
 const lockLeases = ref<any[]>([])
 
-const progressPct = computed(() => Math.round(((topology.value?.current_coord?.x || 0) / 10) * 100))
+// ── Progress: weighted formula using committed/total nodes, capped at 99% for active sessions ──
+const progressPct = computed(() => {
+  const nodes = topology.value?.trajectory || []
+  const total = nodes.length
+  if (total === 0) return 0
+  const committed = nodes.filter((n: any) => n.status === 'committed').length
+  // Weighted: 70% from committed/total ratio, 30% from X/10
+  const xBased = Math.min(((topology.value?.current_coord?.x || 0) / 10) * 100, 100)
+  const commitBased = total > 0 ? (committed / total) * 100 : 0
+  const weighted = commitBased * 0.7 + xBased * 0.3
+  // Cap at 99% for active sessions
+  if (topology.value?.active && weighted >= 99) return 99
+  return Math.round(weighted)
+})
 const progressColor = computed(() => topology.value?.reject_count >= 3 ? 'warn' : topology.value?.trust_locked ? 'ng' : 'ok')
 const progressBarColor = computed(() => topology.value?.reject_count >= 3 ? '#f59e0b' : topology.value?.trust_locked ? '#ef4444' : '#22c55e')
+
+// ── Success rate: committed / total nodes ──
+const successRate = computed(() => {
+  const total = topology.value?.total_nodes || (topology.value?.trajectory || []).length
+  if (total === 0) return 100
+  const committed = topology.value?.committed_count || (topology.value?.trajectory || []).filter((n: any) => n.status === 'committed').length
+  return Math.round((committed / total) * 100)
+})
+const successRateColor = computed(() => successRate.value >= 80 ? 'ok' : successRate.value >= 50 ? 'warn' : 'ng')
+const successRateBarColor = computed(() => successRate.value >= 80 ? '#22c55e' : successRate.value >= 50 ? '#f59e0b' : '#ef4444')
+
 const trustLabel = computed(() => {
   const lies = topology.value?.trust_lies || 0
   if (topology.value?.trust_locked) return '已锁定'
@@ -96,12 +127,17 @@ const successCount = computed(() => (topology.value?.trajectory || []).filter((n
 const failCount = computed(() => (topology.value?.trajectory || []).filter((n: any) => n.status === 'rejected').length)
 
 function resultBadge(s: string): string { switch (s) { case 'committed': return '✓'; case 'rejected': return '✗'; case 'overridden': return '⊡'; default: return s } }
+function toolResultBadge(s: string): string { switch (s) { case 'success': return '✓'; case 'error': return '✗'; default: return '—' } }
+function toolResultClass(s: string): string { switch (s) { case 'success': return 'ok'; case 'error': return 'ng'; default: return 'none' } }
 
 async function fetchTopo() { const sid = chatStore.sessionId; if (!sid) return; try { const r = await fetch(`/api/chat/sessions/${sid}/topology`, { headers: { Authorization: `Bearer ${localStorage.getItem('token')}` } }); const d = await r.json(); if (d.code === 200) localTopology.value = d.data } catch {} }
 async function updateConstraint() { const sid = chatStore.sessionId; if (!sid) return; await fetch(`/api/chat/sessions/${sid}/topology/constraint`, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` }, body: JSON.stringify({ a: constraintA.value, r: constraintR.value, t: constraintT.value, force_tools: [] }) }) }
 async function overrideNode() { const sid = chatStore.sessionId; if (!sid) return; await fetch(`/api/chat/sessions/${sid}/topology/override`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` }, body: JSON.stringify({}) }) }
+async function resetTrust() { const sid = chatStore.sessionId; if (!sid) return; await fetch(`/api/chat/sessions/${sid}/topology/trust-reset`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` } }) }
 
 watch(() => chatStore.topology, (v: any) => { if (v) { constraintA.value = v.constraint?.a || 0.8; constraintR.value = v.constraint?.r || 3.0; constraintT.value = v.constraint?.t || false } }, { deep: true })
+// 切换会话时重新获取拓扑状态
+watch(() => chatStore.sessionId, (newSid) => { if (newSid) { fetchTopo() } })
 onMounted(() => { fetchTopo() })
 </script>
 
@@ -122,16 +158,20 @@ onMounted(() => { fetchTopo() })
 .tp-warn.w { background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; }
 .tp-warn.d { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
 .tp-btn { margin-left: auto; padding: 3px 12px; border-radius: 4px; border: 1px solid; background: #fff; cursor: pointer; font-size: 10px; font-weight: 500; }
+	.tp-btn.sm { margin-left: 6px; padding: 2px 8px; font-size: 9px; }
 
-/* Progress */
+	/* Progress */
 .tp-progress { display: flex; align-items: center; gap: 8px; }
-.tp-progress .bar { flex: 1; height: 4px; background: var(--surface-hover); border-radius: 2px; overflow: hidden; }
+.tp-progress.secondary { gap: 8px; }
+	.tp-progress.secondary .bar { height: 3px; }
+	.tp-progress .bar { flex: 1; height: 4px; background: var(--surface-hover); border-radius: 2px; overflow: hidden; }
 .tp-progress .bar i { display: block; height: 100%; border-radius: 2px; transition: width 0.5s, background-color 0.3s; }
 .tp-label { color: var(--text-muted); }
 .tp-val { font-weight: 700; font-size: 13px; min-width: 36px; font-variant-numeric: tabular-nums; }
+.tp-val.small { font-size: 11px; font-weight: 600; }
 .tp-val.ok { color: #22c55e; }
 .tp-val.warn { color: #f59e0b; }
-.tp-val.ng { color: #ef4444; }
+	.tp-val.ng { color: #ef4444; }
 
 /* Meta row */
 .tp-meta { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
@@ -151,16 +191,20 @@ onMounted(() => { fetchTopo() })
 
 /* Table — redesigned: no "谁" column, full-width tool, row-level tints */
 .tp-table { }
-.tbl-row { display: grid; grid-template-columns: 24px 1fr 32px; gap: 8px; align-items: center; padding: 4px 6px; border-radius: 4px; margin-bottom: 1px; font-size: 11px; }
+.tbl-row { display: grid; grid-template-columns: 24px 1fr 32px 24px; gap: 6px; align-items: center; padding: 4px 6px; border-radius: 4px; margin-bottom: 1px; font-size: 11px; }
 .tbl-row.committed { background: rgba(34,197,94,0.06); }
 .tbl-row.rejected { background: rgba(239,68,68,0.08); }
 .tbl-row.overridden { background: rgba(245,158,11,0.08); }
 .col-step { color: var(--text-muted); text-align: right; font-variant-numeric: tabular-nums; }
 .col-tool { font-family: monospace; font-size: 10.5px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .col-result { text-align: center; font-weight: 700; font-size: 12px; }
-.tbl-row.committed .col-result { color: #22c55e; }
-.tbl-row.rejected .col-result { color: #ef4444; }
-.tbl-row.overridden .col-result { color: #f59e0b; }
+.col-tool-result { text-align: center; font-weight: 700; font-size: 10px; }
+.col-tool-result.ok { color: #22c55e; }
+.col-tool-result.ng { color: #ef4444; }
+	.col-tool-result.none { color: var(--text-muted); }
+	.tbl-row.committed .col-result { color: #22c55e; }
+	.tbl-row.rejected .col-result { color: #ef4444; }
+	.tbl-row.overridden .col-result { color: #f59e0b; }
 
 /* Expert */
 .tp-expert { border-top: 1px solid var(--border-subtle); padding-top: 6px; }

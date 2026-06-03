@@ -16,6 +16,7 @@ import (
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/base"
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/mcp"
 	"github.com/Yunqingqingxi/yunxi-home/internal/models"
+	webmw "github.com/Yunqingqingxi/yunxi-home/internal/web/middleware"
 	"github.com/Yunqingqingxi/yunxi-home/internal/toolreg"
 )
 
@@ -95,7 +96,13 @@ func (h *ChatHandler) Chat(c echo.Context) error {
 		intensity = h.aiService.ReasoningFor(req.Model)
 	}
 	ctx = context.WithValue(ctx, base.ReasoningIntensityKey{}, intensity)
-	stream := h.aiService.StreamChat(ctx, req.SessionID, req.Message, req.Model)
+
+	// Extract user identity from JWT claims for the adaptation layer
+	userID := ""
+	if claims := webmw.GetClaims(c); claims != nil {
+		userID = fmt.Sprintf("%d", claims.UserID)
+	}
+	stream := h.aiService.StreamChat(ctx, req.SessionID, userID, req.Message, req.Model)
 
 	for ev := range stream {
 		data, _ := json.Marshal(ev)
@@ -623,6 +630,20 @@ func (h *ChatHandler) OverrideNode(c echo.Context) error {
 	c.Bind(&req)
 	h.aiService.OverrideNextNode(id, req.TargetCoord)
 	return c.JSON(http.StatusOK, successResp(map[string]string{"status": "override_accepted"}))
+}
+
+// ResetTrust resets the topology trust state (unlocks trust and resets lie counter).
+// POST /api/chat/sessions/:id/topology/trust-reset
+func (h *ChatHandler) ResetTrust(c echo.Context) error {
+	if h.aiService == nil {
+		return c.JSON(http.StatusNotFound, errorResp("AI 未启用"))
+	}
+	id := c.Param("id")
+	if id == "" {
+		return c.JSON(http.StatusBadRequest, errorResp("缺少 session_id"))
+	}
+	h.aiService.ResetTrust(id)
+	return c.JSON(http.StatusOK, successResp(map[string]string{"status": "trust_reset"}))
 }
 
 // EditMessage edits or inserts a message at the given index.

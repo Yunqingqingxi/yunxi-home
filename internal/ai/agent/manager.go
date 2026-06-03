@@ -28,7 +28,7 @@ func NewManager(cfg ManagerConfig) *Manager {
 		cfg.MaxConcurrent = 5
 	}
 	if cfg.MaxRounds <= 0 {
-		cfg.MaxRounds = 100
+		cfg.MaxRounds = 1000
 	}
 	if cfg.AgentTimeout <= 0 {
 		cfg.AgentTimeout = 10 * time.Minute
@@ -293,7 +293,9 @@ func (m *Manager) runAgent(agent *SubAgent, parentID string) {
 		{Role: "system", Content: fmt.Sprintf(
 			"你是一个子任务执行 Agent。你的唯一目标是完成以下任务:\n%s\n\n"+
 				"规则:\n- 只使用已分配的工具\n- 保持简洁高效\n- 完成后用一句话总结结果\n"+
-				"- 最多执行 %d 轮", agent.Goal, m.config.MaxRounds,
+				"- 最多执行 %d 轮\n"+
+				"- 输出中的每个文件必须用 [文件: 文件名 (完整路径)] 格式引用，例: [文件: report.html (/data/report.html)]",
+			agent.Goal, m.config.MaxRounds,
 		)},
 	}
 

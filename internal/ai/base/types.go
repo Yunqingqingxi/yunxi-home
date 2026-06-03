@@ -278,28 +278,32 @@ type ChatStreamEvent struct {
 
 // TopologyUpdateEvent is emitted after each topology validation round.
 type TrajectoryNode struct {
-	X        float64 `json:"x"`
-	Y        float64 `json:"y"`
-	Z        float64 `json:"z"`
-	ToolCall string  `json:"tool_call"`
-	Status   string  `json:"status"` // "success" | "error" | "committed"
+	X          float64 `json:"x"`
+	Y          float64 `json:"y"`
+	Z          float64 `json:"z"`
+	ToolCall   string  `json:"tool_call"`
+	Status     string  `json:"status"`      // "committed" | "rejected" | "overridden" (topology status)
+	ToolResult string  `json:"tool_result"` // "success" | "error" | "" (actual tool execution result)
+	Reason     string  `json:"reason,omitempty"`
 }
 
 type TopologyUpdateEvent struct {
-	SessionID    string           `json:"session_id"`
-	Coord        Coordinate       `json:"coord"`
-	Trajectory   []TrajectoryNode `json:"trajectory"`
-	Constraint   TopologyConstraint `json:"constraint"`
-	Rejected     bool       `json:"rejected"`
-	RejectReason string     `json:"reject_reason,omitempty"`
-	RejectCount  int        `json:"reject_count"`
-	TrustLies    int        `json:"trust_lies"`
-	TrustLocked  bool       `json:"trust_locked"`
-	ClosedLoop   bool       `json:"closed_loop"`
-	ClosedDist   float64    `json:"closed_distance,omitempty"`
-	Warning      string     `json:"warning,omitempty"`
-	Oscillation  bool       `json:"oscillation"`
-	Override     bool       `json:"override"`
+	SessionID      string             `json:"session_id"`
+	Coord          Coordinate         `json:"coord"`
+	Trajectory     []TrajectoryNode   `json:"trajectory"`
+	Constraint     TopologyConstraint `json:"constraint"`
+	Rejected       bool               `json:"rejected"`
+	RejectReason   string             `json:"reject_reason,omitempty"`
+	RejectCount    int                `json:"reject_count"`
+	TrustLies      int                `json:"trust_lies"`
+	TrustLocked    bool               `json:"trust_locked"`
+	ClosedLoop     bool               `json:"closed_loop"`
+	ClosedDist     float64            `json:"closed_distance,omitempty"`
+	Warning        string             `json:"warning,omitempty"`
+	Oscillation    bool               `json:"oscillation"`
+	Override       bool               `json:"override"`
+	CommittedCount int                `json:"committed_count,omitempty"`
+	TotalNodes     int                `json:"total_nodes,omitempty"`
 }
 
 // Coordinate is a 3D point in topology space (mirror of topology.Coordinate for SSE).

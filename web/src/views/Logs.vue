@@ -38,6 +38,10 @@
           :selected-session="store.selectedSessionId"
           :has-more="store.chatHasMore"
           :expandedJSON="store.chatJSONExpanded"
+          :current-page="store.chatCurrentPage"
+          :total-pages="store.chatTotalPages"
+          :total-events="store.chatTotal"
+          :page-size="store.chatPageSize"
           @update:view-mode="store.chatViewMode = $event"
           @update:filter="onChatFilterChange"
           @update:checked="store.chatEventChecks = $event"
@@ -46,6 +50,8 @@
           @toggle-json="onToggleJSON"
           @load-more="store.loadMoreEvents()"
           @fetch-text="store.fetchChatText()"
+          @go-page="store.goToPage($event)"
+          @page-size="store.chatPageSize = $event; store.goToPage(1)"
         />
       </div>
     </div>

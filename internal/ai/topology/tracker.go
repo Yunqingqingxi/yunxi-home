@@ -45,6 +45,11 @@ type sessionTracker struct {
 	VelocityIdx         int        // index into VelocityHistory
 	StuckRounds         int        // consecutive rounds with velocity ≈ 0
 	LastCoord           Coordinate // coordinate from previous round for delta calc
+	consecutiveSuccesses int      // consecutive successful tool executions for trust recovery
+	recentResults        []ToolResultInfo // ring buffer of recent tool execution results
+	committedCount       int      // total committed nodes
+		XCorrected           bool     // X was auto-corrected this round
+		XCorrectedMsg        string   // system hint for AI about X correction
 }
 
 // Repository is the persistence interface for topology data.
@@ -71,6 +76,8 @@ type SessionRecord struct {
 	ForceToolsTriggered bool       `json:"force_tools_triggered"`
 	ClosedLoop          bool       `json:"closed_loop"`
 	ClosedDist          float64    `json:"closed_distance"`
+	CommittedCount      int        `json:"committed_count"`
+	TotalNodes          int        `json:"total_nodes"`
 	CreatedAt           time.Time  `json:"created_at"`
 	UpdatedAt           time.Time  `json:"updated_at"`
 	LastActiveAt        time.Time  `json:"last_active_at"`
@@ -136,19 +143,21 @@ func (t *Tracker) GetState(sessionID string) *SessionState {
 	copy(trajectory, st.Nodes)
 
 	return &SessionState{
-		SessionID:    st.SessionID,
-		CurrentCoord: st.CurrentCoord,
-		StartCoord:   st.StartCoord,
-		Constraint:   st.Constraint,
-		Trajectory:   trajectory,
-		Trust:        st.Trust,
-		RejectCount:  st.RejectCount,
-		ClosedLoop:   st.ClosedLoop,
-		ClosedDist:   st.ClosedDist,
-		Warning:      st.Warning,
-		Active:       st.Active,
-		Velocity:     st.Velocity,
-		StuckRounds:  st.StuckRounds,
+		SessionID:      st.SessionID,
+		CurrentCoord:   st.CurrentCoord,
+		StartCoord:     st.StartCoord,
+		Constraint:     st.Constraint,
+		Trajectory:     trajectory,
+		Trust:          st.Trust,
+		RejectCount:    st.RejectCount,
+		ClosedLoop:     st.ClosedLoop,
+		ClosedDist:     st.ClosedDist,
+		Warning:        st.Warning,
+		Active:         st.Active,
+		Velocity:       st.Velocity,
+		StuckRounds:    st.StuckRounds,
+		CommittedCount: st.committedCount,
+		TotalNodes:     len(st.Nodes),
 	}
 }
 
@@ -156,7 +165,7 @@ func (t *Tracker) GetState(sessionID string) *SessionState {
 
 // ValidateStep runs all validators on a proposed coordinate.
 // Returns true if the step passes, along with the validation result.
-func (t *Tracker) ValidateStep(sessionID string, proposed ParseResult, actualTools []string) (bool, string) {
+func (t *Tracker) ValidateStep(sessionID string, proposed *ParseResult, actualTools []string) (bool, string) {
 	st := t.GetSession(sessionID)
 	if st == nil {
 		return true, "" // Not tracked, allow all
@@ -245,6 +254,15 @@ func (t *Tracker) ValidateStep(sessionID string, proposed ParseResult, actualToo
 		}
 	}
 
+	// 1.5 X 单调递增校验：AI 报的 X 必须 > 当前值。后端静默修正 + 注入系统提示，不渲染到前端。
+	if proposed.Coord.X > 0 && proposed.Coord.X <= st.CurrentCoord.X {
+		oldX := proposed.Coord.X
+		proposed.Coord.X = st.CurrentCoord.X + 1
+		st.XCorrected = true
+		st.XCorrectedMsg = fmt.Sprintf("拓扑X值违规！当前X=%.1f，你报了X=%.1f（必须 > %.1f）。已强制修正为%.1f。X是无上限累积制不是0-10！下次报 >=%.0f！",
+			st.CurrentCoord.X, oldX, st.CurrentCoord.X, proposed.Coord.X, st.CurrentCoord.X+1)
+	}
+
 	// 2. Check geometry
 	geoResult := CheckGeometry(st.CurrentCoord, proposed.Coord, st.Constraint)
 	if !geoResult.Passed {
@@ -271,24 +289,40 @@ func (t *Tracker) ValidateStep(sessionID string, proposed ParseResult, actualToo
 		for _, tool := range actualTools {
 			truthResult := CheckTruthfulness(tool, st.CurrentCoord, proposed.Coord)
 			if !truthResult.Passed {
-				st.Trust.Lies++
-				st.RejectCount++
-				node := Node{
-					Coord:     proposed.Coord,
-					Round:     len(st.Nodes),
-					Timestamp: time.Now(),
-					ToolCall:  tool,
-					Status:    NodeRejected,
-					Reason:    truthResult.Reason,
+				// Check if this tool actually failed (execution error ≠ lie)
+				toolFailed := st.wasToolFailure(tool)
+				if toolFailed {
+					// Tool execution failed — reject but don't count as a lie
+					st.RejectCount++
+					node := Node{
+						Coord:      proposed.Coord,
+						Round:      len(st.Nodes),
+						Timestamp:  time.Now(),
+						ToolCall:   tool,
+						Status:     NodeRejected,
+						Reason:     "tool execution failed: " + truthResult.Reason,
+						ToolResult: ToolResultError,
+					}
+					st.Nodes = append(st.Nodes, node)
+					t.checkpointMaybe(sessionID, st, &node)
+					log.Info("工具执行失败(非信任违规)", "session", sessionID, "tool", tool, "reason", truthResult.Reason)
+					return false, "tool execution failed: " + truthResult.Reason
 				}
-				st.Nodes = append(st.Nodes, node)
-				t.checkpointMaybe(sessionID, st, &node)
 
-				if st.Trust.Lies >= MaxLiesBeforeLock {
-					st.Trust.Locked = true
-					log.Warn("信任已锁定", "session", sessionID, "lies", st.Trust.Lies)
-				}
-				return false, truthResult.Reason
+					// 工具成功了但坐标不匹配：不计数为撒谎，只记录节点
+					node := Node{
+						Coord:      proposed.Coord,
+						Round:      len(st.Nodes),
+						Timestamp:  time.Now(),
+						ToolCall:   tool,
+						Status:     NodeRejected,
+						Reason:     truthResult.Reason,
+						ToolResult: ToolResultSuccess,
+					}
+					st.Nodes = append(st.Nodes, node)
+					t.checkpointMaybe(sessionID, st, &node)
+					log.Info("坐标校验不匹配(工具成功不计数为撒谎)", "session", sessionID, "tool", tool, "reason", truthResult.Reason)
+					return false, truthResult.Reason
 			}
 		}
 	}
@@ -296,12 +330,29 @@ func (t *Tracker) ValidateStep(sessionID string, proposed ParseResult, actualToo
 	// All validations passed — commit node
 	st.RejectCount = 0
 	st.Warning = ""
+	st.committedCount++
+
+	// Look up actual tool result for committed nodes
+	toolResultStatus := ToolResultNone
+	if len(actualTools) > 0 {
+		for _, tool := range actualTools {
+			if st.wasToolFailure(tool) {
+				toolResultStatus = ToolResultError
+				break
+			}
+		}
+		if toolResultStatus == ToolResultNone {
+			toolResultStatus = ToolResultSuccess
+		}
+	}
+
 	node := Node{
-		Coord:     proposed.Coord,
-		Round:     len(st.Nodes),
-		Timestamp: time.Now(),
-		ToolCall:  fmt.Sprintf("%v", actualTools),
-		Status:    NodeCommitted,
+		Coord:      proposed.Coord,
+		Round:      len(st.Nodes),
+		Timestamp:  time.Now(),
+		ToolCall:   fmt.Sprintf("%v", actualTools),
+		Status:     NodeCommitted,
+		ToolResult: toolResultStatus,
 	}
 	st.Nodes = append(st.Nodes, node)
 	st.CurrentCoord = proposed.Coord
@@ -481,11 +532,11 @@ func (t *Tracker) ShouldForceTools(sessionID string, recentHistory []string, con
 		return ""
 	}
 
-	// Trigger if stuck: consecutive failures >= threshold, regardless of X
+	// Trigger if stuck: consecutive failures >= threshold
 	stuck := consecutiveFailures >= ForceToolsStuckThreshold
 
-	// Trigger if progress stalled below threshold
-	progressStalled := st.CurrentCoord.X < ForceToolsProgressThreshold && len(st.Nodes) >= 3
+	// Trigger if progress stalled (X hasn't moved in last 3+ rounds)
+	progressStalled := st.StuckRounds >= 3 && len(st.Nodes) >= 3
 
 	if !stuck && !progressStalled {
 		return ""
@@ -624,7 +675,87 @@ func (st *sessionTracker) toRecord() *SessionRecord {
 		ForceToolsTriggered: st.ForceToolsTriggered,
 		ClosedLoop:          st.ClosedLoop,
 		ClosedDist:          st.ClosedDist,
+		CommittedCount:      st.committedCount,
+		TotalNodes:          len(st.Nodes),
 	}
+}
+
+// ── Tool Result Tracking ──────────────────────────────────────
+
+const maxRecentResults = 20 // ring buffer size for recent tool results
+
+// RecordToolResult records a tool execution outcome for a session.
+// Used by the middleware chain to feed actual tool results into topology tracking.
+// This enables the topology system to differentiate between:
+//   - Tool execution failure (exit ≠ 0) → recorded but not a "lie"
+//   - Trust violation (tool succeeded but coordinates don't match risk profile) → counts as a lie
+func (t *Tracker) RecordToolResult(sessionID, toolName string, success bool, durationMs int64) {
+	st := t.GetSession(sessionID)
+	if st == nil {
+		return
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	status := ToolResultSuccess
+	if !success {
+		status = ToolResultError
+	}
+
+	result := ToolResultInfo{
+		ToolName:   toolName,
+		Success:    success,
+		DurationMs: durationMs,
+		Status:     status,
+		Timestamp:  time.Now(),
+	}
+
+	// Maintain ring buffer of recent results
+	st.recentResults = append(st.recentResults, result)
+	if len(st.recentResults) > maxRecentResults {
+		st.recentResults = st.recentResults[len(st.recentResults)-maxRecentResults:]
+	}
+
+	// Trust auto-recovery: after N consecutive successful tool executions,
+	// automatically unlock trust if it was locked
+	if success {
+		st.consecutiveSuccesses++
+		if st.Trust.Locked && st.consecutiveSuccesses >= ConsecutiveSuccessesForUnlock {
+			st.Trust.Lies = 0
+			st.Trust.Locked = false
+			st.Warning = ""
+			st.consecutiveSuccesses = 0
+			log.Info("信任自动恢复", "session", sessionID, "consecutive_successes", st.consecutiveSuccesses)
+		}
+	} else {
+		st.consecutiveSuccesses = 0
+	}
+}
+
+// wasToolFailure checks if the most recent result for the given tool was a failure.
+// Must be called while holding st.mu (either Lock or RLock).
+func (st *sessionTracker) wasToolFailure(toolName string) bool {
+	// Scan recent results in reverse (most recent first)
+	for i := len(st.recentResults) - 1; i >= 0; i-- {
+		if st.recentResults[i].ToolName == toolName {
+			return !st.recentResults[i].Success
+		}
+	}
+	return false
+}
+
+// GetRecentResults returns recent tool execution results for a session.
+func (t *Tracker) GetRecentResults(sessionID string) []ToolResultInfo {
+	st := t.GetSession(sessionID)
+	if st == nil {
+		return nil
+	}
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	cp := make([]ToolResultInfo, len(st.recentResults))
+	copy(cp, st.recentResults)
+	return cp
 }
 
 // ── Shutdown ──────────────────────────────────────────────────

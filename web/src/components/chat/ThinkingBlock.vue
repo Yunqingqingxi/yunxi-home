@@ -14,7 +14,7 @@ import { renderMarkdown } from '../../stores/chat'
 const props = defineProps<{ reasoning?: string; streaming?: boolean }>()
 const open = ref(false)
 const displayHtml = computed(() => renderMarkdown(props.reasoning || ''))
-watch(() => props.streaming, (s) => { if (s) open.value = true }, { immediate: true })
+watch(() => props.streaming, (s) => { if (s) open.value = true })
 </script>
 
 <style scoped>

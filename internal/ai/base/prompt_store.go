@@ -44,13 +44,9 @@ func NewPromptStore(repo dbase.PromptRepository) *PromptStore {
 	}
 }
 
-// SeedDefaults writes the built-in minimal prompts to DB on first run.
+// SeedDefaults 首次启动时写入内置默认提示词到 DB（已废弃——生产提示词通过 DB hot-reload 管理）。
 func (ps *PromptStore) SeedDefaults(ctx context.Context) error {
-	if ps.repo == nil {
-		return nil
-	}
-	seeds := SeedPrompts()
-	return ps.repo.InitDefaults(ctx, seeds)
+return nil
 }
 
 // LoadAll loads all prompts from DB into memory cache.
@@ -157,6 +153,19 @@ func (ps *PromptStore) GetActivatedContexts(sessionID string) []string {
 }
 
 // GetSpecializedPrompt returns the content for a specialized prompt by ID.
+// GetPrompt returns a single prompt by ID from in-memory cache.
+func (ps *PromptStore) GetPrompt(id string) *dbase.PromptRecord {
+	ps.mu.RLock()
+	defer ps.mu.RUnlock()
+	for _, p := range ps.general {
+		if p.ID == id { c := p; return &c }
+	}
+	for _, p := range ps.specialized {
+		if p.ID == id { c := p; return &c }
+	}
+	return nil
+}
+
 func (ps *PromptStore) GetSpecializedPrompt(id string) string {
 	ps.mu.RLock()
 	defer ps.mu.RUnlock()
@@ -234,15 +243,19 @@ func (ps *PromptStore) BuildSystemPrompt(sessionID, userMessage string, recentTo
 		}
 	}
 
-	log.Info("System Prompt 已组装",
+	result := sb.String()
+	log.Warn("SystemPrompt组装", // WARN 级别便于生产环境追踪提示词激活
 		"session", sessionID,
 		"general_count", len(generalNames),
 		"general_ids", strings.Join(generalNames, ","),
 		"specialized_activated", len(activeSpecialized),
 		"specialized_ids", strings.Join(activeSpecialized, ","),
+		"total_len", len([]rune(result)),
+		"preview_head", truncateRunes(result, 200),
+		"preview_tail", tailRunes(result, 200),
 	)
 
-	return sb.String()
+	return result
 }
 
 // TryAutoActivate runs keyword matching and activates matched contexts for a session.
@@ -381,3 +394,15 @@ func BuildTopologyMessage(x, y, z, a, r float64, t bool, acked bool) string {
 
 // TopologyMsgPrefix is the prefix used to identify topology state messages in history.
 const TopologyMsgPrefix = "<t:"
+
+func truncateRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n { return s }
+	return string(r[:n]) + "..."
+}
+
+func tailRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n { return s }
+	return "..." + string(r[len(r)-n:])
+}

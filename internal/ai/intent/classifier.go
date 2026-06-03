@@ -7,17 +7,18 @@ import (
 	"time"
 
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/base"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai/query"
 )
 
 // Classifier uses the LLM to classify user intent into a tool name.
 type Classifier struct {
-	provider   base.AIProvider
+	client      *query.Client
 	toolCatalog string // pre-built tool name + description catalog
 }
 
 // NewClassifier creates a Stage 2 LLM classifier.
 // toolDefs is the list of all registered tools from the registry.
-func NewClassifier(provider base.AIProvider, toolDefs []base.ToolDef) *Classifier {
+func NewClassifier(client *query.Client, toolDefs []base.ToolDef) *Classifier {
 	// Build a compact tool catalog string
 	var sb strings.Builder
 	for i, t := range toolDefs {
@@ -35,15 +36,15 @@ func NewClassifier(provider base.AIProvider, toolDefs []base.ToolDef) *Classifie
 		sb.WriteString(fmt.Sprintf("%s: %s", t.Name, desc))
 	}
 	return &Classifier{
-		provider:    provider,
+		client:      client,
 		toolCatalog: sb.String(),
 	}
 }
 
 // Classify runs the LLM with a small classification prompt and returns a tool name.
-// Returns "NONE" for chit-chat, "" on error/timeout.
+// Returns "" for chit-chat or on error/timeout.
 func (c *Classifier) Classify(ctx context.Context, userMsg string) string {
-	if c.provider == nil {
+	if c.client == nil {
 		return ""
 	}
 
@@ -63,25 +64,14 @@ func (c *Classifier) Classify(ctx context.Context, userMsg string) string {
 
 	messages := []base.Message{{Role: "user", Content: prompt}}
 
-	// Use a short timeout for classification (5 seconds)
-	classifyCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	stream, err := c.provider.ChatStream(classifyCtx, messages, nil)
-	if err != nil {
+	result := c.client.Chat(ctx, messages, query.WithTimeout(5*time.Second))
+	if result.Err != nil || result.Content == "" {
 		return ""
 	}
 
-	var result strings.Builder
-	for ev := range stream {
-		if ev.Type == "content" {
-			result.WriteString(ev.Content)
-		}
-	}
-
-	tool := strings.TrimSpace(result.String())
+	tool := strings.TrimSpace(result.Content)
 	// Sanitize: remove quotes, punctuation, newlines
-	tool = strings.Trim(tool, `"'` + "`~\n\r\t ")
+	tool = strings.Trim(tool, `"'`+"`~\n\r\t ")
 	tool = strings.ToLower(tool)
 
 	if tool == "" || tool == "none" {

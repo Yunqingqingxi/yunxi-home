@@ -42,21 +42,7 @@
           @wheel.passive="onPanelWheel"
           @touchmove.passive="onPanelTouchMove"
         >
-          <div class="sticky-panels">
-            <InterruptBanner
-              :visible="interruptBannerVisible && !!store.interruptSnapshot"
-              :progress="store.interruptSnapshot?.progress || 0"
-              :last-task="store.interruptSnapshot?.last_task || ''"
-              @continue="onInterruptContinue"
-              @retry="onInterruptRetry"
-              @dismiss="onInterruptNewTask"
-            />
-            <AgentStatusBar
-              :visible="store.isStreaming || store.hasRunningAgents"
-              :agents="store.agents"
-              :tool-name="store.currentToolName"
-            />
-          </div>
+          <div class="sticky-panels"></div>
           <LockConflictNotice :conflicts="store.lockConflicts" />
           <TodoPanel :items="store.todoList" />
           <AgentPanel :agents="store.agents" />
@@ -178,6 +164,11 @@
         <svg :class="{ rotated: !infoCollapsed }" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6,4 10,8 6,12"/></svg>
       </button>
       <div v-if="!infoCollapsed" class="ip-body">
+        <AgentStatusBar
+          :visible="store.isStreaming || store.hasRunningAgents"
+          :agents="store.agents"
+          :tool-name="store.currentToolName"
+        />
         <TopologyPanel />
         <MetaReportCard :report="store.metaReport" :visible="store.agents.some((a: any) => a.role === 'supervisor' || a.role === 'manager')" />
         <div class="ip-section">
@@ -226,7 +217,6 @@ import Sidebar from '../components/chat/Sidebar.vue'
 import HomeState from '../components/chat/HomeState.vue'
 import ChatInputBar from '../components/chat/ChatInputBar.vue'
 import TopologyPanel from '../components/chat/TopologyPanel.vue'
-import InterruptBanner from '../components/chat/InterruptBanner.vue'
 import AgentStatusBar from '../components/chat/AgentStatusBar.vue'
 import LockConflictNotice from '../components/chat/LockConflictNotice.vue'
 import MetaReportCard from '../components/chat/MetaReportCard.vue'
@@ -243,43 +233,6 @@ const currentTitle = computed(() => store.conversations.find(c => c.id === store
 const safeMessages = computed(() => store.messages.filter(m => m != null))
 
 // ── Interrupt banner state ──
-const interruptBannerVisible = ref(false)
-let _interruptTimer: ReturnType<typeof setTimeout> | null = null
-
-// Watch store interruptSnapshot to show banner
-watch(() => store.interruptSnapshot, (snap) => {
-  if (snap) {
-    interruptBannerVisible.value = true
-    if (_interruptTimer) clearTimeout(_interruptTimer)
-    _interruptTimer = setTimeout(() => { interruptBannerVisible.value = false }, 30000)
-  }
-}, { deep: true })
-
-function dismissBanner() {
-  interruptBannerVisible.value = false
-  store.interruptSnapshot = null
-  if (_interruptTimer) { clearTimeout(_interruptTimer); _interruptTimer = null }
-}
-
-function onInterruptContinue() {
-  dismissBanner()
-  // 清理重连流 + streaming 状态，避免 sendMessage 误走注入路径
-  store.disconnectStream()
-  store.streamingSessions[store.sessionId] = false
-  store.sendMessage('继续', '', {})
-}
-
-function onInterruptRetry() {
-  dismissBanner()
-  store.disconnectStream()
-  store.streamingSessions[store.sessionId] = false
-  store.sendMessage('换个方式重新执行刚才的任务', '', {})
-}
-
-function onInterruptNewTask() {
-  dismissBanner()
-}
-
 const msgContainer = ref(null)
 const scrollAnchor = ref(null)
 const renderError = ref(false)

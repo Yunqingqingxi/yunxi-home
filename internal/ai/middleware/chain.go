@@ -14,11 +14,16 @@ import (
 
 var log = logger.ForComponent("middleware")
 
+// ToolResultCallback is called after every tool execution to allow external systems
+// (e.g., topology tracker) to observe tool outcomes.
+type ToolResultCallback func(ctx context.Context, toolName string, result *base.ToolResult)
+
 // Chain 工具调用中间件链
 type Chain struct {
-	registry *register.Registry
-	maxRetry int
-	deny     *DenyEngine // 硬边界：不可绕过的安全规则引擎
+	registry    *register.Registry
+	maxRetry    int
+	deny        *DenyEngine // 硬边界：不可绕过的安全规则引擎
+	onResult    ToolResultCallback
 }
 
 // NewChain 创建中间件链
@@ -29,14 +34,31 @@ func NewChain(reg *register.Registry) *Chain {
 // DenyEngine 返回拒绝规则引擎（供外部添加自定义规则）
 func (c *Chain) DenyEngine() *DenyEngine { return c.deny }
 
+// SetResultCallback registers a callback invoked after each tool execution.
+// Used by the topology tracker to observe tool outcomes.
+func (c *Chain) SetResultCallback(cb ToolResultCallback) {
+	c.onResult = cb
+}
+
 // Execute 执行工具调用，经过 pre → retry → post 处理
 func (c *Chain) Execute(ctx context.Context, toolName string, args map[string]any) *base.ToolResult {
 	start := time.Now()
 
+	// Extract session ID from context for logging and topology correlation
+	sessionID := ""
+	if v := ctx.Value(base.SessionIDKey{}); v != nil {
+		if sid, ok := v.(string); ok {
+			sessionID = sid
+		}
+	}
+
 	// 0. Deny check — 硬边界：不可绕过的安全规则（Deny > Allow > Ask）
 	if denied := c.deny.Check(toolName, args); denied != nil {
 		denied.Metadata.DurationMs = time.Since(start).Milliseconds()
-		log.Warn("tool denied by security rule", "tool", toolName, "reason", denied.Error.Message)
+		log.Warn("tool denied by security rule",
+			"tool", toolName,
+			logger.KeySessionID, sessionID,
+			"reason", denied.Error.Message)
 		return denied
 	}
 
@@ -63,7 +85,10 @@ func (c *Chain) Execute(ctx context.Context, toolName string, args map[string]an
 	}
 
 	// 2. 执行（优先用 V2 处理器）
-	log.Info("tool execute start", "tool", toolName, "has_v2", tool.HandlerV2 != nil)
+	log.Info("tool execute start",
+		"tool", toolName,
+		logger.KeySessionID, sessionID,
+		"has_v2", tool.HandlerV2 != nil)
 	var result *base.ToolResult
 	if tool.HandlerV2 != nil {
 		result = tool.HandlerV2(ctx, args)
@@ -134,11 +159,18 @@ func (c *Chain) Execute(ctx context.Context, toolName string, args map[string]an
 
 	log.Info("tool executed via middleware",
 		"tool", toolName,
+		logger.KeySessionID, sessionID,
 		"status", string(result.Status),
 		"duration_ms", result.Metadata.DurationMs,
 		"summary", truncate(result.Summary, 200),
 		"has_error", result.Error != nil,
 	)
+
+	// Notify topology tracker via callback
+	if c.onResult != nil {
+		c.onResult(ctx, toolName, result)
+	}
+
 	return result
 }
 

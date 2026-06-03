@@ -8,7 +8,7 @@ import (
 
 // ChatService defines the AI chat service interface.
 type ChatService interface {
-	StreamChat(ctx context.Context, sessionID, userMessage string, model ...string) <-chan ChatStreamEvent
+	StreamChat(ctx context.Context, sessionID, userID, userMessage string, model ...string) <-chan ChatStreamEvent
 	GetHints(ctx context.Context, sessionID string) []string
 	ClearSession(sessionID string)
 	CompactSession(sessionID string) string

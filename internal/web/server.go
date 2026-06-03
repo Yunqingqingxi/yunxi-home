@@ -271,6 +271,7 @@ func New(cfg *config.Config, configRepo database.ConfigRepository, domainRepo da
 	api.GET("/chat/sessions/:id/topology", chatH.GetTopology)
 	api.PUT("/chat/sessions/:id/topology/constraint", chatH.UpdateConstraint)
 	api.POST("/chat/sessions/:id/topology/override", chatH.OverrideNode)
+	api.POST("/chat/sessions/:id/topology/trust-reset", chatH.ResetTrust)
 	api.PUT("/chat/sessions/:id/messages/:messageIndex", chatH.EditMessage)
 	api.DELETE("/chat/sessions/:id/messages/:messageIndex", chatH.DeleteMessage)
 	api.POST("/chat/sessions/:id/interrupt", chatH.InterruptSession)

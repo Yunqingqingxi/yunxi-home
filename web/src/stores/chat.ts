@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, computed, ComputedRef } from 'vue'
+import { ref, computed, ComputedRef, watch } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import type { ChatMessage, ChatBlock, Conversation, SSEEvent, AgentInfo, ToolCall, AgentState, AgentRole, LockConflict } from '../types/chat'
@@ -41,6 +41,27 @@ const fileMarkerRe: RegExp = /\[文件:\s*[^\]]+?\s*\([^)]+?\)\]/g
 
 function stripFileMarkers(text: string): string {
   return text.replace(fileMarkerRe, '').replace(/\n{3,}/g, '\n\n')
+}
+
+// Convert bare file references (filename.ext or /path/to/file.ext) in agent results to clickable links
+const knownExt = '(?:html?|json|txt|log|yaml|yml|md|csv|xml|pdf|png|jpg|jpeg|gif|svg|zip|tar\\.gz|sh|py|go|js|ts|css|java|class|jar|war|vue|svelte|rs|rb|php|c|cpp|h|hpp|sql|proto|toml|ini|cfg|conf|env|bat|ps1|dockerfile|makefile)'
+const bareFileRe = new RegExp(`\\b([\\w\\-+.]+?)\\.${knownExt}\\b`, 'gi')
+const pathFileRe = new RegExp(`(/[\\w\\-+./]+?)\\.${knownExt}\\b`, 'gi')
+
+function convertFileRefs(text: string): string {
+  if (!text) return text
+  // Don't double-convert
+  if (fileMarkerRe.test(text)) return text
+  // Convert paths like /DeepSeekExample.java or /data/.../file.py
+  text = text.replace(pathFileRe, (_match, path) => {
+    const name = path.split('/').pop() || path
+    return `[文件: ${name} (${path})]`
+  })
+  // Convert bare filenames like DeepSeekExample.java
+  text = text.replace(bareFileRe, (_match, name) => {
+    return `[文件: ${name} (/sandbox/${name})]`
+  })
+  return text
 }
 
 // ── Render Markdown ───────────────────────
@@ -108,7 +129,6 @@ export const useChatStore = defineStore('chat', () => {
   const todoList = ref<Todo[]>([])
   const confirmRequest = ref<ConfirmRequest | null>(null)
   const interactiveRequest = ref<InteractiveRequest | null>(null)
-  const topology = ref<TopologyState | null>(null)
 
   // ── v2.0 Session connection lifecycle ──
   // Persisted across tab switches + page refreshes via sessionStorage.
@@ -195,7 +215,22 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   // Interrupt state (for InterruptBanner)
-  const interruptSnapshot = ref<{ progress: number; last_task: string } | null>(null)
+  // 按会话隔离的 interrupt/topology 状态
+  const _interruptSnapshots: Record<string, any> = {}
+  const _topologies: Record<string, any> = {}
+
+  const interruptSnapshot = ref<any>(null)
+  const topology = ref<TopologyState | null>(null)
+
+  // 切换会话时自动保存/恢复状态
+  watch(sessionId, (newSid, oldSid) => {
+    if (oldSid) {
+      _interruptSnapshots[oldSid] = interruptSnapshot.value
+      _topologies[oldSid] = topology.value
+    }
+    interruptSnapshot.value = _interruptSnapshots[newSid] || null
+    topology.value = _topologies[newSid] || null
+  })
 
   // Current turn's streaming assistant message indices
   const streamingPlaceholders = ref<number[]>([])
@@ -464,9 +499,15 @@ export const useChatStore = defineStore('chat', () => {
       const content = ev.content || ''
       const pm = content.match(/进度\s*(\d+)%/)
       const tm = content.match(/最后执行：(.+)/)
+      // 捕获当前拓扑状态，用于 InterruptBanner 显示
+      const topo = topology.value
       interruptSnapshot.value = {
         progress: pm ? parseInt(pm[1]) : 0,
         last_task: tm ? tm[1] : '',
+        trust_locked: topo?.trust_locked ?? false,
+        trust_lies: topo?.trust_lies ?? 0,
+        reject_count: topo?.reject_count ?? 0,
+        warning: topo?.warning ?? '',
       }
       setLifecycle(targetSid, 'idle')
       return
@@ -526,11 +567,13 @@ export const useChatStore = defineStore('chat', () => {
         const isOk = merged.status === 'done'
         const resultContent = ev.content || ev.summary || ''
         const isQQ = targetSid?.startsWith('qqbot_')
+        // 转换文件引用为可点击链接
+        const fileRefContent = convertFileRefs(resultContent)
         const agentContent = isQQ
-          ? `${isOk ? '✓' : '✗'} ${ev.agent_goal || ev.goal || ''}: ${resultContent.slice(0, 200)}`
+          ? `${isOk ? '✓' : '✗'} ${ev.agent_goal || ev.goal || ''}: ${fileRefContent.slice(0, 200)}`
           : isOk
-            ? `子Agent 完成\n> ${ev.agent_goal || ev.goal || ''}\n\n${resultContent}`
-            : `子Agent 失败\n> ${ev.agent_goal || ev.goal || ''}\n\n${resultContent}`
+            ? `子Agent 完成\n> ${ev.agent_goal || ev.goal || ''}\n\n${fileRefContent}`
+            : `子Agent 失败\n> ${ev.agent_goal || ev.goal || ''}\n\n${fileRefContent}`
         messages.value.push({
           id: 'agr_' + (ev.agent_id || Date.now()),
           role: 'assistant' as const,
@@ -547,15 +590,18 @@ export const useChatStore = defineStore('chat', () => {
     }
     if (t === 'topology_update') {
       const tu = ev.topology_update as TopologyUpdate | undefined
-      if (tu) {
+      // 仅接受当前会话的拓扑事件，防止旧会话 SSE 覆盖新会话状态
+      if (tu && tu.session_id === sessionId.value) {
         topology.value = {
           session_id: tu.session_id,
           current_coord: tu.coord,
           start_coord: { x: 0, y: 0, z: 0 },
           constraint: tu.constraint,
-          trajectory: (tu.trajectory || []).map((c, i) => ({
+          trajectory: (tu.trajectory || []).map((c: any, i: number) => ({
             x: c.x, y: c.y, z: c.z, round: i,
             tool_call: c.tool_call || '', status: c.status || 'committed',
+            reason: c.reason || '',
+            tool_result: c.tool_result || '',
           })),
           reject_count: tu.reject_count,
           trust_lies: tu.trust_lies,
@@ -564,6 +610,8 @@ export const useChatStore = defineStore('chat', () => {
           closed_distance: tu.closed_distance,
           warning: tu.warning,
           active: true,
+          committed_count: tu.committed_count,
+          total_nodes: tu.total_nodes,
         }
       }
       return
@@ -583,15 +631,14 @@ export const useChatStore = defineStore('chat', () => {
       if (ev.tool) currentToolName.value = ev.tool
       currentToolProgress.value = ev.content || ''
       const pending = currentStreamingMsg()
-      if (!pending) return
-      const blocks = [...pending.blocks!]
-      for (let i = 0; i < blocks.length; i++) {
-        if (blocks[i].type === 'tool' && !blocks[i].result && blocks[i].status !== 'running') {
-          blocks[i] = { ...blocks[i], status: 'running', progress: ev.content || '执行中...' }
+      if (!pending || !pending.blocks) return
+      // 原地突变，避免新建数组触发 v-for 全量重建
+      for (let i = 0; i < pending.blocks.length; i++) {
+        if (pending.blocks[i].type === 'tool' && !pending.blocks[i].result && pending.blocks[i].status !== 'running') {
+          pending.blocks[i] = { ...pending.blocks[i], status: 'running', progress: ev.content || '执行中...' }
           break
         }
       }
-      pending.blocks = blocks
       pending._v = ++_msgVersion
       return
     }
@@ -610,38 +657,35 @@ export const useChatStore = defineStore('chat', () => {
       const raw = ev.content || ''
       const clean = t === 'content' ? stripFileMarkers(raw) : raw
       if (t === 'content' && !clean) return
-      const blocks = [...msg.blocks!]
-      const last = blocks.length > 0 ? blocks[blocks.length - 1] : null
+      if (!msg.blocks) msg.blocks = []
+      const last = msg.blocks.length > 0 ? msg.blocks[msg.blocks.length - 1] : null
       if (last && last.type === t) {
-        blocks[blocks.length - 1] = { type: t, content: (last.content || '') + clean }
+        // 原地突变，避免新建数组
+        msg.blocks[msg.blocks.length - 1] = { type: t, content: (last.content || '') + clean }
       } else {
-        if (clean) blocks.push({ type: t, content: clean })
+        if (clean) msg.blocks.push({ type: t, content: clean })
       }
-      msg.blocks = blocks
       msg._v = ++_msgVersion
     } else if (t === 'tool_call') {
-      msg.blocks = [
-        ...msg.blocks!,
-        {
-          type: 'tool' as const,
-          name: ev.tool || 'unknown',
-          args: ev.args || '',
-          result: '',
-        },
-      ]
+      if (!msg.blocks) msg.blocks = []
+      msg.blocks.push({
+        type: 'tool' as const,
+        name: ev.tool || 'unknown',
+        args: ev.args || '',
+        result: '',
+      })
       msg._v = ++_msgVersion
     } else if (t === 'tool_result') {
-      const blocks = [...msg.blocks!]
-      for (let i = 0; i < blocks.length; i++) {
-        if (blocks[i].type === 'tool' && !blocks[i].result) {
-          blocks[i] = { ...blocks[i], result: ev.content || '', status: '', progress: '' }
+      if (!msg.blocks) return
+      for (let i = 0; i < msg.blocks.length; i++) {
+        if (msg.blocks[i].type === 'tool' && !msg.blocks[i].result) {
+          msg.blocks[i] = { ...msg.blocks[i], result: ev.content || '', status: '', progress: '' }
           break
         }
       }
-      msg.blocks = blocks
       msg._v = ++_msgVersion
 
-      const hasPendingTools = blocks.some((b) => b.type === 'tool' && !b.result)
+      const hasPendingTools = msg.blocks.some((b: any) => b.type === 'tool' && !b.result)
       if (!hasPendingTools && blocks.length > 0) {
         finalizeOne(msg)
         const newIdx = addAssistantPlaceholder()
@@ -1154,9 +1198,8 @@ export const useChatStore = defineStore('chat', () => {
     const targetLc = getLifecycle(id)
     const wasStreaming = targetLc === 'streaming' || targetLc === 'reconnecting' || targetLc === 'connecting'
 
-    // Only clear these if the target is NOT streaming (otherwise keep them)
+    // Only clear transient UI state if target is NOT streaming
     if (!wasStreaming) {
-      interruptSnapshot.value = null
       confirmRequest.value = null
       todoList.value = []
       streamingPlaceholders.value = []
@@ -1164,6 +1207,7 @@ export const useChatStore = defineStore('chat', () => {
       currentToolProgress.value = ''
       loading.value = false
     }
+    // interruptSnapshot 和 topology 已由 sessionId watch 自动恢复，无需手动清除
 
     // ALWAYS restore from per-session cache first (it has the latest messages from SSE redirects)
     const cached = _sessionMsgs[id]
@@ -1190,6 +1234,7 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function updateSubAgent(convId: string, agent: AgentInfo): void {
+    // 更新 Sidebar 子 Agent 列表
     if (!subAgents.value[convId]) subAgents.value[convId] = []
     const list = subAgents.value[convId]
     const idx = list.findIndex((a) => a.id === agent.agent_id)
@@ -1207,6 +1252,25 @@ export const useChatStore = defineStore('chat', () => {
         summary: '',
       })
     }
+    // 同步到 sessionAgents，使右侧 "活跃助手" 面板也能显示
+    if (!sessionAgents.value[convId]) sessionAgents.value[convId] = []
+    const saList = sessionAgents.value[convId]
+    const saIdx = saList.findIndex((a) => a.agent_id === agent.agent_id)
+    const agentEntry: AgentInfo = {
+      agent_id: agent.agent_id,
+      agent_goal: agent.agent_goal || '',
+      agent_status: agent.agent_status || agent.status || 'running',
+      agent_round: agent.agent_round || 0,
+      content: agent.content || '',
+      state: (agent.state || agent.agent_status || 'executing') as import('../types/chat').AgentState,
+    }
+    if (saIdx >= 0) {
+      saList.splice(saIdx, 1, { ...saList[saIdx], ...agentEntry })
+    } else {
+      saList.push(agentEntry)
+    }
+    // 触发 ref 响应
+    sessionAgents.value = { ...sessionAgents.value }
   }
 
   // ── v2.0 debug injection (dev only) ──

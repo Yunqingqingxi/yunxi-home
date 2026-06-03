@@ -43,7 +43,7 @@ func ParseTopology(text string) ParseResult {
 	// Parse coordinates
 	if xStr, ok := attrMap["x"]; ok {
 		if x, err := strconv.ParseFloat(xStr, 64); err == nil {
-			result.Coord.X = clampFloat(x, 0, 10)
+			result.Coord.X = clampFloat(x, 0, 10000) // 累积制，AI自评分
 		}
 	}
 	if yStr, ok := attrMap["y"]; ok {

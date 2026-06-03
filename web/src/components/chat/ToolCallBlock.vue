@@ -1,5 +1,6 @@
 <template>
-  <div class="tool-block" :class="{ pending: !result && status !== 'running', running: status === 'running' }">
+  <!-- 前端兜底过滤：后台执行占位符、静默工具结果不渲染 -->
+  <div v-if="!isBackgroundPlaceholder" class="tool-block" :class="{ pending: !result && status !== 'running', running: status === 'running' }">
     <div class="tool-header" @click="result ? showFull = !showFull : null">
       <span v-if="status === 'running'" class="tool-spinner"><span class="spinner-dot"></span></span>
       <code class="tool-name">{{ name }}</code>
@@ -25,6 +26,14 @@ const props = defineProps<{ name?: string; args?: string; result?: string; statu
 const showFull = ref(false)
 const elapsed = ref('')
 let timer: ReturnType<typeof setInterval> | null = null
+
+// 静默工具列表（与后端 silentTools 保持一致，前端兜底）
+const silentToolNames = new Set(['spawn_agent', 'recall', 'remember', 'request_confirmation', 'activate_specialized_context'])
+const isBackgroundPlaceholder = computed(() => {
+  if (props.name && silentToolNames.has(props.name)) return true
+  if (props.result && (props.result.startsWith('[后台执行]') || props.result.startsWith('[ForceTools'))) return true
+  return false
+})
 
 watch(() => props.status, (s) => {
   if (s === 'running') {

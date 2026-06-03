@@ -190,12 +190,19 @@ func RegisterFileTools(r *register.Registry, fs nas.FileService) {
 
 			data := buf[:n]
 			if useBase64 {
+				name := filepath.Base(path)
+				b64 := base64.StdEncoding.EncodeToString(data)
+				// 对图片/二进制文件，返回引用格式让 AI 用 [文件: name (path)]
+				ref := fmt.Sprintf("[文件: %s (%s)]", name, path)
+				note := fmt.Sprintf("\n\n⚠️ 请用 %s 格式引用此文件发送给用户，系统会自动渲染为缩略图/文件卡片。不要使用 data:image 或 base64 内嵌。", ref)
 				return ToJSON(map[string]any{
 					"path":   path,
 					"size":   stat.Size(),
 					"read":   n,
 					"offset": offset,
-					"base64": base64.StdEncoding.EncodeToString(data),
+					"base64": b64,
+					"ref":    ref,
+					"note":   note,
 				})
 			}
 

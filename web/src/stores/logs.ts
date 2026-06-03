@@ -169,18 +169,20 @@ export const useLogsStore = defineStore('logs', () => {
     await _fetchEvents(0)
   }
 
-  async function _fetchEvents(offset: number) {
+  const chatPageSize = ref(200) // 每页条数
+
+  async function _fetchEvents(offset: number, replace = false) {
     chatEventsLoading.value = true
     try {
       const f = chatFilter.value
-      const params: Record<string, unknown> = { offset, limit: 500, order: f.order }
+      const params: Record<string, unknown> = { offset, limit: chatPageSize.value, order: f.order }
       if (f.eventTypes.size > 0) params.type = [...f.eventTypes].join(',')
       if (f.search) params.search = f.search
 
       const res = await api.get(`/api/logs/chat/${selectedSessionId.value}`, { params })
       const data: ChatLogResponse = res.data?.data || res.data
 
-      if (offset === 0) {
+      if (offset === 0 || replace) {
         chatEvents.value = data.events || []
       } else {
         chatEvents.value.push(...(data.events || []))
@@ -190,7 +192,7 @@ export const useLogsStore = defineStore('logs', () => {
       chatOffset.value = offset + (data.events?.length || 0)
       chatHasMore.value = chatOffset.value < data.total
     } catch {
-      if (offset === 0) chatEvents.value = []
+      if (offset === 0 || replace) chatEvents.value = []
     } finally {
       chatEventsLoading.value = false
     }
@@ -200,6 +202,14 @@ export const useLogsStore = defineStore('logs', () => {
     if (!chatHasMore.value || chatEventsLoading.value) return
     _fetchEvents(chatOffset.value)
   }
+
+  function goToPage(page: number) {
+    const offset = (page - 1) * chatPageSize.value
+    _fetchEvents(offset, true)
+  }
+
+  const chatCurrentPage = computed(() => Math.floor(chatOffset.value / chatPageSize.value) + (chatOffset.value > 0 ? 1 : 1))
+  const chatTotalPages = computed(() => Math.max(1, Math.ceil(chatTotal.value / chatPageSize.value)))
 
   // ── 会话日志文本视图 ──────────────────────────────
   async function fetchChatText() {
@@ -496,7 +506,8 @@ export const useLogsStore = defineStore('logs', () => {
     // Computed
     filteredChatEvents, groupedEvents, filteredSysLines,
     // Actions
-    fetchSessions, selectSession, loadMoreEvents,
+    fetchSessions, selectSession, loadMoreEvents, goToPage,
+    chatCurrentPage, chatTotalPages, chatPageSize,
     fetchChatText,
     connectSSE, disconnectSSE,
     deleteChatLog, downloadChatLog,

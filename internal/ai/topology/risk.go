@@ -41,6 +41,20 @@ func init() {
 		// Command execution — high complexity, high deviation
 		{Pattern: "run_command", DeltaYMin: 0.4, DeltaYMax: 1.0, DeltaZMin: 0, DeltaZMax: 1.0},
 
+		// run_command_* sub-command overrides — narrower profiles for known subcommands
+		// Longer patterns match first, so specific subcommands get tighter constraints.
+		// Build/compile commands — high progress, moderate complexity
+		{Pattern: "run_command_go_build", DeltaYMin: 0.2, DeltaYMax: 0.6, DeltaZMin: 0, DeltaZMax: 0.5},
+		{Pattern: "run_command_go_test", DeltaYMin: 0.2, DeltaYMax: 0.5, DeltaZMin: 0, DeltaZMax: 0.4},
+		{Pattern: "run_command_npm_run", DeltaYMin: 0.2, DeltaYMax: 0.6, DeltaZMin: 0, DeltaZMax: 0.5},
+		// Query/info commands — low complexity, low deviation
+		{Pattern: "run_command_*_query", DeltaYMin: -0.2, DeltaYMax: 0.3, DeltaZMin: 0, DeltaZMax: 0.3},
+		{Pattern: "run_command_*_list", DeltaYMin: -0.2, DeltaYMax: 0.3, DeltaZMin: 0, DeltaZMax: 0.3},
+		{Pattern: "run_command_*_info", DeltaYMin: -0.2, DeltaYMax: 0.3, DeltaZMin: 0, DeltaZMax: 0.3},
+		{Pattern: "run_command_*_status", DeltaYMin: -0.2, DeltaYMax: 0.3, DeltaZMin: 0, DeltaZMax: 0.3},
+		// General wildcard for run_command_* — slightly narrower than plain run_command
+		{Pattern: "run_command_*", DeltaYMin: 0.3, DeltaYMax: 0.8, DeltaZMin: 0, DeltaZMax: 0.7},
+
 		// Docker / system control — high complexity, high deviation
 		{Pattern: "docker_*", DeltaYMin: 0.5, DeltaYMax: 1.0, DeltaZMin: 0, DeltaZMax: 0.8},
 		{Pattern: "systemctl_*", DeltaYMin: 0.5, DeltaYMax: 1.0, DeltaZMin: 0, DeltaZMax: 0.8},
@@ -138,20 +152,21 @@ func GetAllRiskProfiles() []RiskProfile {
 
 // EstimateProgressDelta 估算工具调用对应的 X 轴（进度）增量。
 // 用于 AI 未自报 <topology> 标签时的系统估算。
+// EstimateProgressDelta 估算工具调用对应的 X 轴（累积进度）增量。
+// 适用于累积任务制：X 只增不减，简单任务 +1~3，复杂任务 +5~10。
 func EstimateProgressDelta(toolName string) float64 {
 	switch {
+	// 查询/读取类：小幅推进
 	case matchPattern("file_read", toolName),
 		matchPattern("file_list", toolName),
 		matchPattern("file_info", toolName),
 		matchPattern("file_search", toolName),
-		matchPattern("file_disk_info", toolName),
-		matchPattern("file_sandbox_info", toolName),
 		matchPattern("get_*", toolName),
 		matchPattern("list_*", toolName),
-		matchPattern("query_*", toolName),
-		matchPattern("ping_*", toolName):
-		return 1.0 // 查询/读取类：小幅推进
+		matchPattern("query_*", toolName):
+		return 2.0
 
+	// 写入/修改类：中等推进
 	case matchPattern("file_write", toolName),
 		matchPattern("file_mkdir", toolName),
 		matchPattern("file_edit", toolName),
@@ -160,29 +175,27 @@ func EstimateProgressDelta(toolName string) float64 {
 		matchPattern("add_*", toolName),
 		matchPattern("create_*", toolName),
 		matchPattern("update_*", toolName),
-		matchPattern("set_*", toolName):
-		return 2.0 // 写入/修改类：显著推进
+		matchPattern("set_*", toolName),
+		matchPattern("file_delete", toolName),
+		matchPattern("delete_*", toolName):
+		return 3.0
 
-	case matchPattern("file_delete", toolName),
-		matchPattern("delete_*", toolName),
-		matchPattern("remove_*", toolName),
-		matchPattern("clean_*", toolName):
-		return 2.0 // 删除类：显著推进
-
+	// 执行/运维类：显著推进
 	case matchPattern("run_command", toolName),
 		matchPattern("docker_*", toolName),
 		matchPattern("ssh_*", toolName),
-		matchPattern("spawn_agent", toolName),
-		matchPattern("db_backup", toolName),
-		matchPattern("snapshot_*", toolName),
-		matchPattern("sync_*", toolName):
-		return 1.5 // 执行/运维类：中等推进
+		matchPattern("systemctl_*", toolName):
+		return 5.0
 
-	case matchPattern("mcp__*", toolName),
+	// 子Agent/技能/MCP：大幅推进（代表拆分了子任务）
+	case matchPattern("spawn_agent", toolName),
 		matchPattern("run_skill", toolName):
-		return 1.5 // MCP/技能类：中等推进
+		return 8.0
+
+	case matchPattern("mcp__*", toolName):
+		return 4.0
 
 	default:
-		return 1.0 // 未知工具：保守估算
+		return 2.0
 	}
 }

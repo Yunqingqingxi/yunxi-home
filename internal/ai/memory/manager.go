@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 )
@@ -282,4 +283,135 @@ func (m *Manager) Count() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return len(m.memories)
+}
+
+// RecordAccess updates access metadata for a memory (called when matched or retrieved).
+func (m *Manager) RecordAccess(name string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if mem, ok := m.memories[name]; ok {
+		mem.AccessCount++
+		mem.LastAccessed = time.Now()
+	}
+}
+
+// TopByImportance returns up to N memories sorted by computed importance (highest first).
+func (m *Manager) TopByImportance(n int) []*Memory {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	type scored struct {
+		mem   *Memory
+		score float64
+	}
+	var items []scored
+	for _, mem := range m.memories {
+		items = append(items, scored{mem: mem, score: mem.ComputeImportance()})
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].score > items[j].score })
+
+	result := make([]*Memory, 0, n)
+	for i, item := range items {
+		if i >= n {
+			break
+		}
+		result = append(result, item.mem)
+	}
+	return result
+}
+
+// SummarizeCompact returns a concise memory summary for limited-context injection.
+// Only includes top-5 most important memories with one-line descriptions.
+func (m *Manager) SummarizeCompact() string {
+	top := m.TopByImportance(5)
+	if len(top) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	sb.WriteString("## 关键记忆\n")
+	for _, mem := range top {
+		sb.WriteString(fmt.Sprintf("- [%s] %s\n", mem.Name, mem.Description))
+	}
+	return sb.String()
+}
+
+// AutoCreateFromFeedback creates a feedback-type memory when correction patterns repeat.
+// Called by the adapt layer when the same correction type is detected 3+ times.
+func (m *Manager) AutoCreateFromFeedback(ctx context.Context, feedbackType, detail string) {
+	if feedbackType == "" {
+		return
+	}
+	name := fmt.Sprintf("feedback-%s-%d", feedbackType, time.Now().Unix())
+	mem := &Memory{
+		Name:        name,
+		Description: fmt.Sprintf("Auto-created from repeated %s feedback", feedbackType),
+		Type:        TypeFeedback,
+		Content:     detail,
+		Source:      "auto",
+		Importance:  0.6,
+		CreatedAt:   time.Now().UTC(),
+		UpdatedAt:   time.Now().UTC(),
+	}
+	if err := m.Save(ctx, mem); err != nil {
+		log.Warn("auto-create memory failed", "name", name, "error", err)
+	} else {
+		log.Info("auto-created feedback memory", "name", name, "type", feedbackType)
+	}
+}
+
+// CleanupStale removes memories whose importance has decayed below a threshold.
+// Returns the number of deleted memories.
+func (m *Manager) CleanupStale(ctx context.Context, threshold float64) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	var toDelete []string
+	for name, mem := range m.memories {
+		if mem.ComputeImportance() < threshold && mem.Source != "file" {
+			toDelete = append(toDelete, name)
+		}
+	}
+
+	for _, name := range toDelete {
+		_ = m.repo.Delete(ctx, name)
+		delete(m.memories, name)
+	}
+
+	if len(toDelete) > 0 {
+		log.Info("cleaned stale memories", "count", len(toDelete), "threshold", threshold)
+	}
+	return len(toDelete)
+}
+
+// UpdateImportance adjusts a memory's importance score.
+func (m *Manager) UpdateImportance(name string, delta float64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if mem, ok := m.memories[name]; ok {
+		mem.Importance += delta
+		if mem.Importance > 1.0 {
+			mem.Importance = 1.0
+		}
+		if mem.Importance < 0.0 {
+			mem.Importance = 0.0
+		}
+		mem.UpdatedAt = time.Now().UTC()
+	}
+}
+
+// RecordMatchAndAccess updates access metadata for matched memories.
+func (m *Manager) RecordMatchAndAccess(matched []*Memory) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, mem := range matched {
+		if existing, ok := m.memories[mem.Name]; ok {
+			existing.AccessCount++
+			existing.LastAccessed = time.Now().UTC()
+			// Slightly boost importance on each access
+			existing.Importance = existing.ComputeImportance() + 0.02
+			if existing.Importance > 1.0 {
+				existing.Importance = 1.0
+			}
+		}
+	}
 }

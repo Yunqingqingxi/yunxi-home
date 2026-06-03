@@ -74,38 +74,48 @@
     />
 
     <!-- 底栏控件行 -->
-    <div class="input-toolbar">
-      <button class="tb-item model-btn" @click="modelMenuOpen = !modelMenuOpen">
-        <span class="tb-dot" :class="modelKey"></span>
-        <span>{{ currentModelLabel }}</span>
-        <svg width="8" height="8" viewBox="0 0 8 8"><path d="M2 3l2 2 2-2" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>
-      </button>
+    <div class="input-toolbar" :class="{ interrupted: !!interruptSnapshot }">
+      <!-- 正常模式：模型 + 附件 + 发送 -->
+      <template v-if="!interruptSnapshot">
+        <button class="tb-item model-btn" @click="modelMenuOpen = !modelMenuOpen">
+          <span class="tb-dot" :class="modelKey"></span>
+          <span>{{ currentModelLabel }}</span>
+          <svg width="8" height="8" viewBox="0 0 8 8"><path d="M2 3l2 2 2-2" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>
+        </button>
+        <div class="tb-spacer"></div>
+        <button class="tb-item" @click="$refs.fileInput.click()" title="附加文件">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+            <path d="M10 4v7a3 3 0 01-6 0V5a2 2 0 014 0v5.5a1 1 0 01-2 0V5"/>
+          </svg>
+        </button>
+        <button
+          class="tb-send"
+          :class="{ stop: isBusy, active: !isBusy && (hasInput || attachedFiles.length) }"
+          :disabled="!isBusy && !hasInput && !attachedFiles.length"
+          :title="isBusy ? '停止' : '发送'"
+          @click="handleSend"
+        >
+          <svg v-if="isBusy" width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><rect x="2" y="2" width="8" height="8" rx="1.5"/></svg>
+          <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2L15 22l-4-9-9-4 20-7z"/></svg>
+        </button>
+      </template>
 
-      <div class="tb-spacer"></div>
-
-      <button class="tb-item" @click="$refs.fileInput.click()" title="附加文件">
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
-          <path d="M10 4v7a3 3 0 01-6 0V5a2 2 0 014 0v5.5a1 1 0 01-2 0V5"/>
-        </svg>
-      </button>
-
-      <button
-        class="tb-send"
-        :class="{
-          stop: isBusy,
-          active: !isBusy && (hasInput || attachedFiles.length)
-        }"
-        :disabled="!isBusy && !hasInput && !attachedFiles.length"
-        :title="isBusy ? '停止' : '发送'"
-        @click="handleSend"
-      >
-        <svg v-if="isBusy" width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
-          <rect x="2" y="2" width="8" height="8" rx="1.5"/>
-        </svg>
-        <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M22 2L11 13"/><path d="M22 2L15 22l-4-9-9-4 20-7z"/>
-        </svg>
-      </button>
+      <!-- 中断模式：进度 + 拓扑 + 操作按钮 -->
+      <template v-else>
+        <div class="tb-int-left">
+          <svg class="tb-int-icon" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="2" width="3" height="12" rx="1"/><rect x="9" y="2" width="3" height="12" rx="1"/></svg>
+          <span class="tb-int-title">已中断</span>
+          <span v-if="interruptSnapshot.progress > 0" class="tb-int-progress">{{ interruptSnapshot.progress }}%</span>
+          <span v-if="interruptSnapshot.trust_locked" class="tb-int-tag locked">已锁定</span>
+          <span v-else-if="interruptSnapshot.reject_count >= 2" class="tb-int-tag reject">{{ interruptSnapshot.reject_count }}拒</span>
+        </div>
+        <div class="tb-spacer"></div>
+        <button v-if="interruptSnapshot.trust_locked" class="tb-int-btn unlock" @click="handleUnlockTrust">解锁</button>
+        <button v-if="interruptSnapshot.reject_count >= 2" class="tb-int-btn warn" @click="handleOverride">放行</button>
+        <button class="tb-int-btn" @click="handleRetry">重试</button>
+        <button class="tb-int-btn" @click="handleDismiss">新任务</button>
+        <button class="tb-int-btn primary" @click="handleContinue">继续</button>
+      </template>
     </div>
 
     <!-- 模型下拉 -->
@@ -215,6 +225,52 @@ const store = useChatStore()
 const isBusy = computed(() => store.isStreaming || store.hasRunningAgents || !!store.currentToolName)
 const hasAgent = computed(() => store.hasRunningAgents && !store.isStreaming)
 const hasInput = computed(() => !!input.value.trim())
+
+// ── 中断恢复（拓扑集成在输入栏）──
+const interruptSnapshot = computed(() => store.interruptSnapshot)
+function dismissInterrupt() {
+  store.interruptSnapshot = null
+}
+async function handleUnlockTrust() {
+  const sid = store.sessionId
+  if (!sid) return
+  await fetch(`/api/chat/sessions/${sid}/topology/trust-reset`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
+  })
+  if (store.interruptSnapshot) {
+    store.interruptSnapshot = { ...store.interruptSnapshot, trust_locked: false, trust_lies: 0, warning: '' }
+  }
+}
+async function handleOverride() {
+  const sid = store.sessionId
+  if (!sid) return
+  await fetch(`/api/chat/sessions/${sid}/topology/override`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${localStorage.getItem('token')}` },
+  })
+}
+function handleContinue() {
+  const msg = input.value.trim()
+  dismissInterrupt()
+  store.disconnectStream()
+  store.streamingSessions[store.sessionId] = false
+  // 用户有自定义输入时注入到对话，否则发送"继续"
+  store.sendMessage(msg || '继续', '', {})
+  input.value = ''
+}
+function handleRetry() {
+  const msg = input.value.trim()
+  dismissInterrupt()
+  store.disconnectStream()
+  store.streamingSessions[store.sessionId] = false
+  const retryMsg = msg ? `修改做法，${msg}` : '修改做法，换一种思路重新开始'
+  store.sendMessage(retryMsg, '', {})
+  input.value = ''
+}
+function handleDismiss() {
+  dismissInterrupt()
+}
 
 const input = ref('')
 const inputEl = ref(null)
@@ -413,6 +469,7 @@ function selectCommand(cmd) {
 
 // ── Placeholder ──
 const inputPlaceholder = computed(() => {
+  if (interruptSnapshot.value) return '输入补充内容后点击"继续"，或直接继续...'
   if (!store.sessionId) return '描述你想做什么...'
   return '输入消息，Enter 发送，/ 指令'
 })
@@ -460,6 +517,9 @@ function onKeydown(e) {
 function handleSend() {
   if (isBusy.value) {
     stopGeneration()
+  } else if (interruptSnapshot.value) {
+    // 中断状态下按 Enter/发送 → 注入输入内容后继续
+    handleContinue()
   } else {
     doSend()
   }
@@ -582,6 +642,38 @@ onMounted(() => {
   border-color: var(--brand-400);
   box-shadow: 0 0 0 3px rgba(6,182,212,0.12), 0 4px 20px rgba(6,182,212,0.1);
 }
+
+/* ── 中断模式底栏 ── */
+.input-toolbar.interrupted {
+  background: rgba(212,153,29,0.06);
+  border-radius: 6px;
+  margin: 2px -4px -4px;
+  padding: 5px 8px;
+}
+.tb-int-left {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+.tb-int-icon { color: #d2991d; flex-shrink: 0; }
+.tb-int-title { font-weight: 600; font-size: 11px; color: var(--text-primary); white-space: nowrap; }
+.tb-int-progress { font-size: 10px; color: var(--text-muted); }
+.tb-int-tag { font-size: 10px; padding: 1px 5px; border-radius: 6px; font-weight: 500; white-space: nowrap; }
+.tb-int-tag.locked { background: rgba(239,68,68,0.12); color: #ef4444; }
+.tb-int-tag.reject { background: rgba(245,158,11,0.12); color: #d97706; }
+.tb-int-btn {
+  padding: 3px 8px; border-radius: 5px; border: 1px solid var(--border-default);
+  background: transparent; color: var(--text-secondary); font-size: 11px;
+  font-family: inherit; cursor: pointer; white-space: nowrap; transition: all 0.15s;
+}
+.tb-int-btn:hover { background: var(--surface-hover); color: var(--text-primary); }
+.tb-int-btn.primary { background: var(--brand-500); color: #fff; border-color: transparent; font-weight: 500; }
+.tb-int-btn.primary:hover { background: var(--brand-600); }
+.tb-int-btn.unlock { color: #ef4444; border-color: rgba(239,68,68,0.25); }
+.tb-int-btn.unlock:hover { background: rgba(239,68,68,0.06); }
+.tb-int-btn.warn { color: #d97706; border-color: rgba(217,119,6,0.25); }
+.tb-int-btn.warn:hover { background: rgba(217,119,6,0.06); }
 .drop-overlay {
   position: absolute; inset: 0; z-index: 10;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;

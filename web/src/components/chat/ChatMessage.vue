@@ -144,42 +144,16 @@
     class="msg-row user"
   >
     <div class="user-msg-wrap">
-      <!-- Attachments as separate bubbles -->
-      <div
-        v-if="attachments.length"
-        class="user-attachments"
-      >
-        <div
+      <!-- Attachments as rich file cards -->
+      <div v-if="attachments.length" class="msg-attachments">
+        <FileAttachment
           v-for="(att, i) in attachments"
           :key="i"
-          class="file-card-msg"
-          @click="previewAttachment(att)"
-        >
-          <div class="file-card-icon">
-            <svg
-              width="24"
-              height="28"
-              viewBox="0 0 24 28"
-              fill="none"
-            >
-              <path
-                d="M16.5 0l7 7v15.6c0 2.25 0 3.375-.573 4.164a3 3 0 0 1-.663.663C21.475 28 20.349 28 18.1 28H5.9c-2.25 0-3.375 0-4.164-.573a3 3 0 0 1-.663-.663C.5 25.975.5 24.849.5 22.6V5.4c0-2.25 0-3.375.573-4.164a3 3 0 0 1 .663-.663C2.525 0 3.651 0 5.9 0h10.6z"
-                :fill="fileIconGradientUrl(att.name, i)"
-              /><path
-                d="M16.5 0l7 7h-3.8c-1.12 0-1.68 0-2.108-.218a2 2 0 0 1-.874-.874C16.5 5.48 16.5 4.92 16.5 3.8V0z"
-                fill="#fff"
-                fill-opacity=".55"
-              /><path
-                d="M6 11.784c0-.433.351-.784.784-.784h10.432a.784.784 0 1 1 0 1.568H6.784A.784.784 0 0 1 6 11.784zM6 15.784c0-.433.351-.784.784-.784h10.432a.784.784 0 1 1 0 1.568H6.784A.784.784 0 0 1 6 15.784zM6.114 19.817c0-.433.35-.784.784-.784h6.318a.784.784 0 1 1 0 1.568H6.898a.784.784 0 0 1-.784-.784z"
-                fill="#fff"
-              />
-            </svg>
-          </div>
-          <div class="file-card-info">
-            <span class="file-card-name">{{ att.name }}</span>
-            <span class="file-card-meta">{{ fileExt(att.name).toUpperCase() }} {{ fmtFileSize(att.path) }}</span>
-          </div>
-        </div>
+          :name="att.name"
+          :path="att.path"
+          :error="att._error"
+          @preview="openLightbox(i)"
+        />
       </div>
       <!-- Text content (without attachment markers) -->
       <div
@@ -212,111 +186,58 @@
     </div>
   </div>
 
-  <!-- Assistant message -->
-  <div
-    v-else-if="msg.role === 'assistant' || msg.role === 'agent'"
-    class="msg-row assistant"
-  >
-    <div class="avatar ai-avatar">
-      <svg
-        width="14"
-        height="14"
-        viewBox="0 0 16 16"
-        fill="none"
-      ><circle
-        cx="8"
-        cy="8"
-        r="7"
-        stroke="currentColor"
-        stroke-width="1.2"
-        fill="none"
-      /><circle
-        cx="5.5"
-        cy="7"
-        r="1"
-        fill="currentColor"
-      /><circle
-        cx="10.5"
-        cy="7"
-        r="1"
-        fill="currentColor"
-      /><path
-        d="M5.5 10.5c0 0 1 2 2.5 2s2.5-2 2.5-2"
-        stroke="currentColor"
-        stroke-width="1"
-        fill="none"
-        stroke-linecap="round"
-      /></svg>
-    </div>
-    <div class="ai-blocks">
-      <span class="role-tag">云兮</span>
-      <span
-        v-if="!msg.streaming && msg.durationMs >= 1000"
-        class="msg-duration"
-      >{{ fmtDur(msg.durationMs) }}</span>
-
-      <!-- Blocks preserving temporal reply chain order -->
-      <template
-        v-for="(block, bi) in msg.blocks"
-        :key="'blk'+bi"
-      >
-        <ThinkingBlock
-          v-if="block.type === 'thinking'"
-          :reasoning="block.content"
-          :streaming="msg.streaming"
-        />
-        <ContentBlock
-          v-if="block.type === 'content'"
-          :content="block.content"
-          :streaming="msg.streaming"
-        />
-        <ToolCallBlock
-          v-if="block.type === 'tool'"
-          :name="block.name"
-          :args="block.args"
-          :result="block.result"
-          :status="block.status"
-          :progress="block.progress"
-          :streaming="msg.streaming"
-        />
+  <!-- AI消息：每个block独立气泡 -->
+  <template v-if="msg.role === 'assistant' || msg.role === 'agent'">
+    <div v-for="(block, bi) in (msg.blocks || [])" :key="'blk'+bi">
+      <div v-if="block.type === 'thinking'" class="msg-row assistant thinking-row">
+        <div class="avatar ai-avatar"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.2" fill="none"/><circle cx="5.5" cy="7" r="1" fill="currentColor"/><circle cx="10.5" cy="7" r="1" fill="currentColor"/><path d="M5.5 10.5c0 0 1 2 2.5 2s2.5-2 2.5-2" stroke="currentColor" stroke-width="1" fill="none" stroke-linecap="round"/></svg></div>
+        <div class="block-body thinking-body-plain"><span class="role-tag">云兮</span><ThinkingBlock :reasoning="block.content" :streaming="msg.streaming" /></div>
+      </div>
+      <div v-else-if="block.type === 'tool'" class="msg-row assistant">
+        <div class="avatar ai-avatar"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.2" fill="none"/><circle cx="5.5" cy="7" r="1" fill="currentColor"/><circle cx="10.5" cy="7" r="1" fill="currentColor"/><path d="M5.5 10.5c0 0 1 2 2.5 2s2.5-2 2.5-2" stroke="currentColor" stroke-width="1" fill="none" stroke-linecap="round"/></svg></div>
+        <div class="block-body"><span class="role-tag">云兮</span><ToolCallBlock :name="block.name" :args="block.args" :result="block.result" :status="block.status" :progress="block.progress" :streaming="msg.streaming" /></div>
+      </div>
+      <template v-else-if="block.type === 'content'">
+        <div v-for="(seg, si) in contentSegments" :key="'seg'+si" class="msg-row assistant">
+          <div class="avatar ai-avatar"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.2" fill="none"/><circle cx="5.5" cy="7" r="1" fill="currentColor"/><circle cx="10.5" cy="7" r="1" fill="currentColor"/><path d="M5.5 10.5c0 0 1 2 2.5 2s2.5-2 2.5-2" stroke="currentColor" stroke-width="1" fill="none" stroke-linecap="round"/></svg></div>
+          <div v-if="seg.type === 'text'" class="block-body content-body-bubble"><span class="role-tag">云兮</span><ContentBlock :content="seg.content" :streaming="false" /></div>
+          <div v-else class="block-body"><FileAttachment :name="seg.name" :path="seg.path" @preview="openLightbox(findImageIdx(seg.path))" /></div>
+        </div>
       </template>
-
-      <!-- Streaming loading dots (before any blocks arrive) -->
-      <div
-        v-if="msg.streaming && !msg.blocks?.length"
-        class="ai-empty"
-      >
-        <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-      </div>
-      <!-- Fallback: done message with content but no blocks (agent results, system msgs) -->
-      <ContentBlock
-        v-else-if="!msg.streaming && !msg.blocks?.length && msg.content"
-        :content="msg.content"
-        :streaming="false"
-      />
-      <!-- Error fallback -->
-      <div
-        v-else-if="msg.status === 'error' && !msg.blocks?.length"
-        class="ai-empty error"
-      >
-        <span class="error-text">请求失败</span>
-      </div>
     </div>
-  </div>
+    <div v-if="!msg.blocks?.length && (msg.content || msg.streaming)" class="msg-row assistant">
+      <div class="avatar ai-avatar"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.2" fill="none"/><circle cx="5.5" cy="7" r="1" fill="currentColor"/><circle cx="10.5" cy="7" r="1" fill="currentColor"/><path d="M5.5 10.5c0 0 1 2 2.5 2s2.5-2 2.5-2" stroke="currentColor" stroke-width="1" fill="none" stroke-linecap="round"/></svg></div>
+      <div class="block-body content-body-bubble"><span class="role-tag">云兮</span><div v-if="msg.streaming && !msg.content" class="ai-empty"><span class="dot"/><span class="dot"/><span class="dot"/></div><ContentBlock v-else :content="msg.content" :streaming="false" /></div>
+    </div>
+    <div v-if="msg.status === 'error' && !msg.blocks?.length" class="msg-row assistant">
+      <div class="avatar ai-avatar"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.2" fill="none"/><circle cx="5.5" cy="7" r="1" fill="currentColor"/><circle cx="10.5" cy="7" r="1" fill="currentColor"/><path d="M5.5 10.5c0 0 1 2 2.5 2s2.5-2 2.5-2" stroke="currentColor" stroke-width="1" fill="none" stroke-linecap="round"/></svg></div>
+      <div class="block-body"><span class="error-text">请求失败</span></div>
+    </div>
+  </template>
 
   <!-- Safety fallback: unknown role not rendered -->
   <div
     v-else
     style="display:none"
   ></div>
+
+  <!-- 图片灯箱 -->
+  <ImageLightbox
+    :images="lightboxImages"
+    :index="lightboxIdx"
+    :visible="lightboxVisible"
+    @close="lightboxVisible = false"
+  />
 </template>
 
 <script setup lang="ts">
 // @ts-nocheck
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import ContentBlock from './ContentBlock.vue'
 import ThinkingBlock from './ThinkingBlock.vue'
 import ToolCallBlock from './ToolCallBlock.vue'
+import FileAttachment from './FileAttachment.vue'
+import ImageLightbox from './ImageLightbox.vue'
 
 
 const props = defineProps({
@@ -325,20 +246,49 @@ const props = defineProps({
 })
 
 // Parse [文件: name (path)] patterns from user content
-const attachmentRe = /\[文件:\s*([^\]]+?)\s*\(([^)]+)\)\]/g
-const attachments = computed(() => {
-  const content = props.msg.content || ''
-  const matches = []
-  let m
-  while ((m = attachmentRe.exec(content)) !== null) {
-    matches.push({ name: m[1].trim(), path: m[2].trim() })
+// Split content block by [文件: name (path)] markers into text/file segments
+const fileSplitRe = /\[文件:\s*([^\]]+?)\s*\(([^)]+)\)\]/
+type Segment = { type: 'text'; content: string } | { type: 'file'; name: string; path: string }
+
+function splitSegments(content: string): Segment[] {
+  const segments: Segment[] = []
+  let remaining = content || ''
+  while (remaining.length > 0) {
+    const m = remaining.match(fileSplitRe)
+    if (!m || m.index === undefined) {
+      const trimmed = remaining.trim()
+      if (trimmed) segments.push({ type: 'text', content: trimmed })
+      break
+    }
+    // Text before the file marker
+    if (m.index > 0) {
+      const before = remaining.slice(0, m.index).trim()
+      if (before) segments.push({ type: 'text', content: before })
+    }
+    // The file
+    segments.push({ type: 'file', name: m[1].trim(), path: m[2].trim() })
+    remaining = remaining.slice(m.index + m[0].length)
   }
-  return matches
+  return segments
+}
+
+// Get segments from the main content block (NOT from individual blocks)
+const contentSegments = computed(() => {
+  // 流式传输期间不切分，避免抖动和重复渲染；完成后才切分
+  if (props.msg.streaming) {
+    const block = (props.msg.blocks || []).find((b: any) => b.type === 'content')
+    return [{ type: 'text' as const, content: block?.content || props.msg.content || '' }]
+  }
+  const block = (props.msg.blocks || []).find((b: any) => b.type === 'content')
+  if (block?.content) return splitSegments(block.content)
+  return splitSegments(props.msg.content || '')
 })
+
+const attachments = computed(() => contentSegments.value.filter((s): s is { type: 'file'; name: string; path: string } => s.type === 'file'))
+const fileMarkerReGlobal = /\[文件:\s*[^\]]+?\s*\([^)]*\)\]/g
 const cleanContent = computed(() => {
   return (props.msg.content || '')
-    .replace(attachmentRe, '')
-    // Also strip bare [文件: name] without path
+    .replace(fileMarkerReGlobal, '')
     .replace(/\[文件:\s*[^\]]+\]/g, '')
     .trim()
 })
@@ -353,18 +303,25 @@ function fmtFileSize(path) {
   // Try to get size from available info; fallback to type display
   return ''
 }
-function isImage(name) { return /\.(png|jpg|jpeg|gif|webp|svg|bmp)$/i.test(name) }
-function isDoc(name) { return /\.(doc|docx|pdf|txt|md)$/i.test(name) }
+function isImage(name) { return /\.(png|jpg|jpeg|gif|webp|svg|bmp|ico)$/i.test(name) }
 
-function previewAttachment(att) {
-  const url = '/api/nas/files/download?path=' + encodeURIComponent(att.path)
-  // Images: open in new tab for preview. Others: download
-  if (isImage(att.name)) {
-    window.open(url, '_blank')
-  } else {
-    const a = document.createElement('a')
-    a.href = url; a.download = att.name; a.click()
-  }
+const lightboxImages = ref<{ name: string; path: string }[]>([])
+const lightboxIdx = ref(0)
+const lightboxVisible = ref(false)
+
+function findImageIdx(path: string): number {
+  // Find this path's index among image attachments for lightbox navigation
+  const imgAtts = attachments.value.filter(a => isImage(a.name))
+  return imgAtts.findIndex(a => a.path === path)
+}
+
+const allImageAtts = computed(() => attachments.value.filter(a => isImage(a.name)))
+
+function openLightbox(imgIdx: number) {
+  if (!allImageAtts.value.length) return
+  lightboxImages.value = allImageAtts.value.map(a => ({ name: a.name, path: a.path }))
+  lightboxIdx.value = imgIdx >= 0 ? imgIdx : 0
+  lightboxVisible.value = true
 }
 
 function fmtDur(ms) {
@@ -403,6 +360,26 @@ function fmtDur(ms) {
 .file-card-name { font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-primary); }
 .file-card-meta { font-size: 10px; color: var(--text-muted); }
 
+.file-standalone {
+  flex: 1; min-width: 0;
+}
+.file-standalone .file-attach {
+  max-width: 230px;
+  margin-bottom: 8px;
+}
+/* 图片气泡更大 */
+.file-standalone:has(.fa-image) .file-attach {
+  max-width: 400px;
+}
+.file-standalone:has(.fa-image) .fa-thumb {
+  width: 400px;
+  height: 225px; /* 16:9 */
+}
+/* 行间距 */
+.msg-row.assistant + .msg-row.assistant {
+  margin-top: 6px;
+}
+
 .user-bubble {
   width: 100%; padding: 10px 14px; border-radius: 8px;
   background: var(--surface-card, #fff);
@@ -412,6 +389,22 @@ function fmtDur(ms) {
 .user-bubble :deep(.content-body p) { margin: 0; }
 
 /* ── AI message ── */
+.block-body {
+  flex: 1; min-width: 0;
+}
+/* 思考块：无背景 */
+.thinking-body-plain {
+  opacity: 0.75; font-size: 13px;
+}
+.thinking-body-plain .thinking-body { background: transparent; border: none; padding: 0; }
+/* 内容块：保持卡片背景 */
+.content-body-bubble {
+  border: 1px solid var(--border-subtle, #e2e8f0); border-radius: 8px; padding: 12px 14px;
+  background: var(--surface-card, #fff);
+}
+/* 思考行 */
+.thinking-row { margin: 6px 0; }
+
 .ai-blocks {
   display: flex; flex-direction: column; gap: 12px;
   border: 1px solid var(--border-subtle, #e2e8f0); border-radius: 8px; padding: 12px 14px;
