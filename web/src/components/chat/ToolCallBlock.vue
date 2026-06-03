@@ -1,8 +1,12 @@
 <template>
   <div class="tool-block" :class="{ pending: !result && status !== 'running', running: status === 'running' }">
     <div class="tool-header" @click="result ? showFull = !showFull : null">
+      <span v-if="status === 'running'" class="tool-spinner"><span class="spinner-dot"></span></span>
       <code class="tool-name">{{ name }}</code>
-      <span v-if="status === 'running' && progress" class="tool-progress">{{ progress }}</span>
+      <span v-if="status === 'running'" class="tool-running-label">
+        <span class="running-dots">执行中<span class="dot1">.</span><span class="dot2">.</span><span class="dot3">.</span></span>
+        <span v-if="elapsed" class="tool-elapsed">{{ elapsed }}</span>
+      </span>
       <span v-if="result" class="tool-result-preview">{{ resultPreview }}</span>
       <svg v-if="result" :class="['chevron', { flipped: showFull }]" width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M3 3.5l2 3 2-3" /></svg>
     </div>
@@ -16,9 +20,26 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, watch, onUnmounted } from 'vue'
 const props = defineProps<{ name?: string; args?: string; result?: string; status?: string; progress?: string; streaming?: boolean }>()
 const showFull = ref(false)
+const elapsed = ref('')
+let timer: ReturnType<typeof setInterval> | null = null
+
+watch(() => props.status, (s) => {
+  if (s === 'running') {
+    const start = Date.now()
+    timer = setInterval(() => {
+      const sec = Math.floor((Date.now() - start) / 1000)
+      elapsed.value = sec >= 60 ? `${Math.floor(sec / 60)}m${sec % 60}s` : `${sec}s`
+    }, 1000)
+  } else {
+    if (timer) { clearInterval(timer); timer = null }
+    elapsed.value = ''
+  }
+})
+onUnmounted(() => { if (timer) clearInterval(timer) })
+
 const formattedArgs = computed(() => { if (!props.args) return ''; try { return JSON.stringify(JSON.parse(props.args), null, 2) } catch { return props.args } })
 const resultPreview = computed(() => { const r = props.result; if (!r) return ''; const fl = r.split('\n')[0]; return fl.length > 80 ? fl.slice(0, 80) + '…' : fl })
 </script>
@@ -28,8 +49,12 @@ const resultPreview = computed(() => { const r = props.result; if (!r) return ''
   border: 1px solid rgba(34,197,94,0.2); border-left: 3px solid #22c55e; border-radius: 8px; overflow: hidden;
   margin: 4px 0; font-size: 12px; background: rgba(34,197,94,0.04);
 }
-.tool-block.running { border-left-color: #22c55e; background: rgba(34,197,94,0.06); }
+.tool-block.running { border-left-color: #22c55e; background: rgba(34,197,94,0.06); animation: toolPulse 2s ease-in-out infinite; }
 .tool-block.pending { background: rgba(34,197,94,0.04); }
+@keyframes toolPulse {
+  0%, 100% { border-left-color: #22c55e; }
+  50% { border-left-color: #4ade80; box-shadow: 0 0 8px rgba(34,197,94,0.15); }
+}
 .tool-header {
   display: flex; align-items: center; gap: 8px; padding: 7px 10px; cursor: pointer; user-select: none;
 }
@@ -40,7 +65,25 @@ const resultPreview = computed(() => { const r = props.result; if (!r) return ''
   background: rgba(34,197,94,0.12); padding: 3px 8px; border-radius: 4px;
 }
 .tool-result-preview { font-size: 12px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
-.tool-progress { font-size: 11px; color: #16a34a; font-weight: 500; flex-shrink: 0; }
+.tool-running-label { display: flex; align-items: center; gap: 8px; flex: 1; flex-shrink: 0; }
+.running-dots { font-size: 11px; color: #16a34a; font-weight: 500; }
+.running-dots .dot1 { animation: dotBounce 1.2s infinite; }
+.running-dots .dot2 { animation: dotBounce 1.2s 0.2s infinite; }
+.running-dots .dot3 { animation: dotBounce 1.2s 0.4s infinite; }
+@keyframes dotBounce {
+  0%, 100% { opacity: 0.2; }
+  50% { opacity: 1; }
+}
+.tool-elapsed { font-size: 10px; color: var(--text-muted); font-family: var(--font-mono); }
+.tool-spinner { display: flex; align-items: center; flex-shrink: 0; }
+.spinner-dot {
+  width: 8px; height: 8px; border-radius: 50%; background: #22c55e;
+  animation: spinnerPulse 1s ease-in-out infinite;
+}
+@keyframes spinnerPulse {
+  0%, 100% { transform: scale(1); opacity: 0.6; }
+  50% { transform: scale(1.4); opacity: 1; }
+}
 .chevron { flex-shrink: 0; transition: transform 0.15s; opacity: 0.5; }
 .chevron.flipped { transform: rotate(180deg); }
 .tool-body { padding: 0 10px 8px; }
@@ -57,6 +100,5 @@ const resultPreview = computed(() => { const r = props.result; if (!r) return ''
   .tool-header:hover { background: rgba(34,197,94,0.08); }
   .tool-name { background: rgba(34,197,94,0.15); color: #4ade80; }
   .tool-json, .tool-result { background: rgba(34,197,94,0.05); }
-  .tool-progress { color: #4ade80; }
 }
 </style>

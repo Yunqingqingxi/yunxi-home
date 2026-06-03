@@ -700,10 +700,13 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 					appendBlock(&roundBlocks, base.BlockTypeContent, ev.Content, "", "", "")
 					emit(ev)
 				case "tool_call":
-					tcID := fmt.Sprintf("call_%d_%d", state.round, len(toolCalls))
-					toolCalls = append(toolCalls, base.ToolCall{ID: tcID, Type: "function", Function: base.FunctionCall{Name: ev.Tool, Arguments: ev.Args}})
-					roundBlocks = append(roundBlocks, base.ContentBlock{Type: base.BlockTypeToolCall, ToolName: ev.Tool, ToolArgs: ev.Args, ToolCallID: tcID})
-					emit(ev)
+				tcID := fmt.Sprintf("call_%d_%d", state.round, len(toolCalls))
+				toolCalls = append(toolCalls, base.ToolCall{ID: tcID, Type: "function", Function: base.FunctionCall{Name: ev.Tool, Arguments: ev.Args}})
+				roundBlocks = append(roundBlocks, base.ContentBlock{Type: base.BlockTypeToolCall, ToolName: ev.Tool, ToolArgs: ev.Args, ToolCallID: tcID})
+				// Silent tools: don't emit to frontend (security — no data leakage)
+						if !isSilentTool(ev.Tool) {
+							emit(ev)
+						}
 					toolRisk := ""
 					if t, ok := s.registry.Get(ev.Tool); ok {
 						toolRisk = t.RiskLevel
@@ -773,9 +776,11 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 						if !approved {
 							// 告知 AI 操作被取消，不阻塞后续流程
 							obs := fmt.Sprintf("[%s 已取消] 用户未确认危险操作，工具未执行", tc.Function.Name)
-							emit(base.ChatStreamEvent{Type: "tool_result", Tool: tc.Function.Name, Content: obs})
-							history = append(history, base.Message{Role: "tool", Content: obs, ToolCallID: tc.ID})
-							s.sessions.Save(sessionID, history)
+							if !isSilentTool(tc.Function.Name) {
+							 emit(base.ChatStreamEvent{Type: "tool_result", Tool: tc.Function.Name, Content: obs})
+							}
+						history = append(history, base.Message{Role: "tool", Content: obs, ToolCallID: tc.ID})
+						s.sessions.Save(sessionID, history)
 							continue
 						}
 					}
@@ -881,8 +886,10 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userMessage string,
 						Value:  elapsed,
 					})
 					log.Debug("工具执行完成", "工具", tc.Function.Name, "状态", string(result.Status), "结果", truncateStr(obs, 200))
-					emit(base.ChatStreamEvent{Type: "tool_result", Tool: tc.Function.Name, Content: obs})
-					if len(history) > 0 && history[len(history)-1].Role == "assistant" {
+					if !isSilentTool(tc.Function.Name) {
+					 emit(base.ChatStreamEvent{Type: "tool_result", Tool: tc.Function.Name, Content: obs})
+				}
+				if len(history) > 0 && history[len(history)-1].Role == "assistant" {
 						history[len(history)-1].Blocks = append(history[len(history)-1].Blocks, base.ContentBlock{Type: base.BlockTypeToolResult, ToolName: tc.Function.Name, ToolResult: obs, ToolCallID: tc.ID})
 					}
 					history = append(history, base.Message{Role: "tool", Content: obs, ToolCallID: tc.ID})
@@ -1892,7 +1899,9 @@ func (s *Service) executeForcedTool(sessionID, toolName string, bgCtx context.Co
 	emit(base.ChatStreamEvent{Type: "tool_start", Tool: toolName, Args: "{}"})
 	result := s.chain.Execute(toolCtx, toolName, map[string]any{})
 	obs := formatObservation(toolName, result)
-	emit(base.ChatStreamEvent{Type: "tool_result", Tool: toolName, Content: obs})
+	if !isSilentTool(toolName) {
+		emit(base.ChatStreamEvent{Type: "tool_result", Tool: toolName, Content: obs})
+	}
 	*history = append(*history, base.Message{Role: "tool", Content: obs, ToolCallID: tcID})
 
 	// 记录为被覆盖的拓扑节点
@@ -2854,6 +2863,17 @@ func bingSearch(ctx context.Context, query string) (string, error) {
 func cleanHTML(s string) string {
 	return regexp.MustCompile(`<[^>]*>`).ReplaceAllString(s, "")
 }
+
+// silentTools lists tools whose events are never emitted to the frontend.
+var silentTools = map[string]bool{
+	"recall":                       true,
+	"remember":                     true,
+	"request_confirmation":         true,
+	"spawn_agent":                  true,
+	"activate_specialized_context": true,
+}
+
+func isSilentTool(name string) bool { return silentTools[name] }
 
 func truncateStr(s string, maxLen int) string {
 	runes := []rune(s)

@@ -665,26 +665,21 @@ export const useChatStore = defineStore('chat', () => {
 
   const _titleRequested = new Set<string>()
 
-  async function requestTitle(sid: string) {
+  function requestTitle(sid: string) {
     if (_titleRequested.has(sid)) return
     _titleRequested.add(sid)
-    // Find first user message
     const msgs = _sessionMsgs[sid] || messages.value
     const firstUser = msgs.find((m: ChatMessage) => m.role === 'user' && m.content)
     if (!firstUser) return
-    try {
-      const resp = await fetch('/api/chat/title', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-        body: JSON.stringify({ session_id: sid, message: firstUser.content }),
-      })
-      const data = await resp.json()
-      const title = data?.data?.title || data?.title
-      if (title && title !== '新对话') {
-        const conv = conversations.value.find((c: any) => c.id === sid)
-        if (conv) conv.title = title
-      }
-    } catch (_) { /* silent */ }
+    // Fire-and-forget: backend generates title asynchronously
+    const token = localStorage.getItem('token')
+    fetch('/api/chat/title', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+      body: JSON.stringify({ session_id: sid, message: firstUser.content }),
+    }).catch(() => {})
+    // Refresh sidebar after backend has time to generate title
+    setTimeout(() => loadConversations(), 3000)
   }
 
   function finalizeStream(): void {

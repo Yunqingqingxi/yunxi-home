@@ -268,10 +268,10 @@ func (h *ChatHandler) UpdateSessionMeta(c echo.Context) error {
 	return c.JSON(http.StatusOK, successResp(map[string]string{"status": "updated"}))
 }
 
-// GenerateTitle 为会话生成标题  POST /api/chat/title
+// GenerateTitle 异步为会话生成标题  POST /api/chat/title
 func (h *ChatHandler) GenerateTitle(c echo.Context) error {
 	if !h.isAIEnabled() {
-		return c.JSON(http.StatusOK, successResp(map[string]string{"title": "新对话"}))
+		return c.JSON(http.StatusOK, successResp(map[string]string{"status": "skipped"}))
 	}
 	var req struct {
 		SessionID string `json:"session_id"`
@@ -281,12 +281,19 @@ func (h *ChatHandler) GenerateTitle(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, errorResp("缺少 session_id 或 message"))
 	}
 
-	title, err := h.aiService.GenerateTitle(c.Request().Context(), req.SessionID, req.Message)
-	if err != nil {
-		log.Warn("标题生成失败", "session", req.SessionID, "error", err)
-		return c.JSON(http.StatusOK, successResp(map[string]string{"title": "新对话"}))
-	}
-	return c.JSON(http.StatusOK, successResp(map[string]string{"title": title}))
+	// Fire-and-forget: return immediately, generate title in background
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		title, err := h.aiService.GenerateTitle(ctx, req.SessionID, req.Message)
+		if err != nil {
+			log.Warn("异步标题生成失败", "session", req.SessionID, "error", err)
+			return
+		}
+		log.Info("异步标题已生成", "session", req.SessionID, "title", title)
+	}()
+
+	return c.JSON(http.StatusOK, successResp(map[string]string{"status": "processing"}))
 }
 
 // ConfirmAction 处理危险操作确认
