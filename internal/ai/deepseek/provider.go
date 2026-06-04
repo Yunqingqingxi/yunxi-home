@@ -1,19 +1,19 @@
 package deepseek
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
-	"net"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/base"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai/provider"
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/resilience"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
+	"github.com/Yunqingqingxi/yunxi-home/internal/util/safego"
 )
 
 var log = logger.ForComponent("deepseek")
@@ -86,12 +86,6 @@ type dsUsage struct {
 	PromptCacheMissTokens int `json:"prompt_cache_miss_tokens"`
 }
 
-type toolCallAccum struct {
-	id   string
-	name string
-	args strings.Builder
-}
-
 // ── Provider ───────────────────────────────────────────────
 
 type Provider struct {
@@ -121,26 +115,18 @@ func init() {
 }
 
 func New(cfg Config) *Provider {
-	// v3.1: IPv4-only transport — DeepSeek has no AAAA record, Go's DualStack causes
-	// intermittent "unexpected EOF" / "TLS handshake timeout" when IPv6 is attempted.
-	// DialContext forces tcp4; TLS is handled by the HTTP client on top.
-	transport := &http.Transport{
-		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
-			return dialer.DialContext(ctx, "tcp4", addr)
-		},
-		ForceAttemptHTTP2:     true,
-		MaxIdleConns:          10,
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   15 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
-	}
+	// v3.2: Use shared HTTP client with IPv4-only transport.
+	// DeepSeek has no AAAA record; Go's DualStack causes intermittent
+	// "unexpected EOF" / "TLS handshake timeout" when IPv6 is attempted.
+	httpCfg := provider.DefaultHTTPClientConfig()
+	httpCfg.ForceIPv4 = true
+	httpCfg.RequestTimeout = 10 * time.Minute
 
 	return &Provider{
 		apiKey:     cfg.APIKey,
 		baseURL:    "https://api.deepseek.com",
 		model:      "deepseek-v4-flash",
-		client:     &http.Client{Transport: transport, Timeout: 10 * time.Minute},
+		client:     provider.NewHTTPClient(httpCfg),
 		inputPrice: 0.28,   // 元/百万 tokens
 		outputPrice: 1.10,  // 元/百万 tokens
 		cachePrice: 0.07,   // 元/百万 tokens (cache hit)
@@ -273,7 +259,9 @@ func (p *Provider) ChatStream(ctx context.Context, messages []base.Message, tool
 	}
 
 	ch := make(chan base.ChatStreamEvent, 64)
-	go p.readStream(ctx, resp, ch)
+	safego.Go("deepseek-readstream", func() {
+		p.readStream(ctx, resp, ch)
+	})
 	return ch, nil
 }
 
@@ -282,95 +270,50 @@ func (p *Provider) ChatStream(ctx context.Context, messages []base.Message, tool
 func (p *Provider) readStream(ctx context.Context, resp *http.Response, ch chan<- base.ChatStreamEvent) {
 	defer resp.Body.Close()
 	defer close(ch)
-	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 64*1024), 256*1024)
-	var (
-		contentBuf, reasoningBuf strings.Builder
-		toolCallMap              = make(map[int]*toolCallAccum)
-		finished                 bool
-		firstToken               time.Time
-		lastChunk                *dsChunk
-		lastEvent                = time.Now()
-	)
-	done := make(chan struct{})
-	defer close(done)
-	go func() {
-		tk := time.NewTicker(15 * time.Second)
-		defer tk.Stop()
-		for {
-			select {
-			case <-tk.C:
-				if time.Since(lastEvent) > 15*time.Second {
-					select {
-					case ch <- base.ChatStreamEvent{Type: "keepalive", Content: "等待响应..."}:
-					default:
-					}
-				}
-			case <-done:
-				return
-			}
-		}
-	}()
-	emit := func(ev base.ChatStreamEvent) {
-		select {
-		case ch <- ev:
-		default:
-		}
-	}
 
-	for scanner.Scan() {
+	// Shared infrastructure
+	streamCtx := provider.NewStreamCtx()
+	scanner := provider.NewSSEScanner(resp.Body)
+	emit := provider.NewEmitter(ch)
+	done := provider.StartKeepalive(ch, 15*time.Second, &streamCtx.LastEventAt)
+	defer close(done)
+
+	var lastChunk *dsChunk
+
+	// Main SSE loop
+	for {
 		if ctx.Err() != nil {
 			return
 		}
-		line := strings.TrimSpace(scanner.Text())
-		if strings.HasPrefix(line, ":") {
-			lastEvent = time.Now()
-			continue
+		ev := scanner.Next()
+		if ev == nil {
+			break
 		}
-		if line == "" || line == "data: [DONE]" {
-			continue
-		}
-		if !strings.HasPrefix(line, "data: ") {
-			continue
-		}
+		streamCtx.LastEventAt = time.Now()
+
 		var chunk dsChunk
-		if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &chunk); err != nil {
+		if err := json.Unmarshal([]byte(ev.Data), &chunk); err != nil {
 			continue
 		}
-		lastChunk, lastEvent = &chunk, time.Now()
+		lastChunk = &chunk
+
 		for _, c := range chunk.Choices {
-			if c.Delta.ReasoningContent != "" {
-				if firstToken.IsZero() {
-					firstToken = time.Now()
-				}
-				reasoningBuf.WriteString(c.Delta.ReasoningContent)
-				emit(base.ChatStreamEvent{Type: "thinking", Content: c.Delta.ReasoningContent})
-			}
-			if c.Delta.Content != "" {
-				if firstToken.IsZero() {
-					firstToken = time.Now()
-				}
-				contentBuf.WriteString(c.Delta.Content)
-				emit(base.ChatStreamEvent{Type: "content", Content: c.Delta.Content})
-			}
+			// Convert to shared chunk format
+			var fragments []provider.ToolCallFragment
 			for _, tc := range c.Delta.ToolCalls {
-				idx := tc.Index
-				if _, ok := toolCallMap[idx]; !ok {
-					toolCallMap[idx] = &toolCallAccum{}
-				}
-				if tc.ID != "" {
-					toolCallMap[idx].id = tc.ID
-				}
-				if tc.Function.Name != "" {
-					toolCallMap[idx].name = tc.Function.Name
-				}
-				if tc.Function.Arguments != "" {
-					toolCallMap[idx].args.WriteString(tc.Function.Arguments)
-				}
+				fragments = append(fragments, provider.ToolCallFragment{
+					Index: tc.Index,
+					ID:    tc.ID,
+					Name:  tc.Function.Name,
+					Args:  tc.Function.Arguments,
+				})
 			}
-			if c.FinishReason != "" {
-				finished = true
-			}
+			streamCtx.Feed(provider.ChunkContent{
+				ContentDelta:       c.Delta.Content,
+				ThinkingDelta:      c.Delta.ReasoningContent,
+				FinishReason:       c.FinishReason,
+				ToolCallFragments:  fragments,
+			}, emit)
 		}
 	}
 
@@ -383,21 +326,25 @@ func (p *Provider) readStream(ctx context.Context, resp *http.Response, ch chan<
 		}
 		return
 	}
-	if !finished && contentBuf.Len() == 0 && reasoningBuf.Len() == 0 && len(toolCallMap) == 0 {
+	if !streamCtx.Finished && !streamCtx.HasContent() {
 		emit(base.ChatStreamEvent{Type: "error", Content: "模型未返回有效响应"})
 		return
 	}
+
+	// Cache metrics (DeepSeek-specific)
 	var cost float64
-	var total int
-		if lastChunk != nil && lastChunk.Usage != nil {
-			p.cacheMetrics.HitTokens += lastChunk.Usage.PromptCacheHitTokens
+	if lastChunk != nil && lastChunk.Usage != nil {
+		p.cacheMetrics.HitTokens += lastChunk.Usage.PromptCacheHitTokens
 		p.cacheMetrics.MissTokens += lastChunk.Usage.PromptCacheMissTokens
 		p.cacheMetrics.TotalRequests++
-		cost = float64(lastChunk.Usage.PromptCacheHitTokens)*p.cachePrice/1e6 +
-			float64(lastChunk.Usage.PromptCacheMissTokens)*p.inputPrice/1e6 +
-			float64(lastChunk.Usage.CompletionTokens)*p.outputPrice/1e6
+		cost = provider.CalculateCost(
+			lastChunk.Usage.PromptCacheHitTokens+lastChunk.Usage.PromptCacheMissTokens,
+			lastChunk.Usage.CompletionTokens,
+			lastChunk.Usage.PromptCacheHitTokens,
+			p.inputPrice, p.outputPrice, p.cachePrice,
+		)
 		p.cacheMetrics.TotalCost += cost
-		total = lastChunk.Usage.PromptCacheHitTokens + lastChunk.Usage.PromptCacheMissTokens
+		total := lastChunk.Usage.PromptCacheHitTokens + lastChunk.Usage.PromptCacheMissTokens
 		rate := float64(0)
 		if total > 0 {
 			rate = float64(lastChunk.Usage.PromptCacheHitTokens) / float64(total) * 100
@@ -406,26 +353,22 @@ func (p *Provider) readStream(ctx context.Context, resp *http.Response, ch chan<
 			"miss", lastChunk.Usage.PromptCacheMissTokens, "out", lastChunk.Usage.CompletionTokens,
 			"rate", fmt.Sprintf("%.1f%%", rate), "cost", fmt.Sprintf("%.6f元", cost))
 	}
-	log.Info("流式响应完成", "模型", p.model, "内容长度", contentBuf.Len(), "思考长度", reasoningBuf.Len(), "工具调用数", len(toolCallMap))
+	log.Info("流式响应完成", "模型", p.model, "内容长度", streamCtx.ContentBuf.Len(),
+		"思考长度", streamCtx.ThinkingBuf.Len(), "工具调用数", streamCtx.ToolAccum.Len())
 
-	for _, tc := range toolCallMap {
-		args := tc.args.String()
-		if args == "" {
-			args = "{}"
-		}
-		emit(base.ChatStreamEvent{Type: "tool_call", Tool: tc.name, Args: args})
-	}
+	// Emit tool calls and done
+	streamCtx.EmitToolCalls(emit)
 	if lastChunk != nil && lastChunk.Usage != nil {
-			total := lastChunk.Usage.PromptCacheHitTokens + lastChunk.Usage.PromptCacheMissTokens
-			emit(base.ChatStreamEvent{Type: "done", Usage: &base.StreamUsage{
-				PromptTokens:     total,
-				CompletionTokens: lastChunk.Usage.CompletionTokens,
-				TotalTokens:      total + lastChunk.Usage.CompletionTokens,
-				Cost:             cost,
-			}})
-		} else {
-			emit(base.ChatStreamEvent{Type: "done"})
-		}
+		total := lastChunk.Usage.PromptCacheHitTokens + lastChunk.Usage.PromptCacheMissTokens
+		emit(base.ChatStreamEvent{Type: "done", Usage: &base.StreamUsage{
+			PromptTokens:     total,
+			CompletionTokens: lastChunk.Usage.CompletionTokens,
+			TotalTokens:      total + lastChunk.Usage.CompletionTokens,
+			Cost:             cost,
+		}})
+	} else {
+		streamCtx.EmitDone(emit)
+	}
 }
 
 // TestConnection validates the API key by listing models.

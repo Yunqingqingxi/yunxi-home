@@ -22,6 +22,7 @@ type Memory struct {
 	Type         MemoryType `json:"type"`
 	Content      string     `json:"content"`
 	Source       string     `json:"source"`    // "file" or "agent"
+	ContextTags  []string   `json:"context_tags,omitempty"` // 关联的专用上下文ID，空=通用记忆
 	Importance   float64    `json:"importance"` // 0.0-1.0, decays over time
 	AccessCount  int        `json:"access_count"`
 	LastAccessed time.Time  `json:"last_accessed_at"`

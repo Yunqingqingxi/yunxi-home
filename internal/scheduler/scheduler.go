@@ -193,6 +193,10 @@ func (s *Scheduler) TriggerUpdate(ctx context.Context) error {
 	return s.checkAndUpdate(ctx)
 }
 
+// maxConcurrentUpdates limits simultaneous DNS update operations to prevent
+// overwhelming external services or exhausting system resources.
+const maxConcurrentUpdates = 10
+
 // checkAndUpdate 核心业务逻辑：遍历所有启用的域名记录，检测并更新 IP
 func (s *Scheduler) checkAndUpdate(ctx context.Context) error {
 	records, err := s.domainRepo.ListEnabled(ctx)
@@ -210,14 +214,26 @@ func (s *Scheduler) checkAndUpdate(ctx context.Context) error {
 
 	var wg sync.WaitGroup
 	errCh := make(chan error, len(records))
+	sem := make(chan struct{}, maxConcurrentUpdates) // 信号量控制并发
 
 	for _, rec := range records {
 		wg.Add(1)
 		go func(r models.DomainRecord) {
 			defer wg.Done()
+			// 获取信号量
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				errCh <- ctx.Err()
+				return
+			}
 			if err := s.updateSingleRecord(ctx, r); err != nil {
 				log.Error("更新记录失败", "domain", r.Domain, "rr", r.RR, "error", err)
-				errCh <- err
+				select {
+				case errCh <- err:
+				default:
+				}
 			}
 		}(rec)
 	}

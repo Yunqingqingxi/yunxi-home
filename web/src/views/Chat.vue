@@ -60,10 +60,10 @@
               <span class="insert-plus">+</span>
             </div>
             <div
-              v-if="msg && i > 0 && timeGap(safeMessages[i-1], msg) > 5"
+              v-if="msg && i > 0 && minutesBetween(safeMessages[i-1]?.createdAt, msg?.createdAt) > 5"
               class="time-divider"
             >
-              <span>{{ msg.createdAt ? fmtMsgTime(msg.createdAt) : '' }}</span>
+              <span>{{ msg.createdAt ? formatHM(msg.createdAt) : '' }}</span>
             </div>
             <!-- Message wrapper with edit controls -->
             <div
@@ -219,6 +219,7 @@ import TopologyPanel from '../components/chat/TopologyPanel.vue'
 import AgentStatusBar from '../components/chat/AgentStatusBar.vue'
 import LockConflictNotice from '../components/chat/LockConflictNotice.vue'
 import MetaReportCard from '../components/chat/MetaReportCard.vue'
+import { formatHM, minutesBetween } from '../composables/useFormat'
 
 const route = useRoute()
 const router = useRouter()
@@ -317,7 +318,7 @@ async function saveEdit(i: number) {
     // ④ 编辑后中断（fire-and-forget，仅当 Agent 活跃时）
     if (store.isStreaming || store.hasRunningAgents) {
       console.log('[chat] saveEdit: interrupting active session')
-      store.streamingSessions[sid] = false
+      store.setLifecycle(sid, 'idle')
       store.sessionAgents[sid] = []
       fetch(`/api/chat/sessions/${sid}/interrupt`, {
         method: 'POST',
@@ -411,17 +412,6 @@ function startObserve() {
   _observer.observe(el)
 }
 
-function timeGap(a, b) {
-  if (!a?.createdAt || !b?.createdAt) return 0
-  return Math.abs(b.createdAt - a.createdAt) / 60000
-}
-
-function fmtMsgTime(ts) {
-  if (!ts) return ''
-  const d = new Date(ts)
-  return d.getHours().toString().padStart(2, '0') + ':' + d.getMinutes().toString().padStart(2, '0')
-}
-
 // ── Scroll behavior ──
 const scrolledUp = ref(false)
 const showScrollBtn = ref(false)
@@ -470,9 +460,15 @@ watch(() => {
   const last = msgs.length > 0 ? msgs[msgs.length - 1] : null
   return last?._v ?? 0
 }, () => { if (store.isStreaming) nextTick(() => smartScrollToBottom()) })
-watch(() => store.sessionId, (sid) => {
+watch(() => store.sessionId, (sid, oldSid) => {
   _observer?.disconnect()
-  if (sid) { inputBarHeight.value = 120; nextTick(startObserve) }
+  if (sid) {
+    inputBarHeight.value = 120; nextTick(startObserve)
+    // Immediately sync URL when session ID is first created
+    if (!oldSid && route.path !== '/chat/' + sid) {
+      router.replace('/chat/' + sid)
+    }
+  }
   else { inputBarHeight.value = 0 }
 })
 onMounted(() => { if (store.sessionId && store.messages.length) { nextTick(() => scrollToEnd()); setTimeout(() => scrollToEnd(), 200) } })

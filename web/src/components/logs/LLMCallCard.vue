@@ -3,7 +3,7 @@
     <div class="llm-main">
       <span class="llm-icon" v-html="icons.brain"></span>
       <span class="llm-model">{{ event.model }}</span>
-      <span v-if="event.llm_dur_ms" class="llm-dur">{{ fmtDuration(event.llm_dur_ms) }}</span>
+      <span v-if="event.llm_dur_ms" class="llm-dur">{{ formatDuration(event.llm_dur_ms) }}</span>
       <span v-if="event.cost_usd" class="llm-cost">${{ event.cost_usd?.toFixed(4) }}</span>
     </div>
     <div class="llm-tokens">
@@ -17,12 +17,13 @@
 
 <script setup lang="ts">
 import type { LogEvent } from '../../types/logs'
-import { ICONS, fmtDuration, fmtTokens } from '../../stores/logs'
+import { ICONS } from '../../stores/logs'
+import { formatDuration, formatNum } from '../../composables/useFormat'
 const icons = ICONS
 
 defineProps<{ event: LogEvent }>()
 
-function fmtTok(n: number | undefined): string { return fmtTokens(n || 0) }
+function fmtTok(n: number | undefined): string { return formatNum(n || 0) }
 </script>
 
 <style scoped>

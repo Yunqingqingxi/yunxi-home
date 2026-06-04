@@ -235,7 +235,7 @@ func (cl *ChatLogger) bridgeToSlog(ev LogEvent) {
 		)...)
 
 	case "thinking":
-		slog.Debug("AI 思考", append(base,
+		slog.Info("AI 思考", append(base,
 			slog.String(logger.KeyEvent, logger.EventThinking),
 			slog.String("content", truncateStr(ev.Content, 500)),
 		)...)
@@ -254,15 +254,15 @@ func (cl *ChatLogger) bridgeToSlog(ev LogEvent) {
 		slog.Info("工具调用", append(base,
 			slog.String(logger.KeyEvent, logger.EventToolCall),
 			slog.String(logger.KeyTool, ev.ToolName),
-			slog.String(logger.KeyToolRisk, ev.RiskLevel),
+			slog.String("args", truncateStr(ev.ToolArgs, 200)), slog.String(logger.KeyToolRisk, ev.RiskLevel),
 		)...)
 	case "tool_start":
-		slog.Debug("工具开始", append(base,
+		slog.Info("工具开始", append(base,
 			slog.String(logger.KeyEvent, logger.EventToolStart),
 			slog.String(logger.KeyTool, ev.ToolName),
 		)...)
 	case "tool_progress":
-		slog.Debug("工具进度", append(base,
+		slog.Info("工具进度", append(base,
 			slog.String(logger.KeyEvent, logger.EventToolProgress),
 			slog.String(logger.KeyTool, ev.ToolName),
 			slog.String("progress", truncateStr(ev.Content, 200)),

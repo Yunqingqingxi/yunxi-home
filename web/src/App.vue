@@ -317,6 +317,7 @@ import { useAuthStore } from './stores/auth'
 import { useThemeStore } from './stores/theme'
 import { useUploadStore } from './stores/upload'
 import PageAnalyzer from './components/chat/PageAnalyzer.vue'
+import { formatRelativeShort } from './composables/useFormat'
 
 const router = useRouter()
 const route = useRoute()
@@ -475,13 +476,7 @@ function navigateChat(sessionId) {
 }
 
 function sessionTime(t) {
-  if (!t) return ''
-  const d = new Date(t)
-  const now = new Date()
-  const diff = now - d
-  if (diff < 3600000) return Math.floor(diff / 60000) + 'm ago'
-  if (diff < 86400000) return Math.floor(diff / 3600000) + 'h ago'
-  return d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
+  return formatRelativeShort(t)
 }
 
 async function deleteSession(id) {

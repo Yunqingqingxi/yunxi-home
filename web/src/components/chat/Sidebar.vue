@@ -131,7 +131,7 @@
                 <template v-if="isQQBot(conv.id)"><svg class="bot-icon" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="5" width="10" height="8" rx="2"/><circle cx="7" cy="9" r="1" fill="currentColor"/><circle cx="10" cy="9" r="1" fill="currentColor"/><line x1="6" y1="12" x2="11" y2="12" stroke="currentColor" stroke-linecap="round"/></svg></template>
                 {{ conv.title }}
               </span>
-              <span class="sidebar-item-meta">{{ fmtTime(conv.updatedAt) }} · {{ conv.messageCount }} 条</span>
+              <span class="sidebar-item-meta">{{ formatRelative(conv.updatedAt) }} · {{ conv.messageCount }} 条</span>
             </div>
             <!-- Context menu button -->
             <button
@@ -184,7 +184,7 @@
                   <template v-if="isQQBot(conv.id)"><svg class="bot-icon" width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="5" width="10" height="8" rx="2"/><circle cx="7" cy="9" r="1" fill="currentColor"/><circle cx="10" cy="9" r="1" fill="currentColor"/><line x1="6" y1="12" x2="11" y2="12" stroke="currentColor" stroke-linecap="round"/></svg></template>
                   {{ conv.title }}
                 </span>
-                <span class="sidebar-item-meta">{{ fmtTime(conv.updatedAt) }} · {{ conv.messageCount }} 条</span>
+                <span class="sidebar-item-meta">{{ formatRelative(conv.updatedAt) }} · {{ conv.messageCount }} 条</span>
               </div>
               <button
                 v-if="hoveredConv === conv.id"
@@ -272,6 +272,7 @@
 // @ts-nocheck
 import { ref, computed, nextTick } from 'vue'
 import StatusDot from '../icons/StatusDot.vue'
+import { formatRelative } from '../../composables/useFormat'
 
 function isQQBot(id: string): boolean { return id?.startsWith('qqbot_') }
 
@@ -329,7 +330,7 @@ function dotColorClass(conv: any): string {
 }
 
 function dotTooltip(conv: any): string {
-  const t = fmtTime(conv.updatedAt)
+  const t = formatRelative(conv.updatedAt)
   return conv.title + '\n' + conv.messageCount + ' 条 · ' + t
 }
 
@@ -514,14 +515,7 @@ async function confirmClearAll() {
 
 // ── Formatting ──
 function fmtTime(t: string): string {
-  if (!t) return ''
-  const d = new Date(t)
-  const now = new Date()
-  const diff = now.getTime() - d.getTime()
-  if (diff < 60000) return '刚刚'
-  if (diff < 3600000) return Math.floor(diff / 60000) + ' 分钟前'
-  if (diff < 86400000) return Math.floor(diff / 3600000) + ' 小时前'
-  return d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })
+  return formatRelative(t)
 }
 </script>
 

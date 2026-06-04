@@ -138,15 +138,17 @@ func (s *Session) readLoop() {
 	for {
 		n, err := s.pty.Read(buf)
 		if n > 0 {
+			// 在锁内检查 closed 并执行写入，避免竞态
 			s.mu.Lock()
-			closed := s.closed
-			s.mu.Unlock()
-			if closed {
+			if s.closed {
+				s.mu.Unlock()
 				return
 			}
 			// Set write deadline before writing to detect client that stopped reading.
 			s.conn.SetWriteDeadline(time.Now().Add(writeWait))
-			if writeErr := s.conn.WriteMessage(websocket.TextMessage, buf[:n]); writeErr != nil {
+			writeErr := s.conn.WriteMessage(websocket.TextMessage, buf[:n])
+			s.mu.Unlock()
+			if writeErr != nil {
 				log.Debug("写入 WebSocket 失败", "error", writeErr)
 				return
 			}

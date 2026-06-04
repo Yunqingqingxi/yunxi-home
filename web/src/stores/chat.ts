@@ -2,7 +2,8 @@ import { defineStore } from 'pinia'
 import { ref, computed, ComputedRef, watch } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
-import type { ChatMessage, ChatBlock, Conversation, SSEEvent, AgentInfo, ToolCall, AgentState, AgentRole, LockConflict } from '../types/chat'
+import { fetchEventSource } from '@microsoft/fetch-event-source'
+import type { ChatMessage, ChatBlock, Conversation, SSEEvent, AgentInfo, ToolCall, AgentState, AgentRole, LockConflict, StateTransition } from '../types/chat'
 import type { TopologyState, TopologyUpdate } from '../types/topology'
 
 // ── Session Connection Lifecycle (v2.0) ──
@@ -236,13 +237,8 @@ export const useChatStore = defineStore('chat', () => {
   const streamingPlaceholders = ref<number[]>([])
 
   let _msgVersion = 0
-  let _contentFlushTimer: ReturnType<typeof setTimeout> | null = null
 
   function resetStreaming(): void {
-    if (_contentFlushTimer) {
-      clearTimeout(_contentFlushTimer)
-      _contentFlushTimer = null
-    }
     confirmRequest.value = null
     todoList.value = []
     streamingPlaceholders.value = []
@@ -338,38 +334,24 @@ export const useChatStore = defineStore('chat', () => {
       if (model) body.model = model
       if (opts.reasoning_intensity) body.reasoning_intensity = opts.reasoning_intensity
       if (opts.plan_mode) body.plan_mode = true
-      const res = await fetch('/api/chat', {
+      const ctrl = new AbortController()
+      await fetchEventSource('/api/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: 'Bearer ' + token,
         },
         body: JSON.stringify(body),
-      })
-      if (!res.ok) throw new Error('HTTP ' + res.status)
-
-      const reader = res.body!.getReader()
-      const dec = new TextDecoder()
-      let buf = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buf += dec.decode(value, { stream: true })
-        const lines = buf.split('\n')
-        buf = lines.pop() || ''
-        for (const l of lines) {
-          const trimmed = l.trim()
-          if (!trimmed.startsWith('data: ')) continue
+        signal: ctrl.signal,
+        onmessage(ev) {
           try {
-            const evt = JSON.parse(trimmed.slice(6))
-            // Redirect writes to correct session's message store if user switched away
+            const evt = JSON.parse(ev.data)
             if (sessionId.value !== sendSid && sendSid) {
               const origMsgs = messages.value
               const origPlaceholders = [...streamingPlaceholders.value]
               messages.value = _sessionMsgs[sendSid] || []
               streamingPlaceholders.value = []
-              processSSEEvent(evt, sendSid) // ← pass correct session ID
+              processSSEEvent(evt, sendSid)
               _sessionMsgs[sendSid] = [...messages.value]
               messages.value = origMsgs
               streamingPlaceholders.value = origPlaceholders
@@ -377,25 +359,13 @@ export const useChatStore = defineStore('chat', () => {
               processSSEEvent(evt, sendSid)
             }
           } catch (e) { /* skip */ }
-        }
-      }
-      if (buf.trim().startsWith('data: ')) {
-        try {
-          const evt = JSON.parse(buf.trim().slice(6))
-          if (sessionId.value !== sendSid && sendSid) {
-            const origMsgs = messages.value
-            const origPlaceholders = [...streamingPlaceholders.value]
-            messages.value = _sessionMsgs[sendSid] || []
-            streamingPlaceholders.value = []
-            processSSEEvent(evt, sendSid)
-            _sessionMsgs[sendSid] = [...messages.value]
-            messages.value = origMsgs
-            streamingPlaceholders.value = origPlaceholders
-          } else {
-            processSSEEvent(evt, sendSid)
-          }
-        } catch (e) {}
-      }
+        },
+        onerror(err) {
+          // Don't retry — let the outer catch/finally handle errors
+          ctrl.abort()
+          throw err
+        },
+      })
     } catch (e: any) {
       const msgs = (sendSid && sessionId.value !== sendSid) ? (_sessionMsgs[sendSid] || messages.value) : messages.value
       const idx = streamingPlaceholders.value[0]
@@ -465,6 +435,7 @@ export const useChatStore = defineStore('chat', () => {
       _lastSeq[targetSid] = seq
     }
 
+    if (t === 'session_created') { try { const sc = JSON.parse(ev.content || '{}'); if (sc.session_id && !sessionId.value) { sessionId.value = sc.session_id; activeConversationId.value = sc.session_id } } catch (_) {} return }
     // Handle session_status for reconnection sync
     if (t === 'session_status') {
       try {
@@ -517,15 +488,32 @@ export const useChatStore = defineStore('chat', () => {
     if (t === 'state_change' && ev.state_change) {
       const sc = ev.state_change
       const list = currentAgents(targetSid)
-      const idx = list.findIndex(a => a.agent_id === sc.agent_id)
-      if (idx >= 0) list[idx].state = sc.to
+      var agent = list.find(a => a.agent_id === sc.agent_id)
+      if (!agent) {
+        agent = { agent_id: sc.agent_id, state: sc.to, agent_status: sc.to } as AgentInfo
+        list.push(agent)
+      } else {
+        agent.state = sc.to
+        agent.agent_status = sc.to
+      }
+      if (!agent._transitions) agent._transitions = []
+      agent._transitions.push({ from: sc.from, to: sc.to, event: sc.event, reason: sc.reason, ts: Date.now() } as StateTransition)
+      sessionAgents.value = { ...sessionAgents.value }
+      updateSubAgent(targetSid, agent)
       return
     }
     if (t === 'role_change' && ev.role_change) {
       const rc = ev.role_change
       const list = currentAgents(targetSid)
-      const idx = list.findIndex(a => a.agent_id === rc.agent_id)
-      if (idx >= 0) list[idx].role = rc.new_role
+      var roleAgent = list.find(a => a.agent_id === rc.agent_id)
+      if (!roleAgent) {
+        roleAgent = { agent_id: rc.agent_id, role: rc.new_role } as AgentInfo
+        list.push(roleAgent)
+      }
+      roleAgent.role = rc.new_role as AgentRole
+      if (!roleAgent._transitions) roleAgent._transitions = []
+      roleAgent._transitions.push({ from: rc.old_role, to: rc.new_role, event: 'role_change', reason: rc.reason, ts: Date.now() } as StateTransition)
+      sessionAgents.value = { ...sessionAgents.value }
       return
     }
     if (t === 'lock_conflict' && ev.lock_conflict) {
@@ -596,6 +584,30 @@ export const useChatStore = defineStore('chat', () => {
       }
       return
     }
+    if (t === 'skill_progress') {
+      currentToolName.value = ev.skill_name || 'skill'
+      currentToolProgress.value = String(ev.skill_current_step || 0) + '/' + String(ev.skill_total_steps || 0)
+      return
+    }
+    if (t === 'cron_notify') { return }
+    if (t === 'plan' && ev.plan_result) {
+      messages.value.push({
+        id: 'plan_' + Date.now(), role: 'system' as ChatMessage['role'],
+        content: 'Plan: ' + ev.plan_result.successes + '/' + ev.plan_result.total_steps + ' ok',
+        blocks: [{ type: 'content' as const, content: 'Plan completed' }],
+        status: 'done' as const, streaming: false, _v: 0, createdAt: Date.now(),
+      } as ChatMessage)
+      return
+    }
+    if (t === 'step_result' && ev.step_result) {
+      const sr = currentStreamingMsg()
+      if (sr?.blocks) {
+        sr.blocks.push({ type: 'tool' as const, name: ev.step_result.tool, args: '', result: ev.step_result.status === 'success' ? 'OK' : 'FAIL' })
+        if (typeof sr._v === 'number') sr._v = sr._v + 1
+      }
+      return
+    }
+    if (t === 'goal_progress') { return }
     if (t === 'topology_update') {
       const tu = ev.topology_update as TopologyUpdate | undefined
       // 仅接受当前会话的拓扑事件，防止旧会话 SSE 覆盖新会话状态
@@ -926,9 +938,7 @@ export const useChatStore = defineStore('chat', () => {
   // Bug 2 fix: per-session send flag — prevents cross-session stickiness
   const _sending: Record<string, boolean> = {}
   let _switchToken = 0
-  // Bug 1 fix: debounced reconnect timer
   let _reconnectTimer: ReturnType<typeof setTimeout> | null = null
-  let _pendingReconnectSid: string | null = null
 
   async function connectStream(sid: string): Promise<void> {
     console.log('[chat] connectStream: start', sid)
@@ -937,44 +947,22 @@ export const useChatStore = defineStore('chat', () => {
     _streamAbort = controller
     _listeningForEvents = true
 
-    // Track promise so disconnectStream can await full cleanup.
-    _streamPromise = (async () => {
-      try {
-        const res = await fetch('/api/chat/stream/' + sid, {
-          headers: { Authorization: 'Bearer ' + token },
-          signal: controller.signal,
-        })
-        if (!res.ok) {
-          streamingSessions.value[sessionId.value] = false
-          return
-        }
-
-        const reader = res.body!.getReader()
-        const dec = new TextDecoder()
-        let buf = ''
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-          buf += dec.decode(value, { stream: true })
-          const lines = buf.split('\n')
-          buf = lines.pop() || ''
-          for (const l of lines) {
-            const trimmed = l.trim()
-            if (!trimmed.startsWith('data: ')) continue
-            try {
-              processSSEEvent(JSON.parse(trimmed.slice(6)), sid)
-            } catch (e) {}
-          }
-        }
-      } catch (e: any) {
-        if (e.name !== 'AbortError') {
-          console.warn('[chat] stream disconnected:', e.message)
-        }
-      } finally {
+    _streamPromise = fetchEventSource('/api/chat/stream/' + sid, {
+      headers: { Authorization: 'Bearer ' + token },
+      signal: controller.signal,
+      onmessage(ev) {
+        try {
+          processSSEEvent(JSON.parse(ev.data), sid)
+        } catch (e) {}
+      },
+      onerror(err) {
+        // Don't retry on any error — let onclose/disconnectStream handle cleanup
+        throw err
+      },
+      onclose() {
         _listeningForEvents = false
         _streamAbort = null
         _streamPromise = null
-        // v2.0: Only clean up if session is truly closed, not just reconnecting
         const lc = getLifecycle(sid)
         if (lc === 'closed') {
           if (sessionId.value === sid) {
@@ -982,7 +970,6 @@ export const useChatStore = defineStore('chat', () => {
           }
           return
         }
-        // Don't prematurely clear streaming — let switch/send manage the lifecycle
         if (_sending[sid]) return
         if (sessionId.value === sid && lc !== 'streaming') {
           const idx = streamingPlaceholders.value[0]
@@ -994,8 +981,8 @@ export const useChatStore = defineStore('chat', () => {
           }
           streamingPlaceholders.value = []
         }
-      }
-    })()
+      },
+    })
 
     return _streamPromise
   }
@@ -1007,11 +994,7 @@ export const useChatStore = defineStore('chat', () => {
       delete streamingSessions.value[sid]
     }
     // Cancel any pending reconnect
-    if (_reconnectTimer) {
-      clearTimeout(_reconnectTimer)
-      _reconnectTimer = null
-      _pendingReconnectSid = null
-    }
+    if (_reconnectTimer) { clearTimeout(_reconnectTimer); _reconnectTimer = null }
     console.log('[chat] disconnectStream: abort:', !!_streamAbort, '| hasPromise:', !!_streamPromise)
     // Bug 1 fix: idempotent abort — don't re-abort an already-aborted controller
     if (_streamAbort) {
@@ -1028,19 +1011,12 @@ export const useChatStore = defineStore('chat', () => {
     console.log('[chat] disconnectStream: done')
   }
 
-  // Bug 1 fix: debounced reconnect — prevents SSE thrashing on rapid switches
-  function debouncedReconnect(targetSid: string): void {
-    if (_reconnectTimer) {
-      clearTimeout(_reconnectTimer)
-      _reconnectTimer = null
-    }
-    _pendingReconnectSid = targetSid
+  // Simplified debounce — clean setTimeout/clearTimeout pattern
+  const debouncedReconnect = (targetSid: string): void => {
+    if (_reconnectTimer) clearTimeout(_reconnectTimer)
     _reconnectTimer = setTimeout(() => {
       _reconnectTimer = null
-      if (_pendingReconnectSid === targetSid && sessionId.value === targetSid) {
-        _pendingReconnectSid = null
-        connectStream(targetSid)
-      }
+      if (sessionId.value === targetSid) connectStream(targetSid)
     }, 150)
   }
 
@@ -1053,11 +1029,7 @@ export const useChatStore = defineStore('chat', () => {
       _streamAbort = null
     }
     _listeningForEvents = false
-    if (_reconnectTimer) {
-      clearTimeout(_reconnectTimer)
-      _reconnectTimer = null
-      _pendingReconnectSid = null
-    }
+    if (_reconnectTimer) { clearTimeout(_reconnectTimer); _reconnectTimer = null }
     // Clear all streaming session flags
     const keys = Object.keys(streamingSessions.value)
     for (const k of keys) {

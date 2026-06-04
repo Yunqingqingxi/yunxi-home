@@ -9,7 +9,7 @@ import (
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/register"
 )
 
-// Status 子 Agent 状态（保留向后兼容，新代码使用 AgentState）
+// Status 子 Agent 状态
 type Status string
 
 const (
@@ -25,7 +25,7 @@ func StatusFromAgentState(s AgentState) Status {
 	case StateStart, StateReasoning, StateExecuting, StateRetry:
 		return StatusRunning
 	case StateWaitingLock, StateWaitingHuman, StateDelegate:
-		return StatusRunning // 等待态在前端显示为运行中
+		return StatusRunning
 	case StateSuspended, StateTimeout:
 		return StatusPending
 	case StateDone:
@@ -39,23 +39,46 @@ func StatusFromAgentState(s AgentState) Status {
 	}
 }
 
-// SubAgent 一个 AI 派生的子 Agent
+// SubAgent 统一 Agent 结构 — 主 Agent 和子 Agent 共用。
+// 主 Agent: ParentID 为空。
 type SubAgent struct {
-	ID          string          `json:"agent_id"`
-	Goal        string          `json:"goal"`         // 单一子任务描述
-	ToolFilter  []string        `json:"tool_filter"`  // 允许的工具列表（空=全部，["*"]=全部）
-	Context     []base.Message  `json:"-"`            // 独立上下文
-	ParentID    string          `json:"parent_id"`    // 父会话 ID
-	Status      Status          `json:"status"`       // 兼容旧版，自动从 StateMachine 派生
-	Summary     string          `json:"summary"`      // 完成后的结果摘要
-	Error       string          `json:"error,omitempty"`
-	Round       int             `json:"round"`        // 已完成轮次
-	Progress    string          `json:"progress"`     // 当前进度描述
-	ProgressPct int             `json:"progress_pct"` // 完成百分比 0-100
-	StartedAt   time.Time       `json:"started_at"`
-	FinishedAt  time.Time       `json:"finished_at,omitempty"`
-	progressFn  ProgressFunc    // 创建时捕获的进度回调（nil-safe）
-	State       *StateMachine   `json:"-"`            // 状态机（v2.0）
+	ID        string    `json:"id"`
+	TaskID    string    `json:"task_id"`
+	Task      string    `json:"task"`
+	ParentID  string    `json:"parent_id"`
+	Status    Status    `json:"status"`
+	CreatedAt time.Time `json:"created_at"`
+	Result    string    `json:"result,omitempty"`
+	Timeout   int       `json:"timeout"` // 超时秒数
+	Error     string    `json:"error,omitempty"`
+
+	// ── 运行时字段（不序列化）──
+	ToolFilter []string       `json:"-"`
+	Context    []base.Message `json:"-"`
+	Round      int            `json:"-"`
+	Progress   string         `json:"-"`
+	ProgressPct int           `json:"-"`
+	StatusCode  int           `json:"-"`
+	StartedAt   time.Time     `json:"-"`
+	FinishedAt  time.Time     `json:"-"`
+	progressFn  ProgressFunc
+	State       *StateMachine `json:"-"`
+}
+
+// ToJSON returns the public-facing JSON representation (runtime fields excluded).
+func (a *SubAgent) ToJSON() map[string]any {
+	parentID := a.ParentID
+	return map[string]any{
+		"id":         a.ID,
+		"task_id":    a.TaskID,
+		"task":       a.Task,
+		"parent_id":  parentID,
+		"status":     string(a.Status),
+		"created_at": a.CreatedAt.Format(time.RFC3339),
+		"result":     a.Result,
+		"timeout":    a.Timeout,
+		"error":      a.Error,
+	}
 }
 
 // Result 子 Agent 完成后返回的结果
@@ -88,7 +111,6 @@ func SessionIDFromCtx(ctx context.Context) string {
 type ProgressFunc func(agent *SubAgent, eventType string)
 
 // CompletionFunc 异步完成回调。当异步派生的所有 Agent 完成后调用。
-// sessionID 是父会话 ID，results 是所有 Agent 的结果。
 type CompletionFunc func(sessionID string, results []*Result)
 
 // ManagerConfig 管理器配置

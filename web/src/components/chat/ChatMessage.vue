@@ -198,7 +198,7 @@
         <div class="block-body"><span class="role-tag">云兮</span><ToolCallBlock :name="block.name" :args="block.args" :result="block.result" :status="block.status" :progress="block.progress" :streaming="msg.streaming" /></div>
       </div>
       <template v-else-if="block.type === 'content'">
-        <div v-for="(seg, si) in contentSegments" :key="'seg'+si" class="msg-row assistant">
+        <div v-for="(seg, si) in splitSegments(block.content || '')" :key="'seg'+si" class="msg-row assistant">
           <div class="avatar ai-avatar"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.2" fill="none"/><circle cx="5.5" cy="7" r="1" fill="currentColor"/><circle cx="10.5" cy="7" r="1" fill="currentColor"/><path d="M5.5 10.5c0 0 1 2 2.5 2s2.5-2 2.5-2" stroke="currentColor" stroke-width="1" fill="none" stroke-linecap="round"/></svg></div>
           <div v-if="seg.type === 'text'" class="block-body content-body-bubble"><span class="role-tag">云兮</span><ContentBlock :content="seg.content" :streaming="false" /></div>
           <div v-else class="block-body"><FileAttachment :name="seg.name" :path="seg.path" @preview="openLightbox(findImageIdx(seg.path))" /></div>
@@ -207,7 +207,7 @@
     </div>
     <div v-if="!msg.blocks?.length && (msg.content || msg.streaming)" class="msg-row assistant">
       <div class="avatar ai-avatar"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.2" fill="none"/><circle cx="5.5" cy="7" r="1" fill="currentColor"/><circle cx="10.5" cy="7" r="1" fill="currentColor"/><path d="M5.5 10.5c0 0 1 2 2.5 2s2.5-2 2.5-2" stroke="currentColor" stroke-width="1" fill="none" stroke-linecap="round"/></svg></div>
-      <div class="block-body content-body-bubble"><span class="role-tag">云兮</span><div v-if="msg.streaming && !msg.content" class="ai-empty"><span class="dot"/><span class="dot"/><span class="dot"/></div><ContentBlock v-else :content="msg.content" :streaming="false" /></div>
+      <div :class="['block-body', (msg.streaming && !msg.content) ? '' : 'content-body-bubble']"><span class="role-tag">云兮</span><div v-if="msg.streaming && !msg.content" class="ai-empty"><span class="dot"/><span class="dot"/><span class="dot"/></div><ContentBlock v-else :content="msg.content" :streaming="false" /></div>
     </div>
     <div v-if="msg.status === 'error' && !msg.blocks?.length" class="msg-row assistant">
       <div class="avatar ai-avatar"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.2" fill="none"/><circle cx="5.5" cy="7" r="1" fill="currentColor"/><circle cx="10.5" cy="7" r="1" fill="currentColor"/><path d="M5.5 10.5c0 0 1 2 2.5 2s2.5-2 2.5-2" stroke="currentColor" stroke-width="1" fill="none" stroke-linecap="round"/></svg></div>
@@ -238,6 +238,7 @@ import ThinkingBlock from './ThinkingBlock.vue'
 import ToolCallBlock from './ToolCallBlock.vue'
 import FileAttachment from './FileAttachment.vue'
 import ImageLightbox from './ImageLightbox.vue'
+import { formatDuration } from '../../composables/useFormat'
 
 
 const props = defineProps({
@@ -325,11 +326,7 @@ function openLightbox(imgIdx: number) {
 }
 
 function fmtDur(ms) {
-  if (ms < 1000) return (ms / 1000).toFixed(1) + 's'
-  if (ms < 60000) return (ms / 1000).toFixed(1) + 's'
-  const m = Math.floor(ms / 60000)
-  const s = ((ms % 60000) / 1000).toFixed(1)
-  return m + 'm' + s + 's'
+  return formatDuration(ms)
 }
 </script>
 

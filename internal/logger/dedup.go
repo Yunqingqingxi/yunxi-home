@@ -1,7 +1,9 @@
 package logger
 
 import (
+	"bytes"
 	"io"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -38,7 +40,7 @@ func (dw *DedupWriter) Write(p []byte) (int, error) {
 	defer dw.mu.Unlock()
 
 	// Same line as previous? Count and suppress.
-	if dw.lastLine != nil && bytesEqual(dw.lastLine, p) {
+	if dw.lastLine != nil && bytes.Equal(dw.lastLine, p) {
 		dw.count++
 		// Signal flush timer
 		select {
@@ -99,34 +101,8 @@ func (dw *DedupWriter) flushLocked() {
 			lastStr = lastStr[:200] + "..."
 		}
 		lastStr = strings.ReplaceAll(lastStr, "\"", "'")
-		summary := []byte("time=\"" + time.Now().Format("2006-01-02 15:04:05.000") + "\" level=WARN component=logger msg=\"重复日志折叠: 以下日志连续重复了 " + formatInt(dw.count) + " 次\" last_msg=\"" + lastStr + "\"\n")
+		summary := []byte("time=\"" + time.Now().Format("2006-01-02 15:04:05.000") + "\" level=WARN component=logger msg=\"重复日志折叠: 以下日志连续重复了 " + strconv.Itoa(dw.count) + " 次\" last_msg=\"" + lastStr + "\"\n")
 		dw.w.Write(summary)
 		dw.count = 0
 	}
-}
-
-func bytesEqual(a, b []byte) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
-func formatInt(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var buf [20]byte
-	i := len(buf)
-	for n > 0 {
-		i--
-		buf[i] = byte('0' + n%10)
-		n /= 10
-	}
-	return string(buf[i:])
 }

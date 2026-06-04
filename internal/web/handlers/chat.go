@@ -7,6 +7,7 @@ import (
 	"io"
 	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -102,15 +103,84 @@ func (h *ChatHandler) Chat(c echo.Context) error {
 	if claims := webmw.GetClaims(c); claims != nil {
 		userID = fmt.Sprintf("%d", claims.UserID)
 	}
+	// Immediately emit session_status so frontend knows the session ID
+	// before any AI reply arrives — enables sidebar update + URL sync.
+	initEv, _ := json.Marshal(base.ChatStreamEvent{
+		Type: "session_created",
+		Content: fmt.Sprintf(`{"session_id":"%s"}`, req.SessionID),
+	})
+	fmt.Fprintf(c.Response(), "data: %s\n\n", initEv)
+	flusher.Flush()
+
 	stream := h.aiService.StreamChat(ctx, req.SessionID, userID, req.Message, req.Model)
 
-	for ev := range stream {
-		data, _ := json.Marshal(ev)
-		fmt.Fprintf(c.Response(), "data: %s\n\n", data)
-		flusher.Flush()
-	}
+	// Subscribe to agent events via eventBus for events that are NOT
+	// also emitted on the main stream channel (agent_progress, agent_result, etc.)
+	agentCh := h.aiService.SubscribeSession(req.SessionID)
+	defer h.aiService.UnsubscribeSession(req.SessionID, agentCh)
 
-	return nil
+	streamDone := false
+	// dedup set: when Go's select picks agentCh before stream, we must not emit duplicates
+	emittedSeqs := make(map[int64]bool, 256)
+	idleTicks := 0
+	const maxIdleTicks = 5
+	heartbeatTicker := time.NewTicker(60 * time.Second)
+	defer heartbeatTicker.Stop()
+
+	for {
+		select {
+		case ev, ok := <-stream:
+			if !ok {
+				stream = nil
+				streamDone = true
+				continue
+			}
+			idleTicks = 0
+			if ev.Seq > 0 {
+				emittedSeqs[ev.Seq] = true
+			}
+			data, _ := json.Marshal(ev)
+			if _, err := fmt.Fprintf(c.Response(), "data: %s\n\n", data); err != nil {
+				return nil
+			}
+			flusher.Flush()
+		case ev, ok := <-agentCh:
+			if !ok {
+				agentCh = nil
+				continue
+			}
+			// Dedup: skip if already emitted via stream channel
+			if ev.Seq > 0 && emittedSeqs[ev.Seq] {
+				continue
+			}
+			emittedSeqs[ev.Seq] = true
+			idleTicks = 0
+			data, _ := json.Marshal(ev)
+			if _, err := fmt.Fprintf(c.Response(), "data: %s\n\n", data); err != nil {
+				return nil
+			}
+			flusher.Flush()
+		case <-heartbeatTicker.C:
+			if streamDone {
+				hasAgents := h.aiService.HasRunningAgents(req.SessionID)
+				if !hasAgents {
+					idleTicks++
+					if idleTicks >= maxIdleTicks {
+						log.Info("SSE closing: stream done, idle timeout", "session", req.SessionID)
+						return nil
+					}
+				} else {
+					idleTicks = 0
+				}
+			}
+			if _, err := fmt.Fprintf(c.Response(), ":keepalive\n\n"); err != nil {
+				return nil
+			}
+			flusher.Flush()
+		case <-ctx.Done():
+			return nil
+		}
+	}
 }
 
 // StreamSession allows reconnecting to an active session's event stream.
@@ -160,14 +230,41 @@ func (h *ChatHandler) StreamSession(c echo.Context) error {
 	fmt.Fprintf(c.Response(), "data: %s\n\n", initEv)
 	flusher.Flush()
 
+	idleTicks := 0
+	const maxIdleTicks = 10 // 10 * 60s = 10min max idle before close
+	heartbeatTicker := time.NewTicker(60 * time.Second)
+	defer heartbeatTicker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 		case ev, ok := <-ch:
-			if !ok { return nil }
+			if !ok {
+				// Event channel closed — check if agents still running before closing
+				if !h.aiService.HasRunningAgents(id) {
+					return nil
+				}
+				ch = nil // Don't break — keep waiting for heartbeat timeout
+				continue
+			}
+			idleTicks = 0
 			data, _ := json.Marshal(ev)
 			fmt.Fprintf(c.Response(), "data: %s\n\n", data)
+			flusher.Flush()
+		case <-heartbeatTicker.C:
+			if ch == nil && !h.aiService.HasRunningAgents(id) {
+				idleTicks++
+				if idleTicks >= maxIdleTicks {
+					log.Info("StreamSession closing: idle timeout", "session", id)
+					return nil
+				}
+			} else if h.aiService.HasRunningAgents(id) {
+				idleTicks = 0 // Agents still running, keep alive
+			}
+			if _, err := fmt.Fprintf(c.Response(), ":keepalive\n\n"); err != nil {
+				return nil
+			}
 			flusher.Flush()
 		}
 	}
@@ -198,6 +295,20 @@ func (h *ChatHandler) ListSessions(c echo.Context) error {
 		sessions[i].IsActive = h.aiService.HasActiveStream(sessions[i].ID) || h.aiService.HasRunningAgents(sessions[i].ID)
 	}
 	return c.JSON(http.StatusOK, successResp(sessions))
+}
+
+// GetSessionAgents 返回指定会话的所有子 Agent
+// GET /api/chat/sessions/:id/agents
+func (h *ChatHandler) GetSessionAgents(c echo.Context) error {
+	if h.aiService == nil { return c.JSON(http.StatusOK, successResp([]any{})) }
+	id := c.Param("id")
+	if id == "" { return c.JSON(http.StatusBadRequest, errorResp("缺少 session_id")) }
+	agents := h.aiService.GetSessionAgents(id)
+	result := make([]map[string]any, 0, len(agents))
+	for _, a := range agents {
+		result = append(result, a.ToJSON())
+	}
+	return c.JSON(http.StatusOK, successResp(result))
 }
 
 // ClearAllSessions 清除全部会话  POST /api/chat/clear-all
@@ -499,7 +610,7 @@ func (h *ChatHandler) GetCommands(c echo.Context) error {
 			cmds = append(cmds, CommandInfo{
 				Name:        "mcp-" + s.Name,
 				Type:        "mcp",
-				Description: "已安装 MCP: " + s.Package + " (" + statusText(s.Connected) + ", " + itoa(s.Tools) + " 工具)",
+				Description: "已安装 MCP: " + s.Package + " (" + statusText(s.Connected) + ", " + strconv.Itoa(s.Tools) + " 工具)",
 				Usage:       "/mcp-" + s.Name,
 			})
 		}
@@ -511,16 +622,6 @@ func (h *ChatHandler) GetCommands(c echo.Context) error {
 func statusText(connected bool) string {
 	if connected { return "已连接" }
 	return "未连接"
-}
-
-func itoa(n int) string {
-	if n == 0 { return "0" }
-	s := ""
-	for n > 0 {
-		s = string(rune('0'+n%10)) + s
-		n /= 10
-	}
-	return s
 }
 
 // ── Prompt Management API ─────────────────────────────────────

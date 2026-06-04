@@ -274,6 +274,8 @@ type ChatStreamEvent struct {
 	Usage *StreamUsage `json:"usage,omitempty"`
 	// Topology 拓扑约束事件
 	TopologyUpdate *TopologyUpdateEvent `json:"topology_update,omitempty"`
+	// Seq 事件序列号，用于 SSE 去重和 Last-Event-Id 重连
+	Seq int64 `json:"_seq,omitempty"`
 }
 
 // TopologyUpdateEvent is emitted after each topology validation round.

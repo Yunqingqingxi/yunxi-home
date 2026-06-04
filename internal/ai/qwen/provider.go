@@ -1,17 +1,18 @@
 package qwen
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/base"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai/provider"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
+	"github.com/Yunqingqingxi/yunxi-home/internal/util/safego"
 )
 
 var log = logger.ForComponent("qwen")
@@ -76,12 +77,6 @@ type qwenUsage struct {
 	TotalTokens      int `json:"total_tokens"`
 }
 
-type toolCallAccum struct {
-	id   string
-	name string
-	args strings.Builder
-}
-
 // ── Provider ───────────────────────────────────────────────
 
 type Provider struct {
@@ -108,7 +103,7 @@ func New(cfg Config) *Provider {
 		apiKey:      cfg.APIKey,
 		baseURL:     "https://dashscope.aliyuncs.com/compatible-mode/v1",
 		model:       "qwen-plus",
-		client:      &http.Client{Timeout: 10 * time.Minute},
+		client:      provider.NewStandardHTTPClient(10 * time.Minute),
 		inputPrice:  0.8,  // 元/百万 tokens (qwen-plus: ¥0.0008/1K)
 		outputPrice: 2.0,  // 元/百万 tokens (qwen-plus: ¥0.002/1K)
 	}
@@ -201,7 +196,9 @@ func (p *Provider) ChatStream(ctx context.Context, messages []base.Message, tool
 	}
 
 	ch := make(chan base.ChatStreamEvent, 64)
-	go p.readStream(ctx, resp, ch)
+	safego.Go("qwen-readstream", func() {
+		p.readStream(ctx, resp, ch)
+	})
 	return ch, nil
 }
 
@@ -210,91 +207,50 @@ func (p *Provider) ChatStream(ctx context.Context, messages []base.Message, tool
 func (p *Provider) readStream(ctx context.Context, resp *http.Response, ch chan<- base.ChatStreamEvent) {
 	defer resp.Body.Close()
 	defer close(ch)
-	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 64*1024), 256*1024)
-	var (
-		contentBuf                  strings.Builder
-		toolCallMap                 = make(map[int]*toolCallAccum)
-		finished                    bool
-		firstToken                  time.Time
-		lastChunk                   *qwenChunk
-		lastEvent                   = time.Now()
-		promptTokens, compTokens    int
-	)
-	done := make(chan struct{})
-	defer close(done)
-	go func() {
-		tk := time.NewTicker(15 * time.Second)
-		defer tk.Stop()
-		for {
-			select {
-			case <-tk.C:
-				if time.Since(lastEvent) > 15*time.Second {
-					select {
-					case ch <- base.ChatStreamEvent{Type: "keepalive", Content: "等待响应..."}:
-					default:
-					}
-				}
-			case <-done:
-				return
-			}
-		}
-	}()
-	emit := func(ev base.ChatStreamEvent) {
-		select {
-		case ch <- ev:
-		default:
-		}
-	}
 
-	for scanner.Scan() {
+	// Shared infrastructure
+	streamCtx := provider.NewStreamCtx()
+	scanner := provider.NewSSEScanner(resp.Body)
+	emit := provider.NewEmitter(ch)
+	done := provider.StartKeepalive(ch, 15*time.Second, &streamCtx.LastEventAt)
+	defer close(done)
+
+	var lastChunk *qwenChunk
+	var promptTokens, compTokens int
+
+	// Main SSE loop
+	for {
 		if ctx.Err() != nil {
 			return
 		}
-		line := strings.TrimSpace(scanner.Text())
-		if strings.HasPrefix(line, ":") {
-			lastEvent = time.Now()
-			continue
+		ev := scanner.Next()
+		if ev == nil {
+			break
 		}
-		if line == "" || line == "data: [DONE]" {
-			continue
-		}
-		if !strings.HasPrefix(line, "data: ") {
-			continue
-		}
+		streamCtx.LastEventAt = time.Now()
+
 		var chunk qwenChunk
-		if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &chunk); err != nil {
+		if err := json.Unmarshal([]byte(ev.Data), &chunk); err != nil {
 			continue
 		}
-		lastChunk, lastEvent = &chunk, time.Now()
+		lastChunk = &chunk
+
 		for _, c := range chunk.Choices {
-			if c.Delta.Content != "" {
-				if firstToken.IsZero() {
-					firstToken = time.Now()
-				}
-				contentBuf.WriteString(c.Delta.Content)
-				emit(base.ChatStreamEvent{Type: "content", Content: c.Delta.Content})
-			}
+			var fragments []provider.ToolCallFragment
 			for _, tc := range c.Delta.ToolCalls {
-				idx := tc.Index
-				if _, ok := toolCallMap[idx]; !ok {
-					toolCallMap[idx] = &toolCallAccum{}
-				}
-				if tc.ID != "" {
-					toolCallMap[idx].id = tc.ID
-				}
-				if tc.Function.Name != "" {
-					toolCallMap[idx].name = tc.Function.Name
-				}
-				if tc.Function.Arguments != "" {
-					toolCallMap[idx].args.WriteString(tc.Function.Arguments)
-				}
+				fragments = append(fragments, provider.ToolCallFragment{
+					Index: tc.Index,
+					ID:    tc.ID,
+					Name:  tc.Function.Name,
+					Args:  tc.Function.Arguments,
+				})
 			}
-			if c.FinishReason != "" {
-				finished = true
-			}
+			streamCtx.Feed(provider.ChunkContent{
+				ContentDelta:      c.Delta.Content,
+				FinishReason:      c.FinishReason,
+				ToolCallFragments: fragments,
+			}, emit)
 		}
-		// Accumulate usage from final chunk
 		if chunk.Usage != nil {
 			promptTokens = chunk.Usage.PromptTokens
 			compTokens = chunk.Usage.CompletionTokens
@@ -302,20 +258,17 @@ func (p *Provider) readStream(ctx context.Context, resp *http.Response, ch chan<
 	}
 
 	// ── End of stream ──
-	if !finished && contentBuf.Len() == 0 && len(toolCallMap) == 0 {
+	if !streamCtx.Finished && !streamCtx.HasContent() {
 		emit(base.ChatStreamEvent{Type: "error", Content: "Qwen 模型未返回有效响应"})
 		return
 	}
-	log.Info("Qwen 流式响应完成", "模型", p.model, "内容长度", contentBuf.Len(), "工具调用数", len(toolCallMap))
+	log.Info("Qwen 流式响应完成", "模型", p.model, "内容长度", streamCtx.ContentBuf.Len(),
+		"工具调用数", streamCtx.ToolAccum.Len())
 
-	for _, tc := range toolCallMap {
-		args := tc.args.String()
-		if args == "" { args = "{}" }
-		emit(base.ChatStreamEvent{Type: "tool_call", Tool: tc.name, Args: args})
-	}
-
+	// Emit tool calls and done
+	streamCtx.EmitToolCalls(emit)
 	if lastChunk != nil {
-		cost := float64(promptTokens)*p.inputPrice/1e6 + float64(compTokens)*p.outputPrice/1e6
+		cost := provider.CalculateCost(promptTokens, compTokens, 0, p.inputPrice, p.outputPrice, 0)
 		emit(base.ChatStreamEvent{Type: "done", Usage: &base.StreamUsage{
 			PromptTokens:     promptTokens,
 			CompletionTokens: compTokens,
@@ -323,7 +276,7 @@ func (p *Provider) readStream(ctx context.Context, resp *http.Response, ch chan<
 			Cost:             cost,
 		}})
 	} else {
-		emit(base.ChatStreamEvent{Type: "done"})
+		streamCtx.EmitDone(emit)
 	}
 }
 

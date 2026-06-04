@@ -45,10 +45,10 @@
       class="ai-strip"
     >
       <div class="ai-block">
-        <span class="ai-val">{{ fmtNum(aiStats.requests) }}</span><span class="ai-key">AI 请求</span>
+        <span class="ai-val">{{ formatNum(aiStats.requests) }}</span><span class="ai-key">AI 请求</span>
       </div>
       <div class="ai-block">
-        <span class="ai-val">{{ fmtNum(aiStats.input_tokens + aiStats.output_tokens) }}</span><span class="ai-key">Token 用量</span>
+        <span class="ai-val">{{ formatNum(aiStats.input_tokens + aiStats.output_tokens) }}</span><span class="ai-key">Token 用量</span>
       </div>
       <div class="ai-block">
         <span class="ai-val">¥{{ (aiStats.cost_usd || 0).toFixed(6) }}</span><span class="ai-key">成本</span>
@@ -67,7 +67,7 @@
         v-if="aiStats?.started_at"
         class="ai-since"
       >
-        自 {{ fmtSince(aiStats.started_at) }} 起统计
+        自 {{ formatDateTime(aiStats.started_at) }} 起统计
       </div>
     </div>
 
@@ -109,15 +109,15 @@
             :options="doughnutOpts"
           /><span class="gauge-val">{{ Math.round(diskInfo.used_pct) }}%</span>
         </div>
-        <span class="gauge-label">磁盘 · {{ fmtBytes(diskInfo.used) }}/{{ fmtBytes(diskInfo.total) }}</span>
+        <span class="gauge-label">磁盘 · {{ formatBytes(diskInfo.used) }}/{{ formatBytes(diskInfo.total) }}</span>
       </div>
       <div class="gauge-card net-gauge">
         <div class="net-rates">
           <div class="net-rate down">
-            <span class="net-arrow">↓</span><span class="net-val">{{ fmtRate(netRate.rx) }}</span>
+            <span class="net-arrow">↓</span><span class="net-val">{{ formatRate(netRate.rx) }}</span>
           </div>
           <div class="net-rate up">
-            <span class="net-arrow">↑</span><span class="net-val">{{ fmtRate(netRate.tx) }}</span>
+            <span class="net-arrow">↑</span><span class="net-val">{{ formatRate(netRate.tx) }}</span>
           </div>
         </div>
         <span class="gauge-label">网络 · 实时速率</span>
@@ -263,8 +263,8 @@
       >
         <span class="iface-name">{{ g.name }}</span>
         <span class="iface-addrs">{{ g.addrs.join(', ') }}</span>
-        <span class="iface-rx">↓{{ fmtBytes(g.rx) }}</span>
-        <span class="iface-tx">↑{{ fmtBytes(g.tx) }}</span>
+        <span class="iface-rx">↓{{ formatBytes(g.rx) }}</span>
+        <span class="iface-tx">↑{{ formatBytes(g.tx) }}</span>
       </div>
     </div>
   </div>
@@ -277,6 +277,7 @@ import { Doughnut, Bar } from 'vue-chartjs'
 import { Chart as ChartJS, ArcElement, BarElement, CategoryScale, LinearScale, Filler, Tooltip, Legend } from 'chart.js'
 import api from '../services/api'
 import { useToast } from '../composables/useToast'
+import { formatDateTime, formatBytes, formatRate, formatNum } from '../composables/useFormat'
 
 ChartJS.register(ArcElement, BarElement, CategoryScale, LinearScale, Filler, Tooltip, Legend)
 
@@ -337,11 +338,6 @@ function updateNetRate() {
   }
   lastNetBytes = { rx, tx, ts: Date.now() }
 }
-
-function fmtBytes(n) { if (!n) return '0B'; const u = ['B', 'KB', 'MB', 'GB', 'TB']; const i = Math.floor(Math.log(n) / Math.log(1024)); return (n / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0) + ' ' + u[i] }
-function fmtRate(bps) { if (!bps || bps < 0) return '0 B/s'; const u = ['B/s', 'KB/s', 'MB/s', 'GB/s']; const i = Math.floor(Math.log(bps) / Math.log(1024)); return (bps / Math.pow(1024, i)).toFixed(1) + ' ' + u[i] }
-function fmtNum(n) { if (!n) return '0'; return n >= 1000 ? (n / 1000).toFixed(1) + 'K' : String(n) }
-function fmtSince(t) { if (!t) return ''; const d = new Date(t); return d.toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }
 
 async function loadFast() {
   if (!isActive) return

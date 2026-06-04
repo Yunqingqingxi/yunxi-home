@@ -36,28 +36,35 @@ func GoWithContext(parent context.Context, name string, fn func(ctx context.Cont
 }
 
 // GoWithRestart launches a named goroutine that restarts on panic (useful for long-running loops).
+// If fn panics, it is restarted after a brief delay. If fn returns normally, the goroutine exits.
 // maxRestarts limits the number of restarts within restartWindow; 0 = unlimited.
 func GoWithRestart(name string, maxRestarts int, restartWindow time.Duration, fn func()) {
 	go func() {
 		restarts := 0
 		windowStart := time.Now()
 		for {
+			panicked := false
 			func() {
-				defer recoverPanic(name)
+				defer func() {
+					if r := recover(); r != nil {
+						panicked = true
+						stack := debug.Stack()
+						log.Error("goroutine panic (will restart)",
+							logger.KeyEvent, "goroutine_panic",
+							"name", name,
+							"panic", fmt.Sprintf("%v", r),
+							"stack", string(stack),
+						)
+						if Notifier != nil {
+							Notifier(name, r, stack)
+						}
+					}
+				}()
 				fn()
 			}()
-			// If fn() returns normally, exit the loop
-			return
-		loop:
-			for {
-				select {
-				case <-time.After(time.Second):
-					// This is unreachable in the normal flow but kept for structure
-				default:
-					break loop
-				}
+			if !panicked {
+				return // normal exit, don't restart
 			}
-
 			restarts++
 			if maxRestarts > 0 && restarts > maxRestarts {
 				log.Error("goroutine 重启次数超限", logger.KeyEvent, "goroutine_panic", "name", name, "restarts", restarts)
@@ -68,7 +75,7 @@ func GoWithRestart(name string, maxRestarts int, restartWindow time.Duration, fn
 				windowStart = time.Now()
 			}
 			log.Warn("重启 goroutine", logger.KeyEvent, "goroutine_restart", "name", name, "restarts", restarts)
-			time.Sleep(time.Second) // brief pause before restart
+			time.Sleep(time.Second)
 		}
 	}()
 }

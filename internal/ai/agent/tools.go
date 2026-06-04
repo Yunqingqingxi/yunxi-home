@@ -15,7 +15,7 @@ import (
 func ToolDef(mgr *Manager) *base.ToolDef {
 	return &base.ToolDef{
 		Name:        "spawn_agent",
-		Description: "派生一个或多个子 Agent 来并行处理子任务。当用户的任务可分解为多个独立子任务时（如同时检查多个系统），使用此工具并行执行。每个子 Agent 有独立上下文和受限工具。",
+		Description: "派生子Agent并行执行独立子任务。每个子Agent有独立上下文和受限工具，完成后自动汇报结果。\n\ngoal 按此格式写：\n1. 【目标】一句话说清要完成什么\n2. 【范围】限定搜索/操作的具体范围（路径、关键词、时间等）\n3. 【预期产物】明确需要什么样的输出（摘要/列表/文件等）\n4. 【成功标准】什么情况算完成/算找不到/算失败",
 		Category:    "agent",
 		RiskLevel:   "mutation",
 		Background:  true,
@@ -25,17 +25,17 @@ func ToolDef(mgr *Manager) *base.ToolDef {
 			Properties: map[string]base.ParamProp{
 				"tasks": {
 					Type:        "array",
-					Description: "子任务列表，每项包含 goal(任务描述) 和 tool_filter(允许的工具名列表)",
+					Description: "子任务列表，每项包含 goal(按四段式写) 和 tool_filter(允许的工具列表)",
 					Items: &base.ParamProp{
 						Type: "object",
 						Properties: map[string]base.ParamProp{
 							"goal": {
 								Type:        "string",
-								Description: "子任务的详细目标描述，需要具体明确",
+								Description: "子任务目标。四段式：1.目标 2.范围 3.预期产物 4.成功标准。示例：\n1. 搜索 QQ Bot 官方API文档\n2. 搜索词 'QQ机器人 C2C消息 API' 'QQBot file upload'，范围限定官方文档站点\n3. Markdown 摘要：核心API端点、认证方式、消息类型、文件上传限制\n4. 找到关键API信息=200，多次搜索无结果=404，网络不可达=500",
 							},
 							"tool_filter": {
 								Type:        "array",
-								Description: "允许子 Agent 使用的工具名列表，至少指定一个工具",
+								Description: "允许的工具列表。信息搜索类给 web_search+file_read，代码类加 run_command+file_write，至少一个",
 								Items: &base.ParamProp{
 									Type: "string",
 								},

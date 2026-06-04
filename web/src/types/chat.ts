@@ -16,7 +16,7 @@ export interface ToolCall {
 
 export interface ChatMessage {
   id: string
-  role: 'user' | 'assistant' | 'agent'
+  role: 'user' | 'assistant' | 'agent' | 'system'
   content: string
   contentHtml?: string
   reasoning?: string
@@ -27,7 +27,6 @@ export interface ChatMessage {
   _v?: number
   createdAt?: number
   durationMs?: number
-  // Agent-specific
   agentId?: string
   agentGoal?: string
   agentStatus?: string
@@ -49,13 +48,13 @@ export interface Conversation {
 
 export type AgentState = 'start' | 'reasoning' | 'executing' | 'waiting_lock'
   | 'waiting_human' | 'delegate' | 'suspended' | 'timeout'
-  | 'retry' | 'done' | 'failed' | 'cancel'
+  | 'retry' | 'done' | 'failed' | 'cancel' | 'running' | 'pending' | string
 
-export type AgentRole = 'executor' | 'supervisor' | 'manager'
+export type AgentRole = 'executor' | 'supervisor' | 'manager' | string
 
 export interface StateTransition {
-  from: AgentState
-  to: AgentState
+  from: string
+  to: string
   event: string
   reason?: string
   ts: number
@@ -82,6 +81,8 @@ export interface MetaReport {
   role_ttl?: string
 }
 
+// ── SSEEvent — complete set matching backend ──
+
 export interface SSEEvent {
   type: string
   content?: string
@@ -90,7 +91,7 @@ export interface SSEEvent {
   result?: string
   tool_name?: string
   tool_progress?: string
-  // agent
+  // Agent
   agent_id?: string
   agent_goal?: string
   agent_status?: string
@@ -98,13 +99,38 @@ export interface SSEEvent {
   goal?: string
   status?: string
   summary?: string
+  // Todo
   todos?: Array<{ id: string; content: string; status: string }>
+  // Confirm / Interactive
   confirm_request?: any
   interactive_request?: any
+  // Plan
+  plan_result?: { steps: any[]; total_steps: number; successes: number; failures: number; duration_ms: number }
+  step_result?: { id: number; tool: string; status: string; result: any }
+  // Goal
+  goal_id?: string
+  goal_title?: string
+  goal_progress?: number
+  // Cross-session
+  cross_session?: { type: string; session_id: string; resource?: string; message: string }
+  // Background tasks
+  task_id?: string
+  task_progress?: number
+  task_status?: string
+  task_message?: string
+  // Skill
+  skill_name?: string
+  skill_current_step?: number
+  skill_total_steps?: number
+  skill_step_status?: string
+  // Cron
+  cron_task_id?: string
+  cron_action?: string
+  // Topology
   topology_update?: {
     session_id: string
     coord: { x: number; y: number; z: number }
-    trajectory: Array<{ x: number; y: number; z: number }>
+    trajectory: Array<{ x: number; y: number; z: number; tool_call?: string; status?: string; reason?: string; tool_result?: string }>
     constraint: { a: number; r: number; t: boolean; force_tools: string[] }
     rejected: boolean
     reject_reason?: string
@@ -116,24 +142,32 @@ export interface SSEEvent {
     warning?: string
     oscillation: boolean
     override: boolean
+    committed_count?: number
+    total_nodes?: number
   }
-  // v2.0 events
+  // v2.0 state machine
   state_change?: {
     agent_id: string
-    from: AgentState
-    to: AgentState
+    from: string
+    to: string
     event: string
     reason?: string
   }
   role_change?: {
     agent_id: string
-    old_role: AgentRole
-    new_role: AgentRole
+    old_role: string
+    new_role: string
     reason: string
   }
   lock_conflict?: LockConflict
   meta_report?: MetaReport
+  // Usage
+  usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number; cost: number }
+  // Dedup
+  _seq?: number
 }
+
+// ── AgentInfo — API + SSE merged ──
 
 export interface AgentInfo {
   agent_id: string
@@ -144,7 +178,9 @@ export interface AgentInfo {
   goal?: string
   status?: string
   summary?: string
-  // v2.0
+  task?: string
+  error?: string
   state?: AgentState
   role?: AgentRole
+  _transitions?: StateTransition[]
 }

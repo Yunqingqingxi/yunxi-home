@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/Yunqingqingxi/yunxi-home/internal/database"
 	"github.com/Yunqingqingxi/yunxi-home/internal/models"
 	"github.com/Yunqingqingxi/yunxi-home/internal/scheduler"
+	"github.com/Yunqingqingxi/yunxi-home/internal/util/sanitize"
 )
 
 // DomainHandler 域名管理 Handler
@@ -88,23 +90,40 @@ func (h *DomainHandler) Create(c echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, errorResp("请求参数无效"))
 	}
-	if req.Domain == "" || req.RR == "" || req.Type == "" {
-		return c.JSON(http.StatusBadRequest, errorResp("domain, rr, type 为必填项"))
+
+	// ── 输入校验与清理 ──
+	domain, err := sanitize.Domain(req.Domain)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, errorResp(fmt.Sprintf("域名无效: %v", err)))
 	}
-	if req.Type != "A" && req.Type != "AAAA" {
-		return c.JSON(http.StatusBadRequest, errorResp("type 必须为 A 或 AAAA"))
+	rr, err := sanitize.String(req.RR, sanitize.MaxShortString)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, errorResp(fmt.Sprintf("主机记录无效: %v", err)))
+	}
+	recType, err := sanitize.RecordType(req.Type)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, errorResp(fmt.Sprintf("记录类型无效: %v", err)))
 	}
 	if req.TTL <= 0 {
 		req.TTL = 600
 	}
+	req.TTL = sanitize.Clamp(req.TTL, 1, 86400) // TTL 1s ~ 24h
 	if req.CronExpr == "" {
 		req.CronExpr = "0 */5 * * * *"
 	}
 
+	// ── 防重复检查 ──
+	existing, _ := h.domainRepo.ListEnabled(c.Request().Context())
+	for _, r := range existing {
+		if r.Domain == domain && r.RR == rr && r.Type == recType {
+			return c.JSON(http.StatusConflict, errorResp(fmt.Sprintf("记录已存在: %s.%s (类型: %s)", rr, domain, recType)))
+		}
+	}
+
 	rec := &models.DomainRecord{
-		Domain:   req.Domain,
-		RR:       req.RR,
-		Type:     req.Type,
+		Domain:   domain,
+		RR:       rr,
+		Type:     recType,
 		TTL:      req.TTL,
 		CronExpr: req.CronExpr,
 		Enabled:  req.Enabled,
@@ -117,11 +136,12 @@ func (h *DomainHandler) Create(c echo.Context) error {
 
 	rec.ID = id
 
-	// 注册独立 cron 并立即触发一次更新
+	// 注册独立 cron 并立即触发一次更新（带 panic 恢复）
 	if h.sched != nil {
 		h.sched.RegisterRecord(*rec)
 		if rec.Enabled {
 			go func() {
+				defer func() { recover() }() // 防止 panic 扩散
 				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 				defer cancel()
 				_ = h.sched.TriggerUpdate(ctx)

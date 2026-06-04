@@ -8,6 +8,7 @@ import type {
   SSEStatus, ChatViewMode, LogLevel, EventType,
   SysLogFilter, ChatLogFilter, ParsedLogLine,
 } from '../types/logs'
+import { formatDateTime, formatDuration, formatNum, formatBytes } from '../composables/useFormat'
 
 export const useLogsStore = defineStore('logs', () => {
   // ── 分析概览 ──────────────────────────────────────
@@ -614,32 +615,3 @@ export const RISK_CONFIG: Record<string, { label: string; color: string; bg: str
   dangerous: { label: '危险', color: '#dc2626', bg: '#fee2e2' },
 }
 
-/** 格式化字节 */
-export function fmtSize(bytes: number): string {
-  if (!bytes) return '0 B'
-  const u = ['B', 'KB', 'MB', 'GB']
-  const i = Math.floor(Math.log(bytes) / Math.log(1024))
-  return parseFloat((bytes / Math.pow(1024, i)).toFixed(1)) + ' ' + u[i]
-}
-
-/** 格式化日期 */
-export function fmtDate(t: string): string {
-  if (!t) return ''
-  return new Date(t).toLocaleString('zh-CN', {
-    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
-  })
-}
-
-/** 格式化毫秒 */
-export function fmtDuration(ms: number): string {
-  if (ms < 1000) return `${ms}ms`
-  if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
-  return `${(ms / 60000).toFixed(1)}m`
-}
-
-/** 格式化 Token 数量 */
-export function fmtTokens(n: number): string {
-  if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`
-  return String(n)
-}

@@ -101,6 +101,8 @@ func (m *Manager) LoadFromDB(ctx context.Context) error {
 }
 
 // Summary returns a compact memory list for the system prompt.
+// Only includes GENERAL memories (no context_tags). Context-specific memories are loaded
+// via SummaryByContexts when the corresponding specialized context is activated.
 func (m *Manager) Summary() string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -109,18 +111,66 @@ func (m *Manager) Summary() string {
 		return ""
 	}
 
-	names := make([]string, 0, len(m.memories))
-	for name := range m.memories {
-		names = append(names, name)
+	// Filter for general memories (no context_tags)
+	var generalMemories []*Memory
+	for _, mem := range m.memories {
+		if len(mem.ContextTags) == 0 {
+			generalMemories = append(generalMemories, mem)
+		}
 	}
-	sort.Strings(names)
+
+	if len(generalMemories) == 0 {
+		return ""
+	}
+
+	// Sort by name
+	sort.Slice(generalMemories, func(i, j int) bool {
+		return generalMemories[i].Name < generalMemories[j].Name
+	})
 
 	var sb strings.Builder
-	sb.WriteString("- 以下是关于用户和本项目的长期记忆，跨会话保持。\n")
+	sb.WriteString("- 以下是关于用户和本项目的长期记忆（始终有效），跨会话保持。\n")
 	sb.WriteString("- 需要详细信息时使用 recall 工具检索。\n")
 	sb.WriteString("- 发现需要记住的新信息时使用 remember 工具保存。\n\n")
-	for _, name := range names {
-		mem := m.memories[name]
+	for _, mem := range generalMemories {
+		sb.WriteString(fmt.Sprintf("- [%s] %s\n", mem.Name, mem.Description))
+	}
+	return sb.String()
+}
+
+// SummaryByContexts returns compact descriptions of memories tagged with the given context IDs.
+func (m *Manager) SummaryByContexts(contextIDs []string) string {
+	if len(contextIDs) == 0 {
+		return ""
+	}
+
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	ctxSet := make(map[string]bool, len(contextIDs))
+	for _, id := range contextIDs {
+		ctxSet[id] = true
+	}
+
+	var matched []*Memory
+	for _, mem := range m.memories {
+		for _, tag := range mem.ContextTags {
+			if ctxSet[tag] {
+				matched = append(matched, mem)
+				break
+			}
+		}
+	}
+
+	if len(matched) == 0 {
+		return ""
+	}
+
+	sort.Slice(matched, func(i, j int) bool { return matched[i].Name < matched[j].Name })
+
+	var sb strings.Builder
+	sb.WriteString("- 以下记忆与当前任务领域相关：\n")
+	for _, mem := range matched {
 		sb.WriteString(fmt.Sprintf("- [%s] %s\n", mem.Name, mem.Description))
 	}
 	return sb.String()

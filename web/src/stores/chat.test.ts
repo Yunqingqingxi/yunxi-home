@@ -73,11 +73,9 @@ describe('ChatStore — Session Lifecycle', () => {
     expect(msg.blocks).toEqual([])
   })
 
-  it('lifecycle persisted to streamingSessions alias', () => {
+  it('lifecycle object is defined', () => {
     const store = useChatStore()
-    // Both the legacy streamingSessions and new lifecycles should be synced
     expect(store.lifecycles).toBeDefined()
-    expect(store.streamingSessions).toBeDefined()
   })
 })
 

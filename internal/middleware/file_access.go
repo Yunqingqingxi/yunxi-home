@@ -7,9 +7,9 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
+	"github.com/hashicorp/golang-lru/v2"
 	"github.com/labstack/echo/v4"
 
 	"github.com/Yunqingqingxi/yunxi-home/internal/database"
@@ -39,26 +39,34 @@ func getClaimsFromHeader(c echo.Context, jwtSecret string) *echomw.Claims {
 	return claims
 }
 
-// ── 权限缓存 ──────────────────────────────────────
+// ── 权限缓存（LRU，防内存泄漏） ──────────────────
+
+const (
+	permCacheMaxSize = 10000 // 最大缓存条目数
+	permCacheTTL     = 30   // 秒
+)
 
 type permCacheEntry struct {
 	perm     *models.FilePermission
 	expireAt time.Time
 }
 
-var (
-	permCache   = map[string]*permCacheEntry{}
-	permCacheMu sync.RWMutex
-)
+var permCache *lru.Cache[string, *permCacheEntry]
+
+func init() {
+	var err error
+	permCache, err = lru.New[string, *permCacheEntry](permCacheMaxSize)
+	if err != nil {
+		panic(fmt.Sprintf("初始化权限缓存失败: %v", err))
+	}
+}
 
 func cacheKey(userID int64, path string) string {
 	return fmt.Sprintf("%d:%s", userID, path)
 }
 
 func getCachedPerm(userID int64, path string) *models.FilePermission {
-	permCacheMu.RLock()
-	defer permCacheMu.RUnlock()
-	e, ok := permCache[cacheKey(userID, path)]
+	e, ok := permCache.Get(cacheKey(userID, path))
 	if ok && time.Now().Before(e.expireAt) {
 		return e.perm
 	}
@@ -66,12 +74,10 @@ func getCachedPerm(userID int64, path string) *models.FilePermission {
 }
 
 func setCachedPerm(userID int64, path string, perm *models.FilePermission) {
-	permCacheMu.Lock()
-	defer permCacheMu.Unlock()
-	permCache[cacheKey(userID, path)] = &permCacheEntry{
+	permCache.Add(cacheKey(userID, path), &permCacheEntry{
 		perm:     perm,
-		expireAt: time.Now().Add(30 * time.Second),
-	}
+		expireAt: time.Now().Add(permCacheTTL * time.Second),
+	})
 }
 
 // ── 文件访问中间件 ────────────────────────────────

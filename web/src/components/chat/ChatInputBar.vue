@@ -100,12 +100,12 @@
         </button>
         <button
           class="tb-send"
-          :class="{ stop: isBusy, active: !isBusy && (hasInput || attachedFiles.length) }"
-          :disabled="!isBusy && !hasInput && !attachedFiles.length"
-          :title="isBusy ? '停止' : '发送'"
-          @click="handleSend"
+          :class="{ stop: isBusy && !hasInput, active: hasInput || attachedFiles.length }"
+          :disabled="!hasInput && !attachedFiles.length"
+          :title="isBusy && !hasInput ? '停止生成': '发送消息'"
+          @click="isBusy && !hasInput ? handleStop() : doSend()"
         >
-          <svg v-if="isBusy" width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><rect x="2" y="2" width="8" height="8" rx="1.5"/></svg>
+          <svg v-if="isBusy && !hasInput" width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><rect x="2" y="2" width="8" height="8" rx="1.5"/></svg>
           <svg v-else width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13"/><path d="M22 2L15 22l-4-9-9-4 20-7z"/></svg>
         </button>
       </template>
@@ -209,7 +209,7 @@
               </div>
               <div class="preview-file-meta">
                 <span class="preview-file-name">{{ previewFile.name }}</span>
-                <span class="preview-file-size">{{ fileExt(previewFile.name).toUpperCase() }} · {{ fmtFileSize(previewFile.size) }}</span>
+                <span class="preview-file-size">{{ fileExt(previewFile.name).toUpperCase() }} · {{ formatBytes(previewFile.size) }}</span>
                 <span class="preview-unsupported">此格式不支持预览</span>
               </div>
             </div>
@@ -226,6 +226,7 @@ import { ref, computed, nextTick, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useChatStore, renderMarkdown } from '../../stores/chat'
 import { useSettingsStore } from '../../stores/settings'
+import { formatBytes } from '../../composables/useFormat'
 import CronPanel from './CronPanel.vue'
 
 const router = useRouter()
@@ -278,7 +279,7 @@ function handleContinue() {
   const msg = input.value.trim()
   dismissInterrupt()
   store.disconnectStream()
-  store.streamingSessions[store.sessionId] = false
+  store.setLifecycle(store.sessionId, 'idle')
   // 用户有自定义输入时注入到对话，否则发送"继续"
   store.sendMessage(msg || '继续', '', {})
   input.value = ''
@@ -287,7 +288,7 @@ function handleRetry() {
   const msg = input.value.trim()
   dismissInterrupt()
   store.disconnectStream()
-  store.streamingSessions[store.sessionId] = false
+  store.setLifecycle(store.sessionId, 'idle')
   const retryMsg = msg ? `修改做法，${msg}` : '修改做法，换一种思路重新开始'
   store.sendMessage(retryMsg, '', {})
   input.value = ''
@@ -503,12 +504,6 @@ function fileExt(name) {
   const i = (name || '').lastIndexOf('.')
   return i >= 0 ? name.slice(i + 1) : ''
 }
-function fmtFileSize(bytes) {
-  if (!bytes || bytes < 0) return '0 B'
-  const k = 1024, sizes = ['B','KB','MB','GB']
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
-}
 const gradients = ['fg-md','fg-doc','fg-ppt','fg-xls','fg-pdf','fg-txt','fg-img','fg-zip']
 function fileIconGradient(name, i) {
   const ext = fileExt(name).toLowerCase()
@@ -537,16 +532,15 @@ function onKeydown(e) {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }
 }
 
-// ── Unified send/stop handler ──
+// ── Unified send handler: always inject when busy, never stop ──
 function handleSend() {
-  if (isBusy.value) {
-    stopGeneration()
-  } else if (interruptSnapshot.value) {
-    // 中断状态下按 Enter/发送 → 注入输入内容后继续
-    handleContinue()
-  } else {
-    doSend()
-  }
+  // Always send/inject — the store's sendMessage decides the path
+  doSend()
+}
+
+// Dedicated stop (interrupt) — triggered by stop button, not Enter
+function handleStop() {
+  stopGeneration()
 }
 
 async function stopGeneration() {

@@ -254,13 +254,6 @@ func (e *Executor) cleanupLoop() {
 	}
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // TaskContext 任务执行上下文
 type TaskContext struct {
 	TaskID      string

@@ -94,11 +94,23 @@ func parseFile(path string) (*Memory, error) {
 		memType = TypeReference
 	}
 
+	// Parse context_tags (comma-separated list)
+	var contextTags []string
+	if tags, ok := fm["context_tags"]; ok && tags != "" {
+		for _, t := range strings.Split(tags, ",") {
+			t = strings.TrimSpace(t)
+			if t != "" {
+				contextTags = append(contextTags, t)
+			}
+		}
+	}
+
 	now := time.Now()
 	return &Memory{
 		Name:        name,
 		Description: fm["description"],
 		Type:        memType,
+		ContextTags: contextTags,
 		Content:     strings.TrimSpace(body.String()),
 		Source:      "file",
 		CreatedAt:   now,
@@ -120,6 +132,9 @@ func WriteToFile(dir string, mem *Memory) error {
 	fmt.Fprintf(f, "name: %s\n", mem.Name)
 	fmt.Fprintf(f, "description: %s\n", mem.Description)
 	fmt.Fprintf(f, "type: %s\n", string(mem.Type))
+	if len(mem.ContextTags) > 0 {
+		fmt.Fprintf(f, "context_tags: %s\n", strings.Join(mem.ContextTags, ", "))
+	}
 	f.WriteString("---\n\n")
 	// Body
 	f.WriteString(mem.Content)

@@ -61,7 +61,7 @@ func (m *Manager) ReportStatus(agentID string, statusCode, progress int, message
 		logger.ForComponent("ai.agent").Warn("ReportStatus: agent not found", "id", agentID)
 		return
 	}
-	ag.Summary = message
+	ag.Result = message
 	ag.ProgressPct = progress
 	ag.Progress = fmt.Sprintf("%d%%", progress)
 	// 状态码映射
@@ -92,10 +92,13 @@ func (m *Manager) Spawn(goal string, toolFilter []string, parentID string) *SubA
 	sm := NewSubAgentStateMachine()
 	agent := &SubAgent{
 		ID:         id,
-		Goal:       goal,
+		TaskID:     parentID,
+		Task:       goal,
 		ToolFilter: toolFilter,
 		ParentID:   parentID,
+		Timeout:    int(m.config.AgentTimeout.Seconds()),
 		Status:     StatusPending,
+		CreatedAt:  time.Now(),
 		StartedAt:  time.Now(),
 		progressFn: m.config.ProgressFn, // capture at spawn time
 		State:      sm,
@@ -179,9 +182,9 @@ func (m *Manager) SpawnParallel(tasks []SpawnTask, parentID string) []*Result {
 			m.waitFor(agent)
 			results[idx] = &Result{
 				AgentID: agent.ID,
-				Goal:    agent.Goal,
+				Goal: agent.Task,
 				Status:  agent.Status,
-				Summary: agent.Summary,
+				Summary: agent.Result,
 				Error:   agent.Error,
 				Rounds:  agent.Round,
 			}
@@ -214,8 +217,8 @@ func (m *Manager) SpawnAsync(tasks []SpawnTask, sessionID string) []string {
 			a := m.Get(id)
 			if a != nil {
 				results[i] = &Result{
-					AgentID: a.ID, Goal: a.Goal, Status: a.Status,
-					Summary: a.Summary, Error: a.Error, Rounds: a.Round,
+					AgentID: a.ID, Goal: a.Task, Status: a.Status,
+					Summary: a.Result, Error: a.Error, Rounds: a.Round,
 				}
 			}
 		}
@@ -326,14 +329,30 @@ func (m *Manager) runAgent(agent *SubAgent, parentID string) {
 	ctx = context.WithValue(ctx, AgentIDKey{}, agent.ID) // 注入AgentID供 agent_report 工具使用
 	messages := []base.Message{
 		{Role: "system", Content: fmt.Sprintf(
-			"你是一个子任务执行 Agent。你的唯一目标是完成以下任务:\n%s\n\n"+
-			"规则:\n- 只使用已分配的工具\n- 保持简洁高效\n- **任务完成时必须调用 agent_report(status, progress, message) 汇报**\n"+
-			"  status: 200=成功 404=未找到 500=失败\n"+
-			"  progress: 0-100 完成百分比\n"+
-					"  message: 结果摘要\n"+
-					"- 最多执行 %d 轮\n"+
-					"- 输出中的每个文件必须用 [文件: 文件名 (完整路径)] 格式引用",
-			agent.Goal, m.config.MaxRounds,
+			"你是云兮之家的子任务执行 Agent，ID: %s。\n\n"+
+			"## 任务\n\n%s\n\n"+
+			"## 执行规范\n\n"+
+			"### 工具使用\n"+
+			"- 只使用分配给本 Agent 的工具，不要尝试调用权限外的工具\n"+
+			"- 工具调用失败时分析错误原因，修正参数后重试（最多2次）\n"+
+			"- 连续3次同一工具失败 → 立即 agent_report(500, progress, \"失败原因\")\n\n"+
+			"### 信息检索\n"+
+			"- 搜索结果为空时，换不同的关键词或来源重试\n"+
+			"- 所有搜索完成后，先阅读和理解结果再汇报，不要直接粘贴原始数据\n"+
+			"- 摘要应提炼关键信息，去除冗余广告和导航内容\n\n"+
+			"### 完成标准\n"+
+			"- 成功获取所需信息 → agent_report(200, 100, \"结构化的结果摘要\")\n"+
+			"- 目标明确不存在 → agent_report(404, 100, \"未找到目标: 具体说明\")\n"+
+			"- 尝试多种方法后仍无法完成 → agent_report(500, progress, \"阻塞原因\")\n\n"+
+			"### 输出格式\n"+
+			"- 结果摘要用 Markdown，包含：关键发现、信息来源、数据准确性说明\n"+
+			"- 文件引用格式：[文件: 文件名 (完整路径)]\n"+
+			"- 纯文本回复，不要输出 JSON 或代码块包裹\n\n"+
+			"### 约束\n"+
+			"- 最多执行 %d 轮工具调用\n"+
+			"- 保持高效：优先用最少轮次完成任务\n"+
+			"- 不需要向用户确认，自主决策完成",
+			agent.ID, agent.Task, m.config.MaxRounds,
 		)},
 	}
 
@@ -369,6 +388,9 @@ func (m *Manager) runAgent(agent *SubAgent, parentID string) {
 				reasoningBuf += ev.Content
 			case "content":
 				contentBuf += ev.Content
+				if len(contentBuf) > 0 && len(contentBuf)%500 < len(ev.Content) {
+					log.Debug("📝 子Agent内容", "agent", agent.ID, "round", round, "len", len(contentBuf))
+				}
 			case "tool_call":
 				toolCalls = append(toolCalls, base.ToolCall{
 					ID:       fmt.Sprintf("ca_%d", len(toolCalls)),
@@ -382,6 +404,14 @@ func (m *Manager) runAgent(agent *SubAgent, parentID string) {
 				m.updateStatus(agent, StatusError, "LLM 错误: "+ev.Content)
 				return
 			}
+		}
+
+		// Log thinking content for this round
+		if reasoningBuf != "" {
+			log.Info("💭 子Agent思考", "agent", agent.ID, "round", round, "len", len(reasoningBuf))
+		}
+		if contentBuf != "" {
+			log.Info("📝 子Agent内容", "agent", agent.ID, "round", round, "len", len(contentBuf))
 		}
 
 		// 无工具调用 → Agent 完成
@@ -409,6 +439,7 @@ func (m *Manager) runAgent(agent *SubAgent, parentID string) {
 			toolName := tc.Function.Name
 			args := ParseArgsString(tc.Function.Arguments)
 
+			log.Info("🔧 子Agent工具调用", "agent", agent.ID, "round", round, "tool", toolName, "args", truncate(fmt.Sprint(args), 200))
 			m.updateProgress(agent, fmt.Sprintf("执行: %s", toolName))
 
 			// Check context timeout before executing
@@ -460,12 +491,16 @@ func (m *Manager) runAgent(agent *SubAgent, parentID string) {
 			})
 		}
 
-		// Loop detection: same tool signature 3 consecutive rounds
+	// Loop detection: same tool signature 3 consecutive rounds (exempt iterative tools)
 		sig := ""
+		allIterative := true
 		for _, tc := range toolCalls {
 			sig += tc.Function.Name + ";"
+			if tc.Function.Name != "web_search" && tc.Function.Name != "file_read" && tc.Function.Name != "file_search" {
+				allIterative = false
+			}
 		}
-		if sig == lastToolSig {
+		if sig == lastToolSig && !allIterative {
 			loopCount++
 			if loopCount >= 3 {
 				if agent.State != nil {
@@ -511,7 +546,7 @@ func (m *Manager) filterTools(filter []string) []base.ToolDef {
 func (m *Manager) updateStatus(agent *SubAgent, status Status, summary string) {
 	m.mu.Lock()
 	agent.Status = status
-	agent.Summary = summary
+	agent.Result = summary
 	if status == StatusError {
 		agent.Error = summary
 	}
@@ -534,7 +569,7 @@ func (m *Manager) updateStatus(agent *SubAgent, status Status, summary string) {
 	}
 
 	if status == StatusRunning {
-		log.Info("子Agent启动", "id", agent.ID, "goal", agent.Goal, "tools", len(agent.ToolFilter))
+		log.Info("子Agent启动", "id", agent.ID, "goal", agent.Task, "tools", len(agent.ToolFilter))
 	} else {
 		log.Info("子Agent完成", "id", agent.ID, "status", status, "rounds", agent.Round, "summary", summary)
 	}
@@ -548,4 +583,11 @@ func (m *Manager) updateProgress(agent *SubAgent, progress string) {
 	if agent != nil && agent.progressFn != nil {
 		agent.progressFn(agent, "agent_progress")
 	}
+}
+
+func truncate(s string, maxLen int) string {
+	if len(s) > maxLen {
+		return s[:maxLen] + "..."
+	}
+	return s
 }

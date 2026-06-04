@@ -251,53 +251,26 @@ func wrapLegacyResult(data string, err error) *base.ToolResult {
 func classifyError(err error) string {
 	msg := err.Error()
 	switch {
-	case contains(msg, "timeout", "deadline", "context"):
+	case containsAny(msg, "timeout", "deadline", "context"):
 		return base.ErrCodeTimeout
-	case contains(msg, "permission", "denied", "forbidden", "access"):
+	case containsAny(msg, "permission", "denied", "forbidden", "access"):
 		return base.ErrCodePermissionDenied
-	case contains(msg, "network", "connection", "refused", "unreachable"):
+	case containsAny(msg, "network", "connection", "refused", "unreachable"):
 		return base.ErrCodeNetworkError
-	case contains(msg, "not found", "no such", "不存在", "未找到"):
+	case containsAny(msg, "not found", "no such", "不存在", "未找到"):
 		return base.ErrCodeFileNotFound
-	case contains(msg, "invalid", "required", "参数", "格式"):
+	case containsAny(msg, "invalid", "required", "参数", "格式"):
 		return base.ErrCodeInvalidArgs
 	default:
 		return base.ErrCodeExecFailed
 	}
 }
 
-func contains(s string, substrs ...string) bool {
+func containsAny(s string, substrs ...string) bool {
+	lower := strings.ToLower(s)
 	for _, sub := range substrs {
-		if len(s) >= len(sub) {
-			for i := 0; i <= len(s)-len(sub); i++ {
-				if s[i:i+len(sub)] == sub {
-					return true
-				}
-			}
-		}
-		// case-insensitive fallback
-		lower := ""
-		for _, r := range s {
-			if r >= 'A' && r <= 'Z' {
-				lower += string(r + 32)
-			} else {
-				lower += string(r)
-			}
-		}
-		lowerSub := ""
-		for _, r := range sub {
-			if r >= 'A' && r <= 'Z' {
-				lowerSub += string(r + 32)
-			} else {
-				lowerSub += string(r)
-			}
-		}
-		if len(lower) >= len(lowerSub) {
-			for i := 0; i <= len(lower)-len(lowerSub); i++ {
-				if lower[i:i+len(lowerSub)] == lowerSub {
-					return true
-				}
-			}
+		if strings.Contains(lower, strings.ToLower(sub)) {
+			return true
 		}
 	}
 	return false

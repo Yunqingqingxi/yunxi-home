@@ -50,7 +50,7 @@
               :style="{ width: diskInfo.used_pct + '%' }"
             ></div>
           </div>
-          <span class="disk-mini-text">{{ fmtBytes(diskInfo.used) }}/{{ fmtBytes(diskInfo.total) }}</span>
+          <span class="disk-mini-text">{{ formatBytes(diskInfo.used) }}/{{ formatBytes(diskInfo.total) }}</span>
         </div>
         <div
           v-if="sandboxInfo?.sandbox_root"
@@ -525,8 +525,8 @@
                 <span
                   v-else
                   class="file-size"
-                >{{ fmtBytes(f.size) }}</span>
-                <span class="file-time">{{ fmtTime(f.mod_time) }}</span>
+                >{{ formatBytes(f.size) }}</span>
+                <span class="file-time">{{ formatRelative(f.mod_time) }}</span>
               </span>
               <span
                 class="file-actions"
@@ -742,7 +742,7 @@
     >
       <div class="preview-modal">
         <div class="preview-head">
-          <span class="preview-title">{{ previewFile.name }}</span><span class="preview-size">{{ fmtBytes(previewFile.size) }}</span><button
+          <span class="preview-title">{{ previewFile.name }}</span><span class="preview-size">{{ formatBytes(previewFile.size) }}</span><button
             v-if="!previewFile.is_dir"
             class="btn-ok"
             @click="downloadFile(previewFile)"
@@ -876,7 +876,7 @@
           </div><div class="stat-line">
             <span class="sl">类型</span><span class="sv">{{ statInfo.is_dir ? '文件夹' : '文件' }}</span>
           </div><div class="stat-line">
-            <span class="sl">大小</span><span class="sv">{{ statInfo.size ? fmtBytes(statInfo.size) : '--' }}</span>
+            <span class="sl">大小</span><span class="sv">{{ statInfo.size ? formatBytes(statInfo.size) : '--' }}</span>
           </div><div class="stat-line">
             <span class="sl">权限</span><span class="sv">{{ statInfo.mode }} ({{ statInfo.permissions }})</span>
           </div><div class="stat-line">
@@ -922,6 +922,7 @@ import api from '../services/api'
 import { useUploadStore } from '../stores/upload'
 import { useToast } from '../composables/useToast'
 import { renderMarkdown } from '../stores/chat'
+import { formatRelative, formatBytes } from '../composables/useFormat'
 import ContextMenu from '../components/ui/ContextMenu.vue'
 import ConfirmDialog from '../components/ui/ConfirmDialog.vue'
 
@@ -1010,8 +1011,6 @@ const DOC_EXTS = ['.txt','.md','.log','.json','.xml','.yml','.yaml','.toml','.in
 function isVideo(f) { return VIDEO_EXTS.includes((f.ext||'').toLowerCase()) }
 function isImage(f) { return IMAGE_EXTS.includes((f.ext||'').toLowerCase()) }
 function isTextExt(f) { return DOC_EXTS.includes((f.ext||'').toLowerCase()) }
-function fmtBytes(bytes) { if (!bytes) return '0 B'; const k = 1024; const sizes = ['B','KB','MB','GB']; const i = Math.floor(Math.log(bytes)/Math.log(k)); return parseFloat((bytes/Math.pow(k,i)).toFixed(1))+' '+sizes[i] }
-function fmtTime(t) { if (!t) return ''; const d = new Date(t); const now = new Date(); const diff = now - d; if (diff < 86400000) return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }); return d.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' }) }
 function streamUrl(f) { const token = localStorage.getItem('token'); return '/api/nas/files/stream?path=' + encodeURIComponent(f.path) + '&token=' + encodeURIComponent(token || '') }
 function toggleSort(key) { if (sortBy.value === key) sortOrder.value *= -1; else { sortBy.value = key; sortOrder.value = 1 } }
 

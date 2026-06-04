@@ -119,6 +119,13 @@ type MetricsCollector struct {
 
 	// 计数器持久化回调（每 30s 调用一次）
 	saveFn   func(CounterSnapshot)
+
+	// 生命周期控制
+	done   chan struct{} // 关闭以停止所有后台 goroutine
+	wg     sync.WaitGroup
+
+	// 环形缓冲区同步（保护并发读写）
+	bufMu sync.RWMutex
 }
 
 type toolStatsInternal struct {
@@ -141,7 +148,6 @@ const (
 // SetFlushFn sets the batch persistence callback (e.g., to write to ai_event_log).
 func (mc *MetricsCollector) SetFlushFn(fn func(ctx context.Context, batch []MetricEvent) error) {
 	mc.flushFn = fn
-	if fn != nil { go mc.flushLoop() }
 }
 
 // NewMetricsCollector creates a new metrics collector.
@@ -157,14 +163,27 @@ func NewMetricsCollector(flushFn func(ctx context.Context, batch []MetricEvent) 
 		flushSize:  defaultFlushSize,
 		flushTick:  defaultFlushTick,
 		saveFn:     saveFn,
+		done:       make(chan struct{}),
 	}
 	if flushFn != nil {
+		mc.wg.Add(1)
 		go mc.flushLoop()
 	}
 	if saveFn != nil {
+		mc.wg.Add(1)
 		go mc.saveLoop()
 	}
 	return mc
+}
+
+// Shutdown gracefully stops all background goroutines and performs a final flush.
+func (mc *MetricsCollector) Shutdown() {
+	close(mc.done)
+	mc.wg.Wait()
+	// Final flush
+	if mc.flushFn != nil {
+		mc.doFlush()
+	}
 }
 
 // ── Record ──────────────────────────────────────────────
@@ -178,10 +197,12 @@ func (mc *MetricsCollector) Record(ev MetricEvent) {
 	// 1. 更新原子计数器
 	mc.updateCounters(&ev)
 
-	// 2. 写入环形缓冲区
+	// 2. 写入环形缓冲区（加锁保护，避免 RecentEvents 读到半写事件）
+	mc.bufMu.Lock()
 	pos := mc.cursor.Add(1) - 1
 	idx := int(pos % mc.size)
 	mc.buffer[idx] = ev
+	mc.bufMu.Unlock()
 
 	// 3. 广播给订阅者（非阻塞发送）
 	mc.subMu.RLock()
@@ -198,10 +219,16 @@ func (mc *MetricsCollector) Record(ev MetricEvent) {
 	if mc.flushFn != nil {
 		mc.flushMu.Lock()
 		mc.flushBatch = append(mc.flushBatch, ev)
-		shouldFlush := len(mc.flushBatch) >= mc.flushSize
-		mc.flushMu.Unlock()
-		if shouldFlush {
-			go mc.doFlush()
+		needFlush := len(mc.flushBatch) >= mc.flushSize
+		if needFlush {
+			// 在锁内完成 swap，避免竞态
+			batch := make([]MetricEvent, len(mc.flushBatch))
+			copy(batch, mc.flushBatch)
+			mc.flushBatch = mc.flushBatch[:0]
+			mc.flushMu.Unlock()
+			go mc.doFlushWithBatch(batch)
+		} else {
+			mc.flushMu.Unlock()
 		}
 	}
 }
@@ -390,6 +417,8 @@ func (mc *MetricsCollector) RecentEvents(n int) []MetricEvent {
 	if n <= 0 {
 		n = 100
 	}
+	mc.bufMu.RLock()
+	defer mc.bufMu.RUnlock()
 	cur := mc.cursor.Load()
 	total := int(min(int64(n), mc.size))
 	events := make([]MetricEvent, 0, total)
@@ -410,10 +439,16 @@ func (mc *MetricsCollector) RecentEvents(n int) []MetricEvent {
 // ── 批量落库 ────────────────────────────────────────────
 
 func (mc *MetricsCollector) flushLoop() {
+	defer mc.wg.Done()
 	ticker := time.NewTicker(mc.flushTick)
 	defer ticker.Stop()
-	for range ticker.C {
-		mc.doFlush()
+	for {
+		select {
+		case <-mc.done:
+			return
+		case <-ticker.C:
+			mc.doFlush()
+		}
 	}
 }
 
@@ -431,6 +466,14 @@ func (mc *MetricsCollector) doFlush() {
 	mc.flushBatch = mc.flushBatch[:0]
 	mc.flushMu.Unlock()
 
+	mc.flushBatchToDB(batch)
+}
+
+func (mc *MetricsCollector) doFlushWithBatch(batch []MetricEvent) {
+	mc.flushBatchToDB(batch)
+}
+
+func (mc *MetricsCollector) flushBatchToDB(batch []MetricEvent) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := mc.flushFn(ctx, batch); err != nil {
@@ -447,11 +490,17 @@ func (mc *MetricsCollector) Flush() {
 
 // saveLoop periodically persists the counter snapshot via saveFn.
 func (mc *MetricsCollector) saveLoop() {
+	defer mc.wg.Done()
 	ticker := time.NewTicker(mc.flushTick)
 	defer ticker.Stop()
-	for range ticker.C {
-		if mc.saveFn != nil {
-			mc.saveFn(mc.SnapshotCounters())
+	for {
+		select {
+		case <-mc.done:
+			return
+		case <-ticker.C:
+			if mc.saveFn != nil {
+				mc.saveFn(mc.SnapshotCounters())
+			}
 		}
 	}
 }

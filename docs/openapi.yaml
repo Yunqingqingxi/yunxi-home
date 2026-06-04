@@ -1,0 +1,748 @@
+openapi: "3.0.3"
+info:
+  title: Yunxi Home API
+  description: |
+    云兮之家 (Yunxi Home) — 自托管家庭服务器管理中心 API。
+
+    ## 认证
+    除公开端点外，所有 `/api/*` 路由需在 Header 中携带 JWT Token：
+    ```
+    Authorization: Bearer <token>
+    ```
+    Token 通过 `/api/auth/login` 获取，有效期 24h。
+
+    ## 通用响应格式
+    ```json
+    { "code": 200, "message": "success", "data": {...} }
+    ```
+    错误时 `code` 为非 200，`message` 包含错误描述。
+
+    ## SSE 端点
+    `/api/chat` 返回 `text/event-stream`，事件类型包括：
+    `thinking` | `content` | `tool_call` | `tool_result` | `confirm` | `error` | `done`
+  version: "3.2.0"
+  contact:
+    name: Yunxi Home
+
+servers:
+  - url: http://localhost:8080
+    description: 本地开发服务器
+
+tags:
+  - name: auth
+    description: 认证与用户管理
+  - name: domains
+    description: DNS 域名记录管理
+  - name: history
+    description: DNS 更新历史
+  - name: config
+    description: 系统配置管理
+  - name: status
+    description: 系统状态与监控
+  - name: chat
+    description: AI 对话 (SSE)
+  - name: market
+    description: 技能与 MCP 市场
+  - name: logs
+    description: 日志查询
+  - name: cron
+    description: 定时任务管理
+  - name: nas
+    description: NAS 文件管理
+  - name: sysctl
+    description: 系统控制
+  - name: admin
+    description: 管理员功能
+  - name: docker
+    description: Docker 管理
+
+# ── Security ──
+security:
+  - bearerAuth: []
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    APIResponse:
+      type: object
+      properties:
+        code:    { type: integer, example: 200 }
+        message: { type: string, example: "success" }
+        data:    { type: object }
+
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string, example: "admin" }
+        password: { type: string, example: "admin123" }
+
+    LoginResponse:
+      type: object
+      properties:
+        token:    { type: string }
+        username: { type: string }
+        role:     { type: string, enum: [admin, user] }
+
+    DomainRecord:
+      type: object
+      properties:
+        id:        { type: integer }
+        domain:    { type: string, example: "example.com" }
+        record_id: { type: string, description: "DNS Provider 返回的 RecordId" }
+        rr:        { type: string, example: "@" }
+        type:      { type: string, enum: [A, AAAA] }
+        value:     { type: string, example: "1.2.3.4" }
+        ttl:       { type: integer, example: 600 }
+        enabled:   { type: boolean }
+        cron_expr: { type: string, example: "0 */5 * * * *" }
+        provider:  { type: string, description: "DNS Provider 名称" }
+        created_at:{ type: string, format: date-time }
+        updated_at:{ type: string, format: date-time }
+
+    CreateDomainRequest:
+      type: object
+      required: [domain, rr, type]
+      properties:
+        domain:    { type: string, minLength: 4, maxLength: 253, example: "example.com" }
+        rr:        { type: string, maxLength: 1024, example: "www" }
+        type:      { type: string, enum: [A, AAAA] }
+        value:     { type: string }
+        ttl:       { type: integer, minimum: 1, maximum: 86400, default: 600 }
+        cron_expr: { type: string, default: "0 */5 * * * *" }
+        enabled:   { type: boolean }
+
+    ChatRequest:
+      type: object
+      required: [message]
+      properties:
+        message:    { type: string, maxLength: 65536, description: "用户消息" }
+        session_id: { type: string, description: "会话 ID（可选，新会话自动创建）" }
+        model:      { type: string, description: "模型名（可选）" }
+
+    ChatStreamEvent:
+      type: object
+      description: "SSE 事件，类型由 type 字段区分"
+      properties:
+        type:    { type: string, enum: [thinking, content, tool_call, tool_result, confirm, error, done, keepalive, agent_progress, todo_update] }
+        content: { type: string }
+        tool:    { type: string }
+        args:    { type: string }
+        usage:   { $ref: "#/components/schemas/StreamUsage" }
+
+    StreamUsage:
+      type: object
+      properties:
+        prompt_tokens:     { type: integer }
+        completion_tokens: { type: integer }
+        total_tokens:      { type: integer }
+        cost:              { type: number }
+
+    ConfigSection:
+      type: object
+      description: "任意配置段，key-value 结构"
+
+    HistoryRecord:
+      type: object
+      properties:
+        id:       { type: integer }
+        domain:   { type: string }
+        rr:       { type: string }
+        old_ip:   { type: string }
+        new_ip:   { type: string }
+        type:     { type: string }
+        status:   { type: string, enum: [success, failed] }
+        error_msg:{ type: string }
+        created_at:{ type: string, format: date-time }
+
+    SystemStatus:
+      type: object
+      properties:
+        dns_records:   { type: integer }
+        enabled_records: { type: integer }
+        scheduler:     { type: object }
+        uptime:        { type: string }
+
+    HealthResponse:
+      type: object
+      properties:
+        status:  { type: string, example: "ok" }
+        version: { type: string, example: "3.2.0" }
+
+    ErrorResponse:
+      type: object
+      properties:
+        code:    { type: integer, example: 400 }
+        message: { type: string, example: "请求参数无效" }
+
+# ── Paths ──
+paths:
+  # ── Health ──
+  /health:
+    get:
+      tags: [status]
+      summary: 健康检查
+      security: []
+      responses:
+        200:
+          description: 服务正常
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HealthResponse" }
+
+  /ready:
+    get:
+      tags: [status]
+      summary: 就绪检查
+      security: []
+      responses:
+        200: { description: 服务就绪 }
+
+  # ── Auth ──
+  /api/auth/login:
+    post:
+      tags: [auth]
+      summary: 用户登录
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoginRequest" }
+      responses:
+        200:
+          description: 登录成功
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/APIResponse"
+                  - properties:
+                      data: { $ref: "#/components/schemas/LoginResponse" }
+        401:
+          description: 用户名或密码错误
+
+  /api/auth/status:
+    get:
+      tags: [auth]
+      summary: 检查登录状态
+      security: []
+      responses:
+        200: { description: 当前认证状态 }
+
+  /api/auth/setup:
+    post:
+      tags: [auth]
+      summary: 首次初始化管理员账户
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoginRequest" }
+      responses:
+        201: { description: 初始化成功 }
+        409: { description: 已初始化过 }
+
+  /api/auth/refresh:
+    post:
+      tags: [auth]
+      summary: 刷新 Token
+      responses: { 200: { description: Token 已刷新 } }
+
+  /api/auth/change-password:
+    post:
+      tags: [auth]
+      summary: 修改密码
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [old_password, new_password]
+              properties:
+                old_password: { type: string }
+                new_password: { type: string, minLength: 6 }
+      responses: { 200: { description: 密码已修改 } }
+
+  # ── Domains ──
+  /api/domains:
+    get:
+      tags: [domains]
+      summary: 获取所有域名记录
+      responses:
+        200:
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/APIResponse"
+                  - properties:
+                      data:
+                        type: array
+                        items: { $ref: "#/components/schemas/DomainRecord" }
+    post:
+      tags: [domains]
+      summary: 创建域名记录（防重复）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateDomainRequest" }
+      responses:
+        201: { description: 已创建并触发首次更新 }
+        400: { description: 参数无效 }
+        409: { description: 重复记录 }
+
+  /api/domains/{id}:
+    get:
+      tags: [domains]
+      summary: 获取单条域名记录
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        200: { description: 记录详情 }
+        404: { description: 记录不存在 }
+    put:
+      tags: [domains]
+      summary: 更新域名记录
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses: { 200: { description: 已更新 } }
+    delete:
+      tags: [domains]
+      summary: 删除域名记录
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses: { 200: { description: 已删除 } }
+
+  # ── History ──
+  /api/history:
+    get:
+      tags: [history]
+      summary: 获取 DNS 更新历史（分页）
+      parameters:
+        - { name: page, in: query, schema: { type: integer, default: 1 } }
+        - { name: size, in: query, schema: { type: integer, default: 20 } }
+      responses:
+        200:
+          content:
+            application/json:
+              schema:
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/HistoryRecord" }
+
+  /api/history/stats:
+    get:
+      tags: [history]
+      summary: 获取历史统计
+      responses: { 200: { description: 统计数据 } }
+
+  /api/history/clean:
+    delete:
+      tags: [history]
+      summary: 清理旧历史记录
+      parameters:
+        - { name: days, in: query, schema: { type: integer, default: 30 } }
+      responses: { 200: { description: 已清理 } }
+
+  # ── Config ──
+  /api/config:
+    get:
+      tags: [config]
+      summary: 获取全部配置（敏感字段脱敏）
+      responses: { 200: { description: 配置对象 } }
+    put:
+      tags: [config]
+      summary: 批量更新配置
+      responses: { 200: { description: 已更新 } }
+
+  /api/config/{section}:
+    get:
+      tags: [config]
+      summary: 获取配置段
+      parameters:
+        - { name: section, in: path, required: true, schema: { type: string } }
+      responses: { 200: { description: 配置段数据 } }
+    put:
+      tags: [config]
+      summary: 更新配置段（自动回滚校验）
+      parameters:
+        - { name: section, in: path, required: true, schema: { type: string } }
+      responses: { 200: { description: 已更新并校验通过 } }
+
+  /api/config/ai/test:
+    post:
+      tags: [config]
+      summary: 测试 AI Provider 连接
+      responses: { 200: { description: 连接成功 }, 500: { description: 连接失败 } }
+
+  # ── Status ──
+  /api/status:
+    get:
+      tags: [status]
+      summary: 获取系统状态（含调度器/通知/AI 指标）
+      responses: { 200: { description: 系统状态 } }
+
+  /api/trigger:
+    post:
+      tags: [status]
+      summary: 手动触发 DNS 更新
+      responses: { 200: { description: 已触发 } }
+
+  /api/system/gc:
+    post:
+      tags: [status]
+      summary: 手动触发内存 GC
+      responses: { 200: { description: GC 完成 } }
+
+  # ── Chat (SSE) ──
+  /api/chat:
+    post:
+      tags: [chat]
+      summary: AI 对话（Server-Sent Events 流）
+      description: |
+        这是核心 SSE 端点，返回 `text/event-stream`。
+
+        **事件类型：**
+        - `thinking` — AI 推理过程
+        - `content` — 文本增量
+        - `tool_call` — 工具调用
+        - `tool_result` — 工具执行结果
+        - `confirm` — 需要用户确认
+        - `error` — 错误
+        - `done` — 流结束（含 usage/cost）
+        - `keepalive` — 心跳（15s 无数据时发送）
+
+        **边界情况处理：**
+        - 弱网：自动重连（Last-Event-Id 恢复）
+        - 超时：30s keepalive，10min 整体超时
+        - 并发：同 session 互斥锁
+        - 空消息：返回错误事件
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChatRequest" }
+      responses:
+        200:
+          description: SSE 事件流
+          content:
+            text/event-stream:
+              schema:
+                type: string
+
+  /api/chat/title:
+    post:
+      tags: [chat]
+      summary: 自动生成会话标题
+      responses: { 200: { description: 标题 } }
+
+  /api/chat/confirm:
+    post:
+      tags: [chat]
+      summary: 确认/拒绝危险操作
+      responses: { 200: { description: 已确认 } }
+
+  /api/chat/respond:
+    post:
+      tags: [chat]
+      summary: 回复交互式请求
+      responses: { 200: { description: 已回复 } }
+
+  /api/chat/inject:
+    post:
+      tags: [chat]
+      summary: 注入系统消息到会话
+      responses: { 200: { description: 已注入 } }
+
+  /api/chat/command:
+    post:
+      tags: [chat]
+      summary: 执行斜杠命令
+      responses: { 200: { description: 命令结果 } }
+
+  /api/chat/commands:
+    get:
+      tags: [chat]
+      summary: 获取可用命令列表
+      responses: { 200: { description: 命令列表 } }
+
+  /api/chat/clear:
+    post:
+      tags: [chat]
+      summary: 清空当前会话
+      responses: { 200: { description: 已清空 } }
+
+  /api/chat/clear-all:
+    post:
+      tags: [chat]
+      summary: 清空所有会话
+      responses: { 200: { description: 已清空 } }
+
+  /api/chat/sessions:
+    get:
+      tags: [chat]
+      summary: 列出所有会话
+      responses: { 200: { description: 会话列表 } }
+
+  /api/chat/sessions/{id}:
+    get:
+      tags: [chat]
+      summary: 获取会话详情（含历史消息）
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { 200: { description: 会话详情 } }
+    patch:
+      tags: [chat]
+      summary: 更新会话元数据
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { 200: { description: 已更新 } }
+    delete:
+      tags: [chat]
+      summary: 删除会话
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { 200: { description: 已删除 } }
+
+  /api/chat/stream/{id}:
+    get:
+      tags: [chat]
+      summary: 订阅会话 SSE 流（旁观模式）
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { 200: { description: "SSE 流" } }
+
+  /api/chat/tools:
+    get:
+      tags: [chat]
+      summary: 获取可用工具列表
+      responses: { 200: { description: 工具 JSON Schema 列表 } }
+
+  /api/chat/hints:
+    get:
+      tags: [chat]
+      summary: 获取建议提示
+      responses: { 200: { description: 提示列表 } }
+
+  /api/chat/sessions/{id}/interrupt:
+    post:
+      tags: [chat]
+      summary: 中断会话的 AI 流
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { 200: { description: 已中断 } }
+
+  # ── Topology ──
+  /api/chat/sessions/{id}/topology:
+    get:
+      tags: [chat]
+      summary: 获取会话拓扑状态
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { 200: { description: 拓扑坐标/约束/轨迹 } }
+
+  /api/chat/sessions/{id}/topology/constraint:
+    put:
+      tags: [chat]
+      summary: 更新拓扑约束
+      responses: { 200: { description: 约束已更新 } }
+
+  /api/chat/sessions/{id}/topology/override:
+    post:
+      tags: [chat]
+      summary: 手动覆写下一节点
+      responses: { 200: { description: 已覆写 } }
+
+  /api/chat/sessions/{id}/topology/trust-reset:
+    post:
+      tags: [chat]
+      summary: 重置信任状态
+      responses: { 200: { description: 信任已重置 } }
+
+  # ── Messages ──
+  /api/chat/sessions/{id}/messages/{messageIndex}:
+    put:
+      tags: [chat]
+      summary: 编辑消息（分支）
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: messageIndex, in: path, required: true, schema: { type: integer } }
+      responses: { 200: { description: 已编辑 } }
+    delete:
+      tags: [chat]
+      summary: 删除消息（分支）
+      responses: { 200: { description: 已删除 } }
+
+  # ── Market ──
+  /api/market/search-skills:
+    post:
+      tags: [market]
+      summary: 搜索技能市场
+      responses: { 200: { description: 搜索结果 } }
+
+  /api/market/install-skill:
+    post:
+      tags: [market]
+      summary: 安装技能
+      responses: { 200: { description: 安装任务已创建 } }
+
+  /api/market/install-mcp:
+    post:
+      tags: [market]
+      summary: 安装 MCP Server
+      responses: { 200: { description: 安装任务已创建 } }
+
+  /api/market/install-mcp-stream:
+    post:
+      tags: [market]
+      summary: 安装 MCP Server（SSE 进度）
+      responses: { 200: { description: "SSE 进度流" } }
+
+  /api/market/install-tasks:
+    get:
+      tags: [market]
+      summary: 查看安装任务状态
+      responses: { 200: { description: 任务列表 } }
+
+  /api/market/popular-mcp:
+    get:
+      tags: [market]
+      summary: 热门 MCP Server
+      responses: { 200: { description: 热门列表 } }
+
+  /api/market/installed:
+    get:
+      tags: [market]
+      summary: 已安装列表
+      responses: { 200: { description: 已安装项 } }
+
+  # ── Logs ──
+  /api/logs/chat/sessions:
+    get:
+      tags: [logs]
+      summary: 列出有日志的会话
+      responses: { 200: { description: 会话列表 } }
+
+  /api/logs/chat/{id}:
+    get:
+      tags: [logs]
+      summary: 获取聊天日志
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { 200: { description: 日志内容 } }
+    delete:
+      tags: [logs]
+      summary: 删除聊天日志
+      responses: { 200: { description: 已删除 } }
+
+  /api/logs/system:
+    get:
+      tags: [logs]
+      summary: 列出系统日志文件
+      responses: { 200: { description: 文件列表 } }
+
+  /api/logs/system/{date}:
+    get:
+      tags: [logs]
+      summary: 获取系统日志
+      parameters: [{ name: date, in: path, required: true, schema: { type: string, example: "2026-06-04" } }]
+      responses: { 200: { description: 日志内容 } }
+    delete:
+      tags: [logs]
+      summary: 删除系统日志
+      responses: { 200: { description: 已删除 } }
+
+  # ── Cron ──
+  /api/cron/tasks:
+    get:
+      tags: [cron]
+      summary: 列出定时任务
+      responses: { 200: { description: 任务列表 } }
+
+  /api/cron/tasks/{id}:
+    delete:
+      tags: [cron]
+      summary: 删除定时任务
+      parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+      responses: { 200: { description: 已删除 } }
+
+  # ── NAS ──
+  /api/nas/files:
+    get:
+      tags: [nas]
+      summary: 列出文件
+      parameters:
+        - { name: path, in: query, schema: { type: string, default: "/" } }
+      responses: { 200: { description: 文件列表 } }
+    delete:
+      tags: [nas]
+      summary: 删除文件/目录
+      responses: { 200: { description: 已删除 } }
+
+  /api/nas/files/download:
+    get:
+      tags: [nas]
+      summary: 下载文件
+      parameters: [{ name: path, in: query, required: true, schema: { type: string } }]
+      responses: { 200: { description: 文件流 } }
+
+  /api/nas/files/upload:
+    post:
+      tags: [nas]
+      summary: 上传文件
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file: { type: string, format: binary }
+                dir:  { type: string }
+      responses: { 200: { description: 上传完成 } }
+
+  # ── Admin ──
+  /api/admin/users:
+    get:
+      tags: [admin]
+      summary: 列出所有用户
+      responses: { 200: { description: 用户列表 } }
+    post:
+      tags: [admin]
+      summary: 创建用户
+      responses: { 201: { description: 已创建 } }
+
+  /api/admin/users/{id}:
+    put:
+      tags: [admin]
+      summary: 更新用户
+      responses: { 200: { description: 已更新 } }
+    delete:
+      tags: [admin]
+      summary: 删除用户
+      responses: { 200: { description: 已删除 } }
+
+  # ── Docker ──
+  /api/docker/containers:
+    get:
+      tags: [docker]
+      summary: 列出容器
+      responses: { 200: { description: 容器列表 } }
+
+  /api/docker/containers/{name}/{action}:
+    post:
+      tags: [docker]
+      summary: 容器操作 (start/stop/restart)
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+        - { name: action, in: path, required: true, schema: { type: string, enum: [start, stop, restart] } }
+      responses: { 200: { description: 操作完成 } }
+
+  # ── Sandbox ──
+  /api/sandbox/status:
+    get:
+      tags: [nas]
+      summary: 沙箱状态
+      responses: { 200: { description: 沙箱信息 } }

@@ -30,6 +30,7 @@ import (
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/memory"
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/mcp"
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/middleware"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai/persistence"
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/planner"
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/register"
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/session"
@@ -88,7 +89,11 @@ type Service struct {
 	activeStreams       map[string]context.CancelFunc        // cancel func for active stream per session
 	activeStreamChs     map[string]chan base.ChatStreamEvent // active SSE channel per session (for tool-originated events)
 	activeStreamsMu     sync.Mutex
+	sessionDoneCh       map[string]chan struct{} // closed when session fully completes (stream + agents)
+	sessionDoneMu       sync.Mutex
 	chatLogger          *ChatLogger // 完整会话追踪日志
+		sessionStore        *persistence.SessionStore // persistent session snapshots
+		hookRegistry        *middleware.HookRegistry  // Claude Code-style hook system
 }
 
 type ConfirmResult struct {
@@ -113,6 +118,8 @@ type eventBuffer struct {
 	events []base.ChatStreamEvent
 	subs   map[chan base.ChatStreamEvent]struct{}
 	maxBuf int
+	seq    int64
+	mu     sync.Mutex // guards seq, events
 }
 
 func newSessionEventBus() *sessionEventBus {
@@ -125,7 +132,7 @@ func (b *sessionEventBus) getOrCreate(sessionID string) *eventBuffer {
 	if eb, ok := b.buffers[sessionID]; ok {
 		return eb
 	}
-	eb := &eventBuffer{subs: make(map[chan base.ChatStreamEvent]struct{}), maxBuf: 200}
+	eb := &eventBuffer{subs: make(map[chan base.ChatStreamEvent]struct{}), maxBuf: 1000}
 	b.buffers[sessionID] = eb
 	return eb
 }
@@ -133,32 +140,37 @@ func (b *sessionEventBus) getOrCreate(sessionID string) *eventBuffer {
 func (b *sessionEventBus) remove(sessionID string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if eb, ok := b.buffers[sessionID]; ok {
-		for ch := range eb.subs {
-			close(ch)
-		}
+	if _, ok := b.buffers[sessionID]; ok {
 		delete(b.buffers, sessionID)
 	}
 }
 
-// publish sends an event to all subscribers and appends to the ring buffer.
-func (eb *eventBuffer) publish(ev base.ChatStreamEvent) {
-	for ch := range eb.subs {
-		select {
-		case ch <- ev:
-		default:
-			// slow consumer — drop
-		}
-	}
+// publish assigns a sequence number, appends to ring buffer, and broadcasts to all subscribers.
+// Returns the event with Seq populated for use by the direct stream channel.
+func (eb *eventBuffer) publish(ev base.ChatStreamEvent) base.ChatStreamEvent {
+	eb.mu.Lock()
+	eb.seq++
+	ev.Seq = eb.seq
 	eb.events = append(eb.events, ev)
 	if len(eb.events) > eb.maxBuf {
 		eb.events = eb.events[len(eb.events)-eb.maxBuf:]
 	}
+	eb.mu.Unlock()
+	for ch := range eb.subs {
+		select {
+		case ch <- ev:
+		default:
+			log.Warn("SSE subscriber channel full, dropping event",
+				"type", ev.Type, "session_seq", ev.Seq,
+				"channel_cap", cap(ch), "subscribers", len(eb.subs))
+		}
+	}
+	return ev
 }
 
 // subscribe returns a channel that receives all buffered events followed by live events.
 func (eb *eventBuffer) subscribe() chan base.ChatStreamEvent {
-	ch := make(chan base.ChatStreamEvent, 128)
+	ch := make(chan base.ChatStreamEvent, 256)
 	eb.subs[ch] = struct{}{}
 	// Replay buffered events
 	events := make([]base.ChatStreamEvent, len(eb.events))
@@ -229,6 +241,7 @@ func NewService(provider base.AIProvider, reg *register.Registry, sessionRepo da
 		eventBus:            newSessionEventBus(),
 		activeStreams:       make(map[string]context.CancelFunc),
 		activeStreamChs:     make(map[string]chan base.ChatStreamEvent),
+		sessionDoneCh:       make(map[string]chan struct{}),
 		chatLogger:          NewChatLogger("log/chat"),
 	}
 	svc.asyncExec = async.New(3, svc.injectCallback, svc.progressCallback)
@@ -257,6 +270,27 @@ func NewService(provider base.AIProvider, reg *register.Registry, sessionRepo da
 		AgentTimeout:  10 * time.Minute,
 		Provider:      provider,
 		Registry:      reg,
+		// ProgressFn: publish agent events to eventBus so SSE subscribers see real-time updates.
+		// This runs for EVERY agent status change, regardless of StreamChat state.
+		ProgressFn: func(a *agent.SubAgent, eventType string) {
+			if svc.eventBus != nil {
+				ev := base.ChatStreamEvent{
+					Type:        eventType,
+					AgentID:     a.ID,
+					AgentGoal:   a.Task,
+					AgentRound:  a.Round,
+					AgentStatus: string(a.Status),
+					Content:     a.Result,
+				}
+				eb := svc.eventBus.getOrCreate(a.ParentID)
+				eb.publish(ev)
+				if eventType == "agent_result" {
+					resultMsg := fmt.Sprintf("[子Agent %s] %s | 目标: %s | 结果: %s",
+						a.ID, map[bool]string{true: "完成", false: "失败"}[a.Status == agent.StatusDone], a.Task, a.Result)
+					svc.InjectWithPriority(a.ParentID, resultMsg, "info", "agent_result")
+				}
+			}
+		},
 		CompletionFn: func(sessionID string, results []*agent.Result) {
 			// 发射 agent_result SSE 事件 → 前端用 AgentBubble 渲染
 			if svc.eventBus != nil {
@@ -293,8 +327,10 @@ func NewService(provider base.AIProvider, reg *register.Registry, sessionRepo da
 			}
 			msg := fmt.Sprintf("[后台任务完成] %d/%d 成功\n%s", ok, ok+fail, strings.Join(parts, "\n"))
 			svc.InjectWithPriority(sessionID, msg, "info", "agent_completion")
-			// 持久化到会话历史，确保刷新不丢失
-			svc.SaveSystemMessage(sessionID, msg)
+			// Auto-resume main agent now that all sub-agents are done
+			if !svc.HasActiveStream(sessionID) {
+				svc.resumeMainAgent(sessionID)
+			}
 		},
 	})
 	// Periodic agent cleanup (every 5 min, remove agents older than 30 min)
@@ -455,7 +491,7 @@ func (s *Service) ReasoningFor(model string) string {
 // ── StreamChat ──
 
 func (s *Service) StreamChat(ctx context.Context, sessionID, userID, userMessage string, modelOpt ...string) <-chan base.ChatStreamEvent {
-	ch := make(chan base.ChatStreamEvent, 64)
+	ch := make(chan base.ChatStreamEvent, 256)
 	eb := s.eventBus.getOrCreate(sessionID)
 
 	// Guard: only one active StreamChat per session. Duplicate requests become injections.
@@ -493,17 +529,24 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userID, userMessage
 		}()
 		defer s.releaseAllLocks(sessionID)
 		defer s.closeInjectCh(sessionID)
-		defer s.eventBus.remove(sessionID)
+		defer func() {
+			if !s.HasRunningAgents(sessionID) {
+				s.signalSessionDone(sessionID)
+			}
+		}()
 		s.chatLogger.LogSessionStart(sessionID)
 		defer s.chatLogger.LogSessionEnd(sessionID)
 
-		// emit sends to both the client channel and the event buffer for reconnection
+		// emit sends to both the client channel and the event buffer for reconnection.
+		// publish() assigns a sequence number and broadcasts to subscribers.
 		emit := func(ev base.ChatStreamEvent) {
+			ev = eb.publish(ev)
 			select {
 			case ch <- ev:
 			default:
+				log.Warn("SSE stream channel full, dropping event",
+					"type", ev.Type, "session_seq", ev.Seq)
 			}
-			eb.publish(ev)
 		}
 		startTime := time.Now()
 		modelOverride := ""
@@ -522,20 +565,13 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userID, userMessage
 			ev := base.ChatStreamEvent{
 				Type:        eventType,
 				AgentID:     a.ID,
-				AgentGoal:   a.Goal,
+				AgentGoal:   a.Task,
 				AgentRound:  a.Round,
 				AgentStatus: string(a.Status),
-				Content:     a.Summary,
+				Content:     a.Result,
 			}
-			// Safety: ch may be closed when main stream ends before agent finishes.
-			func() {
-				defer func() { recover() }()
-				select {
-				case ch <- ev:
-				default:
-				}
-			}()
-			eb.publish(ev)
+			// publish assigns seq and broadcasts to event bus subscribers
+			ev = eb.publish(ev)
 
 			// Persist agent result + auto-resume main agent
 			if eventType == "agent_result" {
@@ -544,13 +580,21 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userID, userMessage
 			status = "失败"
 			}
 			resultMsg := fmt.Sprintf("[子Agent %s] %s | 目标: %s | 结果: %s",
-			a.ID, status, a.Goal, a.Summary)
-			s.SaveSystemMessage(sessionID, resultMsg)
-			 // 自动恢复主Agent：子Agent完成后注入消息触发AI继续处理
-					if !s.HasActiveStream(sessionID) {
-						log.Info("子Agent完成，自动恢复主Agent", "session", sessionID, "agent", a.ID)
-						s.InjectMessage(sessionID, fmt.Sprintf("[系统] 子Agent %s 已完成，请继续处理。%s", a.ID, resultMsg))
-					}
+			a.ID, status, a.Task, a.Result)
+			// 仅注入到活跃流作为 AI 上下文提示，不持久化为可见消息
+			s.InjectWithPriority(sessionID, resultMsg, "info", "agent_result")
+			// 检查所有子Agent是否全部结束；完成后自动恢复主Agent
+			allDone := true
+			for _, ag := range s.agentMgr.ListAll() {
+				if ag.ParentID == sessionID && ag.Status != agent.StatusDone && ag.Status != agent.StatusError {
+					allDone = false
+					break
+				}
+			}
+			if allDone && !s.HasActiveStream(sessionID) {
+				log.Info("主Agent自动恢复", "session", sessionID)
+				go s.resumeMainAgent(sessionID)
+			}
 				}
 		})
 		defer s.agentMgr.SetProgressFn(oldAgentFn)
@@ -1213,12 +1257,16 @@ func (s *Service) getOrCreateInjectCh(sessionID string) chan InjectedMessage {
 	if ch, ok := s.injections[sessionID]; ok {
 		return ch
 	}
-	ch := make(chan InjectedMessage, 32)
+	ch := make(chan InjectedMessage, 64)
 	s.injections[sessionID] = ch
 	return ch
 }
 
 func (s *Service) closeInjectCh(sessionID string) {
+	// Don't close if agents are still running — user may inject new messages
+	if s.HasRunningAgents(sessionID) {
+		return
+	}
 	s.injectMu.Lock()
 	defer s.injectMu.Unlock()
 	if ch, ok := s.injections[sessionID]; ok {
@@ -1232,11 +1280,13 @@ func (s *Service) InjectMessage(sessionID, content string) {
 	ch, ok := s.injections[sessionID]
 	s.injectMu.RUnlock()
 	if !ok {
-		return
+		// Create injectCh if missing — agent results may arrive after stream ends
+		ch = s.getOrCreateInjectCh(sessionID)
 	}
 	select {
 	case ch <- InjectedMessage{Content: content, Priority: "system", Source: "inject", Timestamp: time.Now()}:
 	default:
+		log.Warn("InjectMessage channel full, dropping", "session", sessionID)
 	}
 }
 
@@ -1245,11 +1295,14 @@ func (s *Service) InjectWithPriority(sessionID, content, priority, source string
 	ch, ok := s.injections[sessionID]
 	s.injectMu.RUnlock()
 	if !ok {
-		return
+		// Create injectCh if missing — agent results may arrive after stream ends,
+		// need to be buffered for the next StreamChat to consume during thinking gaps
+		ch = s.getOrCreateInjectCh(sessionID)
 	}
 	select {
 	case ch <- InjectedMessage{Content: content, Priority: priority, Source: source, Timestamp: time.Now()}:
 	default:
+		log.Warn("InjectWithPriority channel full, dropping", "session", sessionID, "source", source)
 	}
 }
 
@@ -1261,7 +1314,23 @@ func (s *Service) InjectUserMessage(sessionID, content string) {
 	history, _ := s.sessions.GetOrCreate(sessionID, sessionType, content)
 	history = append(history, base.Message{Role: "user", Content: content})
 	s.sessions.Save(sessionID, history)
+
+	// Save to history and push to active stream if available.
+	// If no active StreamChat, start one immediately so the user gets a response
+	// without waiting for all sub-agents to complete.
 	s.InjectWithPriority(sessionID, "[用户消息] "+content, "user", "user")
+	if !s.HasActiveStream(sessionID) {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+			ctx = context.WithValue(ctx, base.SessionIDKey{}, sessionID)
+			stream := s.StreamChat(ctx, sessionID, "", content)
+			eb := s.eventBus.getOrCreate(sessionID)
+			for ev := range stream {
+				eb.publish(ev)
+			}
+		}()
+	}
 }
 
 // SaveSystemMessage 直接将系统消息持久化到会话历史（不依赖 StreamChat injectCh）
@@ -1274,6 +1343,30 @@ func (s *Service) SaveSystemMessage(sessionID, content string) {
 	s.sessions.Save(sessionID, history)
 	// 同时尝试通过 injectCh 推送给活跃流（如果存在的话）
 	s.InjectWithPriority(sessionID, content, "info", "command_result")
+}
+
+// resumeMainAgent 在子Agent全部完成后恢复主Agent，事件通过 eventBus 发送。
+func (s *Service) resumeMainAgent(sessionID string) {
+	// 将 agent 结果汇总为 system 消息注入会话历史（前端不渲染 system 消息气泡）
+	history, _ := s.sessions.GetOrCreate(sessionID, models.SessionTypeChat, "")
+	history = append(history, base.Message{
+		Role: "system",
+		Content: "[系统] 所有子Agent已完成。请根据以下 agent_result 汇总后回复用户。不要输出 JSON，直接给用户可读的汇总结果。",
+	})
+	s.sessions.Save(sessionID, history)
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+		ctx = context.WithValue(ctx, base.SessionIDKey{}, sessionID)
+		// 使用 "继续" 作为内部触发消息，避免空消息导致无关记忆匹配
+		stream := s.StreamChat(ctx, sessionID, "", "继续")
+		eb := s.eventBus.getOrCreate(sessionID)
+		for ev := range stream {
+			eb.publish(ev)
+		}
+		eb.publish(base.ChatStreamEvent{Type: "session_complete", Content: sessionID})
+	}()
 }
 
 // ── Confirm ──
@@ -1670,6 +1763,38 @@ func (s *Service) SubscribeSession(sessionID string) chan base.ChatStreamEvent {
 func (s *Service) UnsubscribeSession(sessionID string, ch chan base.ChatStreamEvent) {
 	s.eventBus.getOrCreate(sessionID).unsubscribe(ch)
 }
+
+// SessionDoneCh returns a channel that is closed when both the stream and all agents
+// for the session have completed. Handlers can select on this for event-driven cleanup.
+func (s *Service) SessionDoneCh(sessionID string) chan struct{} {
+	return s.getOrCreateDoneCh(sessionID)
+}
+
+func (s *Service) getOrCreateDoneCh(sessionID string) chan struct{} {
+	s.sessionDoneMu.Lock()
+	defer s.sessionDoneMu.Unlock()
+	if ch, ok := s.sessionDoneCh[sessionID]; ok {
+		return ch
+	}
+	ch := make(chan struct{})
+	s.sessionDoneCh[sessionID] = ch
+	return ch
+}
+
+func (s *Service) signalSessionDone(sessionID string) {
+	s.sessionDoneMu.Lock()
+	ch, ok := s.sessionDoneCh[sessionID]
+	if ok {
+		delete(s.sessionDoneCh, sessionID)
+	}
+	s.sessionDoneMu.Unlock()
+	if ok {
+		close(ch)
+	}
+	// Clean up event bus — no more subscribers needed
+	s.eventBus.remove(sessionID)
+}
+
 func (s *Service) ListActiveSessions() []string {
 	var ids []string
 	for _, s := range s.sessions.List() {
@@ -3042,16 +3167,18 @@ func (s *Service) dispatchBackground(tool *base.ToolDef, funcName string, args m
 		return false
 	}
 	log.Info("后台任务分发", "tool", funcName, "session", sessionID)
-	runner := func(ctx *async.TaskContext) (string, error) {
+	bgCtx := agent.WithSessionID(context.Background(), sessionID)
+	bgCtx = base.WithSessionID(bgCtx, sessionID)
+		runner := func(ctx *async.TaskContext) (string, error) {
 		if tool.HandlerV2 != nil {
-			res := tool.HandlerV2(context.Background(), args)
+			res := tool.HandlerV2(bgCtx, args)
 			if res.Status == base.StatusError && res.Error != nil {
 				return "", fmt.Errorf("%s: %s", res.Error.Code, res.Error.Message)
 			}
 			return res.Summary, nil
 		}
 		if tool.Handler != nil {
-			return tool.Handler(context.Background(), args)
+			return tool.Handler(bgCtx, args)
 		}
 		return "", fmt.Errorf("tool %s has no handler", funcName)
 	}

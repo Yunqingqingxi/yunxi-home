@@ -3,7 +3,7 @@
     <div class="tool-main">
       <span class="tool-icon" v-html="icons.tool"></span>
       <span class="tool-name">{{ event.tool_name }}</span>
-      <span v-if="event.tool_dur_ms" class="tool-dur">{{ fmtDuration(event.tool_dur_ms) }}</span>
+      <span v-if="event.tool_dur_ms" class="tool-dur">{{ formatDuration(event.tool_dur_ms) }}</span>
     </div>
     <div v-if="event.tool_args" class="tool-args">{{ truncate(event.tool_args, 150) }}</div>
     <!-- Duration bar -->
@@ -16,7 +16,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { LogEvent } from '../../types/logs'
-import { ICONS, fmtDuration } from '../../stores/logs'
+import { ICONS } from '../../stores/logs'
+import { formatDuration } from '../../composables/useFormat'
 const icons = ICONS
 
 const props = defineProps<{ event: LogEvent }>()

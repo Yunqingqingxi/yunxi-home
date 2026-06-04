@@ -3,6 +3,7 @@
 package goal
 
 import (
+	"strconv"
 	"sync"
 	"time"
 )
@@ -258,36 +259,24 @@ func (m *Manager) ResumePrompt(goalID string) string {
 	p := "你有一个未完成的目标需要继续执行:\n"
 	p += "目标: " + g.Title + "\n"
 	p += "描述: " + g.Description + "\n"
-	p += "进度: " + itoa(g.Progress) + "%\n\n"
+	p += "进度: " + strconv.Itoa(g.Progress) + "%\n\n"
 	p += "已完成的步骤:\n"
 	for _, s := range g.Steps {
 		switch s.Status {
 		case StepDone:
-			p += "  ✅ 步骤" + itoa(s.ID) + ": " + s.Title + " — " + s.Result + "\n"
+			p += "  ✅ 步骤" + strconv.Itoa(s.ID) + ": " + s.Title + " — " + s.Result + "\n"
 		case StepFailed:
-			p += "  ❌ 步骤" + itoa(s.ID) + ": " + s.Title + " — " + s.Error + "\n"
+			p += "  ❌ 步骤" + strconv.Itoa(s.ID) + ": " + s.Title + " — " + s.Error + "\n"
 		case StepInProgress:
-			p += "  🔄 步骤" + itoa(s.ID) + ": " + s.Title + " (进行中)\n"
+			p += "  🔄 步骤" + strconv.Itoa(s.ID) + ": " + s.Title + " (进行中)\n"
 		}
 	}
 	p += "\n待执行的步骤:\n"
 	for _, s := range g.Steps {
 		if s.Status == StepPending {
-			p += "  ⏳ 步骤" + itoa(s.ID) + ": " + s.Title + "\n"
+			p += "  ⏳ 步骤" + strconv.Itoa(s.ID) + ": " + s.Title + "\n"
 		}
 	}
 	p += "\n请从第一个待执行步骤继续。"
 	return p
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	digits := ""
-	for n > 0 {
-		digits = string(rune('0'+n%10)) + digits
-		n /= 10
-	}
-	return digits
 }

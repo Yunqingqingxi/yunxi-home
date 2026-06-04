@@ -6,7 +6,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # ── 配置 ────────────────────────────────────────────
-SSH_HOST="${YUNXI_SSH_HOST:-}"
+SSH_HOST="${YUNXI_SSH_HOST:-yxdthird.top}"
 REMOTE_DIR="${YUNXI_REMOTE_DIR:-/opt/yunxi-home}"
 
 if [ -z "${SSH_HOST}" ]; then

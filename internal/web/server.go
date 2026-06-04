@@ -268,6 +268,7 @@ func New(cfg *config.Config, configRepo database.ConfigRepository, domainRepo da
 	api.GET("/config/prompts", chatH.GetPrompts)
 	api.PUT("/config/prompts/:section", chatH.UpdatePrompt)
 	api.POST("/config/prompts/:section/reset", chatH.ResetPrompt)
+	api.GET("/chat/sessions/:id/agents", chatH.GetSessionAgents)
 	api.GET("/chat/sessions/:id/topology", chatH.GetTopology)
 	api.PUT("/chat/sessions/:id/topology/constraint", chatH.UpdateConstraint)
 	api.POST("/chat/sessions/:id/topology/override", chatH.OverrideNode)
@@ -370,6 +371,9 @@ func New(cfg *config.Config, configRepo database.ConfigRepository, domainRepo da
 	adminAPI.POST("/file-permissions", adminH.UpsertFilePerm)
 	adminAPI.DELETE("/file-permissions/:id", adminH.DeleteFilePerm)
 
+	// ── Swagger UI (全离线嵌入，无需 CDN) ──────────
+	RegisterSwaggerRoutes(api)
+
 	// SPA fallback
 	staticFS, err := fs.Sub(staticFiles, "static")
 	if err == nil {
@@ -430,6 +434,11 @@ func cacheControl(next http.Handler) http.Handler {
 }
 
 func (s *Server) Start() error { return s.echo.Start(s.addr) }
+
+// ServeHTTP implements http.Handler for testing and custom server integration.
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.echo.ServeHTTP(w, r)
+}
 
 func (s *Server) Shutdown(ctx context.Context) error {
 	for _, fn := range s.onShutdown {

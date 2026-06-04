@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { computed } from 'vue'
+import { useLocalStorage } from '@vueuse/core'
 import api from '../services/api'
 
 interface UserInfo {
@@ -8,8 +9,13 @@ interface UserInfo {
 }
 
 export const useAuthStore = defineStore('auth', () => {
-  const token = ref<string>(localStorage.getItem('token') || '')
-  const user = ref<UserInfo | null>(JSON.parse(localStorage.getItem('user') || 'null'))
+  const token = useLocalStorage<string>('token', '')
+  const user = useLocalStorage<UserInfo | null>('user', null, {
+    serializer: {
+      read: (v: any) => (v ? JSON.parse(v) : null),
+      write: (v: any) => JSON.stringify(v),
+    },
+  })
 
   const isLoggedIn = computed(() => !!token.value)
 
@@ -17,16 +23,12 @@ export const useAuthStore = defineStore('auth', () => {
     const res = await api.post('/api/auth/login', { username, password })
     token.value = res.data.data.token
     user.value = { username: res.data.data.username, role: res.data.data.role }
-    localStorage.setItem('token', token.value)
-    localStorage.setItem('user', JSON.stringify(user.value))
     api.defaults.headers.common['Authorization'] = `Bearer ${token.value}`
   }
 
   function logout(): void {
     token.value = ''
     user.value = null
-    localStorage.removeItem('token')
-    localStorage.removeItem('user')
     delete api.defaults.headers.common['Authorization']
   }
 

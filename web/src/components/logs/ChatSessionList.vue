@@ -34,10 +34,10 @@
           <div class="si-title">{{ truncate(item.session_id) }}</div>
           <div class="si-meta">
             <span class="si-rounds">{{ item.rounds || '-' }} 轮</span>
-            <span class="si-size">{{ fmtSize(item.size) }}</span>
+            <span class="si-size">{{ formatBytes(item.size) }}</span>
             <span v-if="item.active" class="si-live">● LIVE</span>
           </div>
-          <div class="si-date">{{ fmtDate(item.created) }}</div>
+          <div class="si-date">{{ formatDateTime(item.created) }}</div>
         </div>
       </template>
     </div>
@@ -47,7 +47,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import type { SessionInfo } from '../../types/logs'
-import { fmtSize, fmtDate } from '../../stores/logs'
+import { formatBytes, formatDateTime } from '../../composables/useFormat'
 
 const props = defineProps<{ sessions: SessionInfo[]; selected: string | null; loading: boolean }>()
 defineEmits<{ select: [session: SessionInfo]; delete: [sessionId: string] }>()
@@ -57,7 +57,7 @@ const selectedDate = ref('')
 
 const dateOptions = computed(() => {
   const dates = new Set<string>()
-  for (const s of props.sessions) dates.add(fmtDate(s.created))
+  for (const s of props.sessions) dates.add(formatDateTime(s.created))
   return [...dates].sort().reverse()
 })
 
@@ -66,7 +66,7 @@ const filteredSessions = computed(() => {
     if (a.active !== b.active) return a.active ? -1 : 1
     return new Date(b.created).getTime() - new Date(a.created).getTime()
   })
-  if (selectedDate.value) list = list.filter(s => fmtDate(s.created) === selectedDate.value)
+  if (selectedDate.value) list = list.filter(s => formatDateTime(s.created) === selectedDate.value)
   if (searchQuery.value) {
     const q = searchQuery.value.toLowerCase()
     list = list.filter(s => s.session_id.toLowerCase().includes(q))
@@ -78,7 +78,7 @@ const sessionsByDate = computed(() => {
   const groups: any[] = []
   let lastDate = ''
   for (const s of filteredSessions.value) {
-    const d = fmtDate(s.created)
+    const d = formatDateTime(s.created)
     if (d !== lastDate) { groups.push({ _date: d }); lastDate = d }
     groups.push(s)
   }

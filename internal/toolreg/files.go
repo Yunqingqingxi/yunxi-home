@@ -654,12 +654,5 @@ func filepathToSlash(p string) string {
 	return filepath.ToSlash(p)
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 
 

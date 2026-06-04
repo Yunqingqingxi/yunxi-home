@@ -136,6 +136,13 @@ func (ps *PromptStore) DeactivateContext(sessionID, contextID string) {
 	}
 }
 
+// ClearContexts removes all activated contexts for a session.
+func (ps *PromptStore) ClearContexts(sessionID string) {
+	ps.mu.Lock()
+	defer ps.mu.Unlock()
+	delete(ps.activatedContexts, sessionID)
+}
+
 // GetActivatedContexts returns the list of activated context IDs for a session.
 func (ps *PromptStore) GetActivatedContexts(sessionID string) []string {
 	ps.mu.RLock()
@@ -233,13 +240,55 @@ func (ps *PromptStore) BuildSystemPrompt(sessionID, userMessage string, recentTo
 	var sb strings.Builder
 	sb.WriteString(generalPrompt)
 
-	// Append activated specialized prompts
+	// ── 上下文感知：告知 AI 当前激活的专用上下文及可用的选项 ──
 	var activeSpecialized []string
 	for contextID := range activated {
+		if ps.GetSpecializedPrompt(contextID) != "" {
+			activeSpecialized = append(activeSpecialized, contextID)
+		}
+	}
+	if len(activeSpecialized) > 0 {
+		sb.WriteString("\n\n## 当前激活的专用上下文\n")
+		for _, id := range activeSpecialized {
+			sb.WriteString(fmt.Sprintf("- %s\n", id))
+		}
+		sb.WriteString("\n任务变化时用 deactivate_specialized_context 停用旧上下文，用 activate_specialized_context 激活新上下文。")
+	} else {
+		sb.WriteString("\n\n## 当前无激活的专用上下文\n")
+		sb.WriteString("根据任务需求用 activate_specialized_context 激活相关上下文。")
+	}
+
+	// 列出可用但未激活的上下文
+	var available []string
+	allSpec := ps.GetAllSpecialized()
+	for _, p := range allSpec {
+		if !p.Enabled {
+			continue
+		}
+		isActive := false
+		for _, id := range activeSpecialized {
+			if id == p.ID {
+				isActive = true
+				break
+			}
+		}
+		if !isActive {
+			available = append(available, p.ID)
+		}
+	}
+	if len(available) > 0 {
+		sb.WriteString("\n\n## 可用的专用上下文\n")
+		for _, id := range available {
+			sb.WriteString(fmt.Sprintf("- %s\n", id))
+		}
+		sb.WriteString("\n用 list_specialized_contexts 查看完整描述。")
+	}
+
+	// Append activated specialized prompt content
+	for _, contextID := range activeSpecialized {
 		if content := ps.GetSpecializedPrompt(contextID); content != "" {
 			sb.WriteString("\n\n")
 			sb.WriteString(content)
-			activeSpecialized = append(activeSpecialized, contextID)
 		}
 	}
 

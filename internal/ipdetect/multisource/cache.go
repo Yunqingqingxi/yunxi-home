@@ -10,6 +10,7 @@ type cache struct {
 	mu    sync.RWMutex
 	items map[string]cacheItem
 	ttl   time.Duration
+	done  chan struct{} // 关闭以停止 cleanupLoop
 }
 
 type cacheItem struct {
@@ -22,12 +23,23 @@ func newCache(ttl time.Duration) *cache {
 	c := &cache{
 		items: make(map[string]cacheItem),
 		ttl:   ttl,
+		done:  make(chan struct{}),
 	}
 
 	// 后台清理过期项
 	go c.cleanupLoop()
 
 	return c
+}
+
+// Stop 停止后台清理 goroutine，不再使用此缓存后可调用。
+func (c *cache) Stop() {
+	select {
+	case <-c.done:
+		// already stopped
+	default:
+		close(c.done)
+	}
 }
 
 // Get 获取缓存的 IP
@@ -75,14 +87,19 @@ func (c *cache) cleanupLoop() {
 	ticker := time.NewTicker(c.ttl)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		c.mu.Lock()
-		now := time.Now()
-		for k, v := range c.items {
-			if now.After(v.expires) {
-				delete(c.items, k)
+	for {
+		select {
+		case <-c.done:
+			return
+		case <-ticker.C:
+			c.mu.Lock()
+			now := time.Now()
+			for k, v := range c.items {
+				if now.After(v.expires) {
+					delete(c.items, k)
+				}
 			}
+			c.mu.Unlock()
 		}
-		c.mu.Unlock()
 	}
 }

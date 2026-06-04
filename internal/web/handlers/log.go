@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
 
@@ -26,6 +27,15 @@ type LogHandler struct {
 
 func NewLogHandler(cl *ai.ChatLogger, sysLogDir string) *LogHandler {
 	return &LogHandler{chatLogger: cl, systemLogDir: sysLogDir}
+}
+
+// writeLogSSE writes a formatted SSE line with a 30-second write deadline.
+func (h *LogHandler) writeLogSSE(c echo.Context, format string, args ...any) error {
+	if w, ok := c.Response().Writer.(interface{ SetWriteDeadline(t time.Time) error }); ok {
+		w.SetWriteDeadline(time.Now().Add(30 * time.Second))
+	}
+	_, err := fmt.Fprintf(c.Response(), format, args...)
+	return err
 }
 
 // ── Chat Logs ──────────────────────────────────────────────────────
@@ -201,32 +211,47 @@ func (h *LogHandler) TailChatLog(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, errorResp("缺少 session ID"))
 	}
 
+	// P0: check Flusher BEFORE writing headers
+	flusher, ok := c.Response().Writer.(http.Flusher)
+	if !ok {
+		return c.JSON(http.StatusInternalServerError, errorResp("不支持 SSE"))
+	}
+
 	c.Response().Header().Set("Content-Type", "text/event-stream")
 	c.Response().Header().Set("Cache-Control", "no-cache")
 	c.Response().Header().Set("Connection", "keep-alive")
 	c.Response().WriteHeader(http.StatusOK)
-	flusher, _ := c.Response().Writer.(http.Flusher)
 
 	ctx := c.Request().Context()
 
 	// Subscribe to live events
 	ch := h.chatLogger.Subscribe(sessionID)
 	if ch == nil {
-		fmt.Fprintf(c.Response(), "event: error\ndata: {\"error\":\"too many subscribers\"}\n\n")
-		if flusher != nil { flusher.Flush() }
+		h.writeLogSSE(c, "event: error\ndata: {\"error\":\"too many subscribers\"}\n\n")
+		flusher.Flush()
 		return nil
 	}
 	defer h.chatLogger.Unsubscribe(sessionID, ch)
+
+	heartbeatTicker := time.NewTicker(15 * time.Second)
+	defer heartbeatTicker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
+		case <-heartbeatTicker.C:
+			if err := h.writeLogSSE(c, ":keepalive\n\n"); err != nil {
+				return nil
+			}
+			flusher.Flush()
 		case ev, ok := <-ch:
 			if !ok { return nil }
 			data, _ := json.Marshal(ev)
-			fmt.Fprintf(c.Response(), "event: log\ndata: %s\n\n", data)
-			if flusher != nil { flusher.Flush() }
+			if err := h.writeLogSSE(c, "id: %s\nevent: log\ndata: %s\n\n", ev.Timestamp, data); err != nil {
+				return nil
+			}
+			flusher.Flush()
 		}
 	}
 }
@@ -694,11 +719,4 @@ func removeEmptyParents(filePath, rootDir string) {
 		}
 		dir = filepath.Dir(dir)
 	}
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

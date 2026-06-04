@@ -1,6 +1,7 @@
 package session
 
 import (
+	"strconv"
 	"strings"
 	"unicode/utf8"
 )
@@ -115,7 +116,7 @@ func (b *BudgetManager) CompactHistory(messages []MessageWithContent) []MessageW
 func buildCompactSummary(count int, old []MessageWithContent) string {
 	sb := strings.Builder{}
 	sb.WriteString("[对话历史摘要] 之前 ")
-	sb.WriteString(itoa(count))
+	sb.WriteString(strconv.Itoa(count))
 	sb.WriteString(" 条消息的关键信息:\n")
 
 	keyResults := make([]string, 0, 5)
@@ -139,16 +140,4 @@ func buildCompactSummary(count int, old []MessageWithContent) string {
 		}
 	}
 	return sb.String()
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	digits := ""
-	for n > 0 {
-		digits = string(rune('0'+n%10)) + digits
-		n /= 10
-	}
-	return digits
 }

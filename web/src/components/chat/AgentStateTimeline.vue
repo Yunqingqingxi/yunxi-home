@@ -7,7 +7,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 
-const props = defineProps<{ transitions: { to: string }[] }>()
+const props = defineProps<{ transitions: { to: string }[] | { to: string }[] }>()
 
 const stateColors: Record<string, string> = {
   start: '#94a3b8', reasoning: '#3b82f6', executing: '#22c55e', waiting_lock: '#f59e0b',

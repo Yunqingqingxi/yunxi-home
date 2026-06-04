@@ -29,7 +29,7 @@
 <script setup lang="ts">
 import { reactive } from 'vue'
 import type { LogEvent } from '../../types/logs'
-import { fmtDuration } from '../../stores/logs'
+import { formatDuration } from '../../composables/useFormat'
 import EventCard from './EventCard.vue'
 
 const props = defineProps<{
@@ -49,7 +49,7 @@ function toggleRound(round: number) {
 
 function roundDuration(group: { events: LogEvent[] }): string {
   const end = group.events.find(e => e.type === 'round_end')
-  if (end?.round_dur_ms) return fmtDuration(end.round_dur_ms)
+  if (end?.round_dur_ms) return formatDuration(end.round_dur_ms)
   return ''
 }
 

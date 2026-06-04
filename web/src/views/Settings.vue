@@ -609,7 +609,7 @@
               <span class="perm-name">{{ u.username }}</span>
               <span :class="['perm-role', u.role]">{{ u.role === 'admin' ? '管理员' : '用户' }}</span>
               <span class="perm-quota">{{ u.storage_quota ? u.storage_quota+'GB' : '无限制' }}</span>
-              <span class="perm-used">{{ fmtBytes(u.storage_used || 0) }}</span>
+              <span class="perm-used">{{ formatBytes(u.storage_used || 0) }}</span>
               <span class="perm-time">{{ u.created_at?.slice(0,10) }}</span>
               <span><a-button
                 size="mini"
@@ -707,6 +707,7 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { onBeforeRouteLeave } from 'vue-router'
 import api from '../services/api'
+import { formatBytes } from '../composables/useFormat'
 import { useToast } from '../composables/useToast.js'
 import ConfirmDialog from '../components/ui/ConfirmDialog.vue'
 import PromptsCard from '../components/settings/PromptsCard.vue'
@@ -774,7 +775,6 @@ async function doEditUser() {
   } catch (e) { toast.error('编辑失败') } finally { savingUser.value = false }
 }
 
-function fmtBytes(bytes) { if (!bytes) return '0 B'; const k = 1024; const s = ['B','KB','MB','GB']; const i = Math.floor(Math.log(bytes)/Math.log(k)); return parseFloat((bytes/Math.pow(k,i)).toFixed(1))+' '+s[i] }
 async function loadUsers() { try { const r = await api.get('/api/admin/users'); users.value = r.data.data || [] } catch (_) {} }
 async function createUser() { if (!newUser.username || !newUser.password) { toast.error('请填写用户名和密码'); return }; creatingUser.value = true; try { await api.post('/api/admin/users', { ...newUser }); Object.assign(newUser, { username: '', password: '', role: 'user', storage_quota: 0 }); loadUsers(); toast.success('已创建') } catch (e) { toast.error('创建失败') } finally { creatingUser.value = false } }
 async function deleteUser(id) { if (!await showConfirm('删除', '确定删除此用户？')) return; try { await api.delete('/api/admin/users/' + id); loadUsers(); toast.success('已删除') } catch (_) {} }

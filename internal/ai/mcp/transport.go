@@ -44,10 +44,14 @@ func StartTransport(command string, args []string, env map[string]string) (*Tran
 		return nil, fmt.Errorf("start %s: %w", command, err)
 	}
 
+	scanner := bufio.NewScanner(stdoutPipe)
+	// MCP servers can return large results (e.g., file_search with 500+ results).
+	// Default 64KB buffer is too small; use 4MB to handle large JSON-RPC responses.
+	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
 	return &Transport{
 		cmd:    cmd,
 		stdin:  stdin,
-		stdout: bufio.NewScanner(stdoutPipe),
+		stdout: scanner,
 	}, nil
 }
 

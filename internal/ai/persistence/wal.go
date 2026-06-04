@@ -200,10 +200,3 @@ func splitLines(s string) []string {
 	}
 	return lines
 }
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}

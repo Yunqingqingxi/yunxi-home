@@ -1,4 +1,4 @@
-﻿package nas
+package nas
 
 import (
 	"crypto/rand"

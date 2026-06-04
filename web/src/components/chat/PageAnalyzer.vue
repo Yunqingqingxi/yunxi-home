@@ -75,6 +75,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue'
 import { renderMarkdown } from '../../stores/chat'
+import { formatNum } from '../../composables/useFormat'
 
 const props = defineProps<{
   pageName: string
@@ -160,17 +161,17 @@ function collectSnapshot(d: any): CollectedItem[] {
       if (sys?.cpu_usage != null) items.push({ label: 'CPU 使用率', value: sys.cpu_usage.toFixed(1) + '%', color: cpuColor(sys.cpu_usage) })
       if (sys?.mem_percent != null) items.push({ label: '内存使用率', value: sys.mem_percent.toFixed(1) + '%', color: memColor(sys.mem_percent) })
       if (sys?.disk_percent != null) items.push({ label: '磁盘使用率', value: sys.disk_percent.toFixed(1) + '%', color: diskColor(sys.disk_percent) })
-      if (ai?.requests != null) items.push({ label: 'AI 总请求', value: fmtNum(ai.requests) })
+      if (ai?.requests != null) items.push({ label: 'AI 总请求', value: formatNum(ai.requests) })
       if (ai?.errors != null && ai?.requests > 0) items.push({ label: 'AI 错误率', value: (ai.errors / ai.requests * 100).toFixed(1) + '%', color: errColor(ai) })
-      if (ai?.input_tokens != null) items.push({ label: 'AI Token 用量', value: fmtNum((ai.input_tokens || 0) + (ai.output_tokens || 0)) })
+      if (ai?.input_tokens != null) items.push({ label: 'AI Token 用量', value: formatNum((ai.input_tokens || 0) + (ai.output_tokens || 0)) })
       if (ai?.tool_calls != null) items.push({ label: '工具调用次数', value: String(ai.tool_calls) })
       if (d.scheduler?.status) items.push({ label: 'DNS 调度器', value: d.scheduler.status })
       break
     case 'logs':
-      if (ai?.requests != null) items.push({ label: 'AI 请求', value: fmtNum(ai.requests) })
+      if (ai?.requests != null) items.push({ label: 'AI 请求', value: formatNum(ai.requests) })
       if (ai?.errors != null) items.push({ label: 'AI 错误数', value: String(ai.errors), color: ai.errors > 0 ? '#dc2626' : undefined })
       if (ai?.tool_calls != null) items.push({ label: '工具调用', value: String(ai.tool_calls) })
-      if (ai?.input_tokens != null) items.push({ label: 'Token 用量', value: fmtNum((ai.input_tokens || 0) + (ai.output_tokens || 0)) })
+      if (ai?.input_tokens != null) items.push({ label: 'Token 用量', value: formatNum((ai.input_tokens || 0) + (ai.output_tokens || 0)) })
       break
     case 'system':
       if (sys?.cpu_usage != null) items.push({ label: 'CPU 使用率', value: sys.cpu_usage.toFixed(1) + '%', color: cpuColor(sys.cpu_usage) })
@@ -195,11 +196,6 @@ function cpuColor(v: number) { return v > 80 ? '#dc2626' : v > 50 ? '#d97706' : 
 function memColor(v: number) { return v > 85 ? '#dc2626' : v > 60 ? '#d97706' : '#16a34a' }
 function diskColor(v: number) { return v > 85 ? '#dc2626' : v > 70 ? '#d97706' : '#16a34a' }
 function errColor(ai: any) { const r = ai.requests ? (ai.errors / ai.requests * 100) : 0; return r > 10 ? '#dc2626' : r > 3 ? '#d97706' : undefined }
-function fmtNum(n: number): string {
-  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M'
-  if (n >= 1000) return (n / 1000).toFixed(1) + 'K'
-  return String(n)
-}
 
 // ── Build context prompt with frozen snapshot ──
 function buildContext(items: CollectedItem[]): string {

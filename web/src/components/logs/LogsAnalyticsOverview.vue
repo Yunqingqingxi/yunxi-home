@@ -2,7 +2,7 @@
   <div class="analytics-overview">
     <div class="stat-card glass-card">
       <div class="stat-label"><span v-html="icons.chart"></span> 总请求</div>
-      <div class="stat-value">{{ fmtNum(analytics.total_requests) }}</div>
+      <div class="stat-value">{{ formatNum(analytics.total_requests) }}</div>
     </div>
     <div class="stat-card glass-card">
       <div class="stat-label">❌ 错误率</div>
@@ -34,7 +34,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { AnalyticsSummary, ToolStat } from '../../types/logs'
-import { fmtTokens, ICONS } from '../../stores/logs'
+import { ICONS } from '../../stores/logs'
+import { formatNum } from '../../composables/useFormat'
 const icons = ICONS
 
 const props = defineProps<{
@@ -51,13 +52,7 @@ const toolSuccessRate = computed(() => {
   return ((1 - errors / total) * 100).toFixed(1)
 })
 
-function fmtNum(n: number): string {
-  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M'
-  if (n >= 1000) return (n / 1000).toFixed(1) + 'K'
-  return String(n)
-}
-
-function fmtTok(n: number): string { return fmtTokens(n) }
+function fmtTok(n: number): string { return formatNum(n) }
 </script>
 
 <style scoped>

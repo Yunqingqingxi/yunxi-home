@@ -6,9 +6,9 @@
     <div class="event-header">
       <span class="event-icon" v-html="config.icon"></span>
       <span class="event-type">{{ config.label }}</span>
-      <span class="event-time">{{ formatTime(event.ts) }}</span>
+      <span class="event-time">{{ formatHMS(event.ts) }}</span>
       <span v-if="event.round" class="event-round">R{{ event.round }}</span>
-      <span v-if="event.tool_dur_ms" class="event-dur">{{ fmtDuration(event.tool_dur_ms) }}</span>
+      <span v-if="event.tool_dur_ms" class="event-dur">{{ formatDuration(event.tool_dur_ms) }}</span>
       <span v-if="event.risk_level" :class="['risk-badge', `risk-${event.risk_level}`]">
         {{ riskLabel(event.risk_level) }}
       </span>
@@ -76,7 +76,8 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { LogEvent, RiskLevel } from '../../types/logs'
-import { EVENT_TYPE_CONFIG, RISK_CONFIG, fmtDuration } from '../../stores/logs'
+import { EVENT_TYPE_CONFIG, RISK_CONFIG } from '../../stores/logs'
+import { formatDuration, formatHMS } from '../../composables/useFormat'
 import ToolCallCard from './ToolCallCard.vue'
 import ToolResultCard from './ToolResultCard.vue'
 import LLMCallCard from './LLMCallCard.vue'
@@ -93,9 +94,7 @@ const config = computed(() => EVENT_TYPE_CONFIG[props.event.type] || { icon: 'â€
 const hasLongContent = computed(() => (props.event.content?.length || 0) > 300)
 
 function formatTime(ts: string): string {
-  if (!ts) return ''
-  const m = ts.match(/(\d{2}:\d{2}:\d{2})/)
-  return m ? m[1] : ts.slice(11, 19) || ts
+  return formatHMS(ts)
 }
 
 function truncateText(text: string | undefined, max: number): string {
