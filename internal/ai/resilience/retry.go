@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"strings"
 	"time"
 )
 
@@ -38,8 +39,23 @@ func IsRetryable(err error) bool {
 	case errors.Is(err, ErrTemporary):
 		return true
 	default:
-		return false
+		return isTransientNetworkError(err)
 	}
+}
+
+// isTransientNetworkError 检测瞬时网络错误（unexpected EOF, connection reset 等）
+func isTransientNetworkError(err error) bool {
+	msg := err.Error()
+	for _, sub := range []string{
+		"unexpected EOF", "connection reset by peer",
+		"broken pipe", "TLS handshake timeout",
+		"no route to host", "i/o timeout",
+	} {
+		if strings.Contains(msg, sub) {
+			return true
+		}
+	}
+	return false
 }
 
 // IsFatal 判断错误是否致命（不可恢复）

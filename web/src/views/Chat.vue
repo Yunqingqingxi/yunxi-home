@@ -45,7 +45,6 @@
           <div class="sticky-panels"></div>
           <LockConflictNotice :conflicts="store.lockConflicts" />
           <TodoPanel :items="store.todoList" />
-          <AgentPanel :agents="store.agents" />
           <template
             v-for="(msg, i) in safeMessages"
             :key="msg?.id || ('_null_' + i)"

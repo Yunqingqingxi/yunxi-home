@@ -3,13 +3,16 @@ package agent
 import (
 	"context"
 	"fmt"
-	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 	"sync"
 	"time"
 
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/base"
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/observability"
+	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 )
+
+// AgentIDKey is used to inject agent ID into tool execution context.
+type AgentIDKey struct{}
 
 var log = logger.ForComponent("ai.agent")
 
@@ -47,6 +50,37 @@ func (m *Manager) SetProgressFn(fn ProgressFunc) ProgressFunc {
 	old := m.config.ProgressFn
 	m.config.ProgressFn = fn
 	return old
+}
+
+// ReportStatus 子Agent通过 agent_report 工具主动汇报状态。
+func (m *Manager) ReportStatus(agentID string, statusCode, progress int, message string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ag, ok := m.agents[agentID]
+	if !ok {
+		logger.ForComponent("ai.agent").Warn("ReportStatus: agent not found", "id", agentID)
+		return
+	}
+	ag.Summary = message
+	ag.ProgressPct = progress
+	ag.Progress = fmt.Sprintf("%d%%", progress)
+	// 状态码映射
+	switch {
+	case statusCode >= 500:
+		ag.Status = StatusError
+	case statusCode >= 400:
+		ag.Status = StatusDone // 明确返回404也算完成
+	default:
+		ag.Status = StatusDone
+	}
+	if ag.progressFn != nil {
+		func() {
+			defer func() { recover() }()
+			ag.progressFn(ag, "agent_result")
+		}()
+	}
+	logger.ForComponent("ai.agent").Info("子Agent状态已汇报",
+		"id", agentID, "status", statusCode, "progress", progress)
 }
 
 // Spawn 创建并启动一个子 Agent。
@@ -289,12 +323,16 @@ func (m *Manager) runAgent(agent *SubAgent, parentID string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), agentTimeout)
 	defer cancel()
+	ctx = context.WithValue(ctx, AgentIDKey{}, agent.ID) // 注入AgentID供 agent_report 工具使用
 	messages := []base.Message{
 		{Role: "system", Content: fmt.Sprintf(
 			"你是一个子任务执行 Agent。你的唯一目标是完成以下任务:\n%s\n\n"+
-				"规则:\n- 只使用已分配的工具\n- 保持简洁高效\n- 完成后用一句话总结结果\n"+
-				"- 最多执行 %d 轮\n"+
-				"- 输出中的每个文件必须用 [文件: 文件名 (完整路径)] 格式引用，例: [文件: report.html (/data/report.html)]",
+			"规则:\n- 只使用已分配的工具\n- 保持简洁高效\n- **任务完成时必须调用 agent_report(status, progress, message) 汇报**\n"+
+			"  status: 200=成功 404=未找到 500=失败\n"+
+			"  progress: 0-100 完成百分比\n"+
+					"  message: 结果摘要\n"+
+					"- 最多执行 %d 轮\n"+
+					"- 输出中的每个文件必须用 [文件: 文件名 (完整路径)] 格式引用",
 			agent.Goal, m.config.MaxRounds,
 		)},
 	}

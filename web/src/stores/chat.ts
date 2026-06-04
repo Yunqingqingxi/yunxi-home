@@ -585,6 +585,14 @@ export const useChatStore = defineStore('chat', () => {
           _v: ++_msgVersion,
           createdAt: Date.now(),
         } as ChatMessage)
+        // 子Agent完成时自动恢复主Agent处理结果
+        if (isOk && targetSid && !targetSid.startsWith('qqbot_')) {
+          setTimeout(() => {
+            if (sessionId.value === targetSid && getLifecycle(targetSid) !== 'streaming') {
+              sendMessage('继续', '', {})
+            }
+          }, 500)
+        }
       }
       return
     }
@@ -658,13 +666,16 @@ export const useChatStore = defineStore('chat', () => {
       const clean = t === 'content' ? stripFileMarkers(raw) : raw
       if (t === 'content' && !clean) return
       if (!msg.blocks) msg.blocks = []
-      const last = msg.blocks.length > 0 ? msg.blocks[msg.blocks.length - 1] : null
-      if (last && last.type === t) {
-        // 原地突变，避免新建数组
-        msg.blocks[msg.blocks.length - 1] = { type: t, content: (last.content || '') + clean }
-      } else {
-        if (clean) msg.blocks.push({ type: t, content: clean })
+      // 查找是否已有同类型 block（而非只看最后一个），避免多轮对话产生重复 block
+      let found = false
+      for (let i = msg.blocks.length - 1; i >= 0; i--) {
+        if (msg.blocks[i].type === t) {
+          msg.blocks[i] = { type: t, content: (msg.blocks[i].content || '') + clean }
+          found = true
+          break
+        }
       }
+      if (!found && clean) msg.blocks.push({ type: t, content: clean })
       msg._v = ++_msgVersion
     } else if (t === 'tool_call') {
       if (!msg.blocks) msg.blocks = []
@@ -686,7 +697,7 @@ export const useChatStore = defineStore('chat', () => {
       msg._v = ++_msgVersion
 
       const hasPendingTools = msg.blocks.some((b: any) => b.type === 'tool' && !b.result)
-      if (!hasPendingTools && blocks.length > 0) {
+      if (!hasPendingTools && msg.blocks.length > 0) {
         finalizeOne(msg)
         const newIdx = addAssistantPlaceholder()
         streamingPlaceholders.value = [...streamingPlaceholders.value, newIdx]

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -352,15 +353,23 @@ func (s *Service) buildQQBotPrompt() string {
 	if s.promptStore == nil {
 		return ""
 	}
-	// QQ Bot uses general prompts + QQ-specific rules
+	// QQ Bot uses general prompts + QQ-specific rules + memory
 	general := s.promptStore.BuildGeneralPrompt()
 	qqSpecific := s.promptStore.GetSpecializedPrompt("spec_qqbot")
+	result := general
 	if qqSpecific != "" {
+		result += "\n" + qqSpecific
 		log.Warn("QQBot提示词组装", "general_len", len(general), "qq_specific", true, "qq_len", len(qqSpecific))
-		return general + "\n" + qqSpecific
+	} else {
+		log.Warn("QQBot提示词组装", "general_len", len(general), "qq_specific", false, "warning", "spec_qqbot 未找到")
 	}
-	log.Warn("QQBot提示词组装", "general_len", len(general), "qq_specific", false, "warning", "spec_qqbot 未找到")
-	return general
+	// 追加持久记忆摘要
+	if s.memoryManager != nil {
+		if summary := s.memoryManager.SummarizeCompact(); summary != "" {
+			result += "\n\n" + summary
+		}
+	}
+	return result
 }
 func (s *Service) SetMCPSubsystem(sub *mcp.Subsystem) { s.mcpSubsystem = sub }
 func (s *Service) GetMCPSubsystem() *mcp.Subsystem    { return s.mcpSubsystem }
@@ -528,16 +537,21 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userID, userMessage
 			}()
 			eb.publish(ev)
 
-			// Persist agent result to session history for page refresh survival
+			// Persist agent result + auto-resume main agent
 			if eventType == "agent_result" {
-				status := "完成"
-				if a.Status == agent.StatusError {
-					status = "失败"
-				}
-				resultMsg := fmt.Sprintf("[子Agent %s] %s | 目标: %s | 结果: %s",
-					a.ID, status, a.Goal, a.Summary)
-				s.SaveSystemMessage(sessionID, resultMsg)
+			status := "完成"
+			if a.Status == agent.StatusError {
+			status = "失败"
 			}
+			resultMsg := fmt.Sprintf("[子Agent %s] %s | 目标: %s | 结果: %s",
+			a.ID, status, a.Goal, a.Summary)
+			s.SaveSystemMessage(sessionID, resultMsg)
+			 // 自动恢复主Agent：子Agent完成后注入消息触发AI继续处理
+					if !s.HasActiveStream(sessionID) {
+						log.Info("子Agent完成，自动恢复主Agent", "session", sessionID, "agent", a.ID)
+						s.InjectMessage(sessionID, fmt.Sprintf("[系统] 子Agent %s 已完成，请继续处理。%s", a.ID, resultMsg))
+					}
+				}
 		})
 		defer s.agentMgr.SetProgressFn(oldAgentFn)
 		// ── End agent progress routing ──
@@ -708,7 +722,9 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userID, userMessage
 			}
 
 			// ── ForceTools 检查（拓扑激活时）──
-			if topoActive && s.tracker != nil {
+			// 仅在 X 坐标确实停滞 2+ 轮时才触发，避免 AI 正常使用同工具（如分块读文件）被误打断
+			log.Info("ForceTools guard check", "round", state.round, "noProgress", state.noProgressToolRounds, "topoActive", topoActive, "hasTracker", s.tracker != nil)
+			if topoActive && s.tracker != nil && state.noProgressToolRounds >= 2 {
 				if forcedTool := s.tracker.ShouldForceTools(sessionID, s.recentToolNames(history, 10), state.consecutiveToolFailures + state.sameToolRepetitions); forcedTool != "" {
 					log.Info("ForceTools 触发", "会话", sessionID, "工具", forcedTool, "轮次", state.round)
 					s.chatLogger.LogRoundStart(sessionID, state.round, len(history), len(allTools))
@@ -725,7 +741,7 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userID, userMessage
 			}
 
 			// ── ForceTools：进度过半且关键工具缺失时跳过 LLM ──
-			if topoActive && s.tracker != nil {
+			if topoActive && s.tracker != nil && state.noProgressToolRounds >= 2 {
 				recentTools := s.extractRecentToolNames(history, 10)
 				if forceTool := s.tracker.ShouldForceTools(sessionID, recentTools, state.consecutiveToolFailures + state.sameToolRepetitions); forceTool != "" {
 					trackerSt := s.tracker.GetState(sessionID)
@@ -762,12 +778,12 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userID, userMessage
 					reasoningBuf.WriteString(ev.Content)
 					appendBlock(&roundBlocks, base.BlockTypeThinking, ev.Content, "", "", "")
 					emit(ev)
-					log.Debug("AI块输出", "session", sessionID, "round", state.round, "type", "thinking", "len", len([]rune(ev.Content)), "preview", truncateStr(ev.Content, 80))
+					log.Debug("AI块输出", "session", sessionID, "round", state.round, "type", "thinking", "len", len([]rune(ev.Content)))
 				case "content":
 				contentBuf.WriteString(ev.Content)
 				appendBlock(&roundBlocks, base.BlockTypeContent, ev.Content, "", "", "")
 				emit(ev)
-					log.Debug("AI块输出", "session", sessionID, "round", state.round, "type", "content", "len", len([]rune(ev.Content)), "preview", truncateStr(ev.Content, 80))
+					log.Debug("AI块输出", "session", sessionID, "round", state.round, "type", "content", "len", len([]rune(ev.Content)))
 						// 流式持久化：每 500 字符保存一次，防止刷新丢失 AI 回复内容
 						contentRunes := []rune(contentBuf.String())
 						if len(contentRunes)%500 < len([]rune(ev.Content)) {
@@ -1094,14 +1110,9 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userID, userMessage
 				finalContent = "抱歉，我没有生成回复。"
 			}
 
-			// ── 任务完成度检测：用几何距离替代启发式规则 ──
-			// 豁免条件（不拦截）：
-			//   1. AI 已生成有实质的回复（≥80字符）
-			//   2. 上一轮已派生后台 Agent/后台任务处理
-			//   3. 回复中已包含文件引用（发文件=任务完成）
-			shouldIntercept := len(finalContent) < 80 &&
-					!strings.Contains(finalContent, "[文件:") &&
-					!s.hasRecentBackgroundTool(history, 2)
+			// ── 任务完成度检测 ──
+			// 仅当 AI 没有任何工具调用且输出为空时才拦截
+			shouldIntercept := finalContent == "" && len(toolCalls) == 0
 			isStuckWithTools := state.noProgressToolRounds >= 3 && len(toolCalls) > 0
 			if completed, dist := s.checkCompletionDistance(sessionID); !completed &&
 				(len(toolCalls) == 0 || isStuckWithTools) && state.taskAbandonCount < 3 &&
@@ -1155,32 +1166,28 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userID, userMessage
 			emit(base.ChatStreamEvent{Type: "done", Content: fmt.Sprintf("%d", totalDur)})
 
 			// ── 用户适应层：记录会话结束 ──
-			if s.adaptLayer != nil && userID != "" {
-				taskCat := s.adaptLayer.InferTaskCategory(userID, userMessage)
+			// TODO: 实时上下文余量 — 接入 budget.NeedsCompact() + 精准 token 计数
+			if s.adaptLayer != nil {
+				uid := userID
+				if uid == "" { uid = sessionID }
+				taskCat := s.adaptLayer.InferTaskCategory(uid, userMessage)
 				toolSuccesses := state.round - state.consecutiveToolFailures
-				if toolSuccesses < 0 {
-					toolSuccesses = 0
-				}
+				if toolSuccesses < 0 { toolSuccesses = 0 }
 				trustLocked := false
 				if s.tracker != nil {
 					if trackerSt := s.tracker.GetState(sessionID); trackerSt != nil {
 						trustLocked = trackerSt.Trust.Locked
 					}
 				}
+				// TODO: budget.NeedsCompact() → context_window_used_pct
 				summary := &adapt.SessionSummary{
-					SessionID:     sessionID,
-					UserID:        userID,
-					TaskCategory:  taskCat,
-					Rounds:        state.round,
-					ToolCalls:     state.round, // approximate
-					ToolSuccesses: toolSuccesses,
-					ToolFailures:  state.consecutiveToolFailures,
-					TokensIn:      0,
-					TokensOut:     0,
-					TrustLocked:   trustLocked,
-					Completed:     true,
-					DurationSec:   time.Since(startTime).Seconds(),
-					Timestamp:     time.Now().UTC(),
+					SessionID: sessionID, UserID: uid, TaskCategory: taskCat,
+					Rounds: state.round, ToolCalls: state.round,
+					ToolSuccesses: toolSuccesses, ToolFailures: state.consecutiveToolFailures,
+					TokensIn: 0, TokensOut: 0, // TODO: 从 session state 取实际值
+					TrustLocked: trustLocked, Completed: true,
+					DurationSec: time.Since(startTime).Seconds(),
+					Timestamp: time.Now().UTC(),
 				}
 				s.adaptLayer.OnSessionEnd(bgCtx, summary)
 			}
@@ -2353,6 +2360,124 @@ func (s *Service) RegisterAgentTools() {
 	// spawn_agent — 派生并行子 Agent
 	s.registry.Register(agent.ToolDef(s.agentMgr))
 
+	// agent_report — 子Agent完成任务后汇报状态（结构化参数保证稳定性）
+	s.registry.Register(&base.ToolDef{
+		Name:        "agent_report",
+		Description: "子Agent任务完成时调用此工具汇报状态。status: 200=成功, 404=未找到目标, 500=执行失败。progress: 0-100 完成百分比。message: 任务结果摘要。**每个子Agent结束时必须调用**",
+		Category:    "agent",
+		RiskLevel:   "readonly",
+		Parameters: base.ToolParams{
+			Type: "object",
+			Properties: map[string]base.ParamProp{
+				"status":   {Type: "integer", Description: "HTTP风格状态码: 200=成功, 404=目标不存在, 500=执行错误"},
+				"progress": {Type: "integer", Description: "任务完成进度 0-100"},
+				"message":  {Type: "string", Description: "任务结果摘要（包含具体发现、文件列表等）"},
+			},
+			Required: []string{"status", "progress", "message"},
+		},
+		Handler: func(ctx context.Context, args map[string]any) (string, error) {
+			status := 200
+			if v, ok := args["status"]; ok {
+				switch n := v.(type) {
+				case float64: status = int(n)
+				case int: status = n
+				}
+			}
+			progress := 100
+			if v, ok := args["progress"]; ok {
+				switch n := v.(type) {
+				case float64: progress = int(n)
+				case int: progress = n
+				}
+			}
+			message := ""
+			if v, ok := args["message"].(string); ok { message = v }
+			agentID, _ := ctx.Value(agent.AgentIDKey{}).(string)
+			if agentID != "" {
+				s.agentMgr.ReportStatus(agentID, status, progress, message)
+			}
+			statusText := "成功"
+			switch {
+			case status >= 500: statusText = "失败"
+			case status >= 400: statusText = "未找到"
+			}
+			return fmt.Sprintf("[%d %s] 进度=%d%% | %s", status, statusText, progress, message), nil
+		},
+	})
+
+	// _install_skill — 静默安装 skill 到 /opt/yunxi-home/skills/
+	s.registry.Register(&base.ToolDef{
+		Name: "_install_skill", Category: "system", RiskLevel: "mutation",
+		Description: "将技能 YAML 安装到 /opt/yunxi-home/skills/{name}.yaml。name=技能名, content=YAML内容。",
+		Parameters: base.ToolParams{
+			Type: "object",
+			Properties: map[string]base.ParamProp{
+				"name":    {Type: "string", Description: "技能文件名（不含.yaml后缀）"},
+				"content": {Type: "string", Description: "技能的完整 YAML 内容"},
+			},
+			Required: []string{"name", "content"},
+		},
+		Handler: func(ctx context.Context, args map[string]any) (string, error) {
+			name, _ := args["name"].(string)
+			content, _ := args["content"].(string)
+			if name == "" || content == "" { return "", fmt.Errorf("name和content不能为空") }
+			// 安全检查：只允许字母数字连字符下划线
+			for _, c := range name {
+				if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_') {
+					return "", fmt.Errorf("非法技能名: %s", name)
+				}
+			}
+			path := filepath.Join("/opt/yunxi-home/skills", name, name+".yml")
+			if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil { return "", err }
+			if err := os.WriteFile(path, []byte(content), 0644); err != nil { return "", err }
+			s.ReloadSkills()
+			return fmt.Sprintf("技能已安装: %s.yml → /opt/yunxi-home/skills/%s/", name, name), nil
+		},
+	})
+	// _install_mcp — 静默安装 MCP 到 /opt/yunxi-home/mcp.json
+	s.registry.Register(&base.ToolDef{
+		Name: "_install_mcp", Category: "system", RiskLevel: "mutation",
+		Description: "安装 MCP 服务器到 /opt/yunxi-home/mcp.json。server_name=MCP名, command=启动命令, args=参数数组JSON, env=环境变量JSON(可选)。",
+		Parameters: base.ToolParams{
+			Type: "object",
+			Properties: map[string]base.ParamProp{
+				"server_name": {Type: "string", Description: "MCP 服务器名称"},
+				"command":     {Type: "string", Description: "启动命令（如 npx, python3, uvx）"},
+				"args":        {Type: "string", Description: "JSON 数组字符串，如 [\"-y\",\"pkg\"]"},
+				"env":         {Type: "string", Description: "JSON 对象字符串，如 {\"KEY\":\"val\"}（可选）"},
+			},
+			Required: []string{"server_name", "command", "args"},
+		},
+		Handler: func(ctx context.Context, args map[string]any) (string, error) {
+			serverName, _ := args["server_name"].(string)
+			command, _ := args["command"].(string)
+			argsStr, _ := args["args"].(string)
+			envStr, _ := args["env"].(string)
+			if serverName == "" || command == "" { return "", fmt.Errorf("参数不完整") }
+			// 读取现有 mcp.json
+			mcpPath := "/opt/yunxi-home/mcp.json"
+			data, err := os.ReadFile(mcpPath)
+			if err != nil && !os.IsNotExist(err) { return "", err }
+			mcpConfig := make(map[string]any)
+			if len(data) > 0 { json.Unmarshal(data, &mcpConfig) }
+			servers, _ := mcpConfig["mcpServers"].(map[string]any)
+			if servers == nil { servers = make(map[string]any); mcpConfig["mcpServers"] = servers }
+			// 解析 args
+			var parsedArgs []string
+			if argsStr != "" { json.Unmarshal([]byte(argsStr), &parsedArgs) }
+			entry := map[string]any{"command": command, "args": parsedArgs}
+			if envStr != "" {
+				var parsedEnv map[string]string
+				if json.Unmarshal([]byte(envStr), &parsedEnv) == nil { entry["env"] = parsedEnv }
+			}
+			servers[serverName] = entry
+			out, _ := json.MarshalIndent(mcpConfig, "", "  ")
+			if err := os.WriteFile(mcpPath, out, 0644); err != nil { return "", err }
+			s.ReloadMCPTools(mcpPath)
+			return fmt.Sprintf("MCP已安装: %s → %s", serverName, mcpPath), nil
+		},
+	})
+
 	// todo_write — 创建/更新任务列表
 	s.registry.Register(todo.ToolDef(s.todoMgr, func(sessionID string, lst *todo.List) {
 		s.InjectMessage(sessionID, fmt.Sprintf("todos updated: %d items", len(lst.Items)))
@@ -2939,7 +3064,12 @@ func (s *Service) dispatchBackground(tool *base.ToolDef, funcName string, args m
 
 func appendBlock(blocks *[]base.ContentBlock, typ base.ContentBlockType, content, toolName, toolArgs, toolCallID string) {
 	if len(*blocks) > 0 && (*blocks)[len(*blocks)-1].Type == typ {
-		(*blocks)[len(*blocks)-1].Content += content
+		// 替换为新对象，确保前端 Vue 响应式检测到变化
+		prev := (*blocks)[len(*blocks)-1]
+		(*blocks)[len(*blocks)-1] = base.ContentBlock{
+			Type: typ, Content: prev.Content + content,
+			ToolName: prev.ToolName, ToolArgs: prev.ToolArgs, ToolCallID: prev.ToolCallID,
+		}
 		return
 	}
 	*blocks = append(*blocks, base.ContentBlock{Type: typ, Content: content, ToolName: toolName, ToolArgs: toolArgs, ToolCallID: toolCallID})
@@ -3132,6 +3262,9 @@ var silentTools = map[string]bool{
 	"remember":                     true,
 	"request_confirmation":         true,
 	"spawn_agent":                  true,
+	"agent_report":                 true,
+	"_install_skill":               true,
+	"_install_mcp":                 true,
 	"activate_specialized_context": true,
 }
 

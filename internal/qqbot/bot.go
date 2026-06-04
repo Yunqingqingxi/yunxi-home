@@ -1,13 +1,15 @@
-﻿package qqbot
+package qqbot
 
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -53,15 +55,15 @@ type SkillRunner interface {
 
 // AIService AI 对话服务接口（避免循环依赖）
 type AIService interface {
-		StreamChat(ctx context.Context, sessionID, userID, userMessage string) <-chan AIEvent
-		InjectSystemMessage(sessionID, content string)
-		ClearSession(sessionID string)
-		CompactSession(sessionID string) string
-		ReloadSkills() error
-		ReloadMCP() error
-		CreateSkill(ctx context.Context, description string) (string, error)
-		GetMCPServer(ctx context.Context, query string) string
-	}
+	StreamChat(ctx context.Context, sessionID, userID, userMessage string) <-chan AIEvent
+	InjectSystemMessage(sessionID, content string)
+	ClearSession(sessionID string)
+	CompactSession(sessionID string) string
+	ReloadSkills() error
+	ReloadMCP() error
+	CreateSkill(ctx context.Context, description string) (string, error)
+	GetMCPServer(ctx context.Context, query string) string
+}
 
 // AIEvent AI 流式事件
 type AIEvent struct {
@@ -72,20 +74,20 @@ type AIEvent struct {
 
 // Bot QQ 机器人
 type Bot struct {
-	cfg         Config
-	api         openapi.OpenAPI
-	tokenSource oauth2.TokenSource
-	handlers    map[string]Handler
-	aiService   AIService
-	skillRunner SkillRunner
-	msgLimiter  *rate.Limiter
-	mu          sync.RWMutex
+	cfg            Config
+	api            openapi.OpenAPI
+	tokenSource    oauth2.TokenSource
+	handlers       map[string]Handler
+	aiService      AIService
+	skillRunner    SkillRunner
+	msgLimiter     *rate.Limiter
+	mu             sync.RWMutex
 	lastCmd        map[string]string
 	cmdMu          sync.RWMutex
 	botUser        *dto.User // 机器人自身信息
 	filePromptSent map[string]bool
 	promptMu       sync.Mutex
-	online         bool                // WebSocket 连接状态
+	online         bool // WebSocket 连接状态
 	statusMu       sync.RWMutex
 	sessionMgr     botgo.SessionManager // 复用 session 以支持断线恢复
 }
@@ -110,11 +112,11 @@ func New(cfg Config) (*Bot, error) {
 	}
 
 	return &Bot{
-		cfg:         cfg,
-		api:         botgo.NewOpenAPI(cfg.AppID, tokenSource),
-		tokenSource: tokenSource,
-		sessionMgr:  botgo.NewSessionManager(),
-		handlers:    make(map[string]Handler),
+		cfg:            cfg,
+		api:            botgo.NewOpenAPI(cfg.AppID, tokenSource),
+		tokenSource:    tokenSource,
+		sessionMgr:     botgo.NewSessionManager(),
+		handlers:       make(map[string]Handler),
 		msgLimiter:     rate.NewLimiter(rate.Every(2*time.Second), 3),
 		lastCmd:        make(map[string]string),
 		filePromptSent: make(map[string]bool),
@@ -344,27 +346,33 @@ func (b *Bot) handleAIChat(ctx context.Context, userID, message string) (string,
 	// 文件发送指令：通过系统消息注入，不污染用户可见的聊天记录
 	if !b.hasSeenFilePrompt(userID) {
 		b.aiService.InjectSystemMessage(sessionID,
-			"[系统指令] 当你要发送文件给用户时，**必须**在回复中使用 `[文件: 文件名 (/path/to/file)]` 格式标记每个文件。"+
-				"然后正常回复文字说明。这样文件才会被实际发送。")
+			"[系统指令] 发送文件流程：用 recall/file_search 找到文件路径 → **立即**返回 `[文件: 显示名 (/沙箱路径)]`。"+
+				"不要逐段读取文件内容，文件会被直接发送给用户。一行格式示例：`[文件: 设计文档.md (/docs/design.md)]`。"+
+				"即使文件很大也只需标记引用，系统会自动传输。在 `[文件: ...]` 后加一句简短说明即可。")
 		b.markFilePromptSent(userID)
 	}
 
-	stream := b.aiService.StreamChat(ctx, sessionID, "", message)
+	stream := b.aiService.StreamChat(ctx, sessionID, userID, message)
 
 	var contentBuf strings.Builder
+	var hadToolResult bool
 
 	for ev := range stream {
 		switch ev.Type {
 		case "thinking":
 		case "content":
+			// 工具结果后的第一段 content 覆盖旧内容（只保留最终轮次回复）
+			if hadToolResult {
+				contentBuf.Reset()
+				hadToolResult = false
+			}
 			contentBuf.WriteString(ev.Content)
 		case "tool_result":
-			// Reset buffer after each tool result — only keep the FINAL round's content.
-			// Prevents multi-round accumulated intermediate text from being sent as duplicates.
-			contentBuf.Reset()
+			hadToolResult = true
 		case "tool_call":
 		case "error":
-			return fmt.Sprintf("AI 服务异常: %s", ev.Content), false
+			return ev.Content, false
+		case "done":
 		}
 	}
 
@@ -391,8 +399,14 @@ func (b *Bot) sendC2CFile(ctx context.Context, userID, filePath, fileName string
 		return fmt.Errorf("读取文件信息失败: %w", err)
 	}
 	fileSize := st.Size()
+	// 上传用 ASCII 文件名，避免中文名被 QQ 丢弃导致显示"未命名"
+	uploadName := sanitizeFilename(fileName)
+	if uploadName != fileName {
+		log.Info("QQ Bot filename sanitized", "original", fileName, "upload", uploadName)
+	}
+	log.Info("QQ Bot sendC2CFile", "filePath", filePath, "fileName", fileName, "size", fileSize)
 
-	ext := strings.ToLower(filepath.Ext(fileName))
+	ext := strings.ToLower(filepath.Ext(uploadName))
 	fileType := 1 // 默认图片
 	switch ext {
 	case ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp":
@@ -405,31 +419,44 @@ func (b *Bot) sendC2CFile(ctx context.Context, userID, filePath, fileName string
 		fileType = 4 // 普通文件
 	}
 
-	// Step 1: 上传文件
+	// ── 发送前指纹：记录文件哈希和内容头 ──
+	fileBytes, _ := os.ReadFile(filePath)
+	fileHash := sha256.Sum256(fileBytes)
+	hashStr := hex.EncodeToString(fileHash[:])
+	headLen := min(100, len(fileBytes))
+	log.Info("QQ Bot 发送前指纹", "file", fileName, "sha256", hashStr, "size", fileSize,
+		"head_hex", hex.EncodeToString(fileBytes[:headLen]))
+
+	// Step 1: 上传文件（文档类始终用 multipart，Content-Disposition 保留文件名）
 	var fileInfo []byte
 	const largeFileThreshold = 10 * 1024 * 1024 // 10MB
-	if fileSize < largeFileThreshold {
-		fileData, err := os.ReadFile(filePath)
-		if err != nil {
-			return fmt.Errorf("读取文件失败: %w", err)
-		}
-		fileInfo, err = b.uploadC2CFileBase64(ctx, userID, fileData, fileName, fileType)
+	useMultipart := fileSize >= largeFileThreshold
+	log.Info("QQ Bot upload strategy", "fileType", fileType, "fileSize", fileSize, "useMultipart", useMultipart, "file", fileName)
+	if !useMultipart {
+		fileInfo, err = b.uploadC2CFileBase64(ctx, userID, fileBytes, uploadName, fileType)
 		if err != nil {
 			return fmt.Errorf("上传QQ文件失败: %w", err)
 		}
 	} else {
 		var err error
-		fileInfo, err = b.uploadC2CFileMultipart(ctx, userID, filePath, fileName, fileType, fileSize)
+		fileInfo, err = b.uploadC2CFileMultipart(ctx, userID, filePath, uploadName, fileType, fileSize)
 		if err != nil {
 			return fmt.Errorf("上传QQ大文件失败: %w", err)
 		}
 	}
 
 	// Step 2: 发送富媒体消息
-	sendBody := fmt.Sprintf(`{"msg_type":7,"media":{"file_info":"%s"}}`, string(fileInfo))
+	sendMsg := map[string]any{
+		"msg_type": 7,
+		"media": map[string]any{
+			"file_info": string(fileInfo),
+			"file_name": uploadName,
+		},
+	}
+	sendBody, _ := json.Marshal(sendMsg)
 	sendReq, _ := http.NewRequestWithContext(ctx, "POST",
 		fmt.Sprintf("https://api.sgroup.qq.com/v2/users/%s/messages", userID),
-		bytes.NewReader([]byte(sendBody)))
+		bytes.NewReader(sendBody))
 	sendReq.Header.Set("Content-Type", "application/json")
 	sendReq.Header.Set("Authorization", "QQBot "+b.getAccessToken())
 
@@ -455,6 +482,7 @@ func (b *Bot) uploadC2CFileBase64(ctx context.Context, userID string, data []byt
 		"url":          "",
 		"srv_send_msg": false,
 		"file_data":    base64.StdEncoding.EncodeToString(data),
+		"filename":     fileName,
 	}
 	body, _ := json.Marshal(payload)
 
@@ -485,6 +513,7 @@ func (b *Bot) uploadC2CFileBase64(ctx context.Context, userID string, data []byt
 		FileInfo string `json:"file_info"`
 	}
 	json.Unmarshal(respBody, &result)
+	log.Info("QQ Bot 上传响应", "file_uuid", result.FileUUID, "file_info", result.FileInfo, "filename", fileName)
 	if result.FileInfo != "" {
 		return []byte(result.FileInfo), nil
 	}
@@ -502,32 +531,26 @@ func (b *Bot) uploadC2CFileMultipart(ctx context.Context, userID, filePath, file
 	}
 	defer f.Close()
 
-	pr, pw := io.Pipe()
-	mw := multipart.NewWriter(pw)
-
-	// 异步写入 multipart body
-	go func() {
-		defer pw.Close()
-		defer mw.Close()
-
-		// file_type 字段
-		mw.WriteField("file_type", fmt.Sprintf("%d", fileType))
-		mw.WriteField("srv_send_msg", "false")
-
-		// 文件流
-		part, err := mw.CreateFormFile("file", fileName)
-		if err != nil {
-			log.Error("QQ Bot multipart: 创建文件字段失败", "error", err)
-			return
-		}
-		written, err := io.Copy(part, f)
-		if err != nil {
-			log.Error("QQ Bot multipart: 写入文件流失败", "error", err, "written", written)
-		}
-	}()
+	// 同步写入 multipart body 到 buffer，消除 goroutine+pipe 竞态
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	mw.WriteField("file_type", fmt.Sprintf("%d", fileType))
+	mw.WriteField("srv_send_msg", "false")
+	part, err := mw.CreateFormFile("file", fileName)
+	if err != nil {
+		f.Close()
+		return nil, fmt.Errorf("创建文件字段失败: %w", err)
+	}
+	written, err := io.Copy(part, f)
+	f.Close()
+	mw.Close()
+	if err != nil {
+		return nil, fmt.Errorf("写入文件流失败: %w (written=%d)", err, written)
+	}
+	log.Info("QQ Bot multipart body", "fields", 2, "file_written", written, "total_bytes", buf.Len())
 
 	apiURL := fmt.Sprintf("https://api.sgroup.qq.com/v2/users/%s/files", userID)
-	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, pr)
+	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, &buf)
 	if err != nil {
 		return nil, err
 	}
@@ -589,24 +612,24 @@ func (b *Bot) extractAndSendFiles(ctx context.Context, userID, text string) stri
 		return text
 	}
 	for _, m := range matches {
-	name := m[1]
-	p := m[2]
-	// 自动补全扩展名：如果显示名没有后缀，从路径中提取
-	if filepath.Ext(name) == "" {
-		if ext := filepath.Ext(p); ext != "" {
-			name = name + ext
+		name := m[1]
+		p := m[2]
+		// 自动补全扩展名：如果显示名没有后缀或后缀仅为"."，从路径中提取
+		if ext := filepath.Ext(name); ext == "" || ext == "." {
+			if pathExt := filepath.Ext(p); pathExt != "" {
+				name = strings.TrimRight(name, ".") + pathExt
+			}
 		}
-	}
-	// 沙箱路径 → 真实文件系统路径（始终拼 SandboxRoot）
-	fullPath := filepath.Join(b.cfg.SandboxRoot, strings.TrimPrefix(p, "/")) // TrimPrefix 防止绝对路径覆盖
-	if _, err := os.Stat(fullPath); err == nil {
-	 log.Debug("QQ Bot 检测到文件引用，准备发送", "name", name, "path", fullPath)
-	 if err := b.sendC2CFile(ctx, userID, fullPath, name); err != nil {
-	 log.Warn("QQ Bot 发送文件失败", "name", name, "error", err)
-	}
-	} else {
-	log.Warn("QQ Bot 文件不存在，跳过发送", "name", name, "path", fullPath, "error", err)
-	}
+		// 沙箱路径 → 真实文件系统路径（始终拼 SandboxRoot）
+		fullPath := filepath.Join(b.cfg.SandboxRoot, strings.TrimPrefix(p, "/"))
+		if _, err := os.Stat(fullPath); err == nil {
+			log.Debug("QQ Bot 检测到文件引用，准备发送", "name", name, "path", fullPath)
+			if err := b.sendC2CFile(ctx, userID, fullPath, name); err != nil {
+				log.Warn("QQ Bot 发送文件失败", "name", name, "error", err)
+			}
+		} else {
+			log.Warn("QQ Bot 文件不存在，跳过发送", "name", name, "path", fullPath, "error", err)
+		}
 	}
 	// 去掉文件引用标记，保留纯文本
 	result := fileRefRe.ReplaceAllString(text, "")
@@ -814,8 +837,8 @@ func (b *Bot) SendGroupMarkdown(ctx context.Context, markdownText string) error 
 	chunks := chunkMarkdown(markdownText)
 	for _, chunk := range chunks {
 		msg := &dto.MessageToCreate{
-		MsgType:  2,
-		Markdown: &dto.Markdown{Content: chunk},
+			MsgType:  2,
+			Markdown: &dto.Markdown{Content: chunk},
 		}
 		if _, err := b.api.PostGroupMessage(ctx, b.cfg.GroupID, msg); err != nil {
 			// 降级纯文本
@@ -994,4 +1017,36 @@ func parseCommand(content string) (string, []string) {
 		return "", nil
 	}
 	return strings.ToLower(parts[0]), parts[1:]
+}
+
+// sanitizeFilename converts non-ASCII filenames to safe ASCII to prevent QQ from stripping extensions.
+func sanitizeFilename(name string) string {
+	ext := filepath.Ext(name)
+	base := name[:len(name)-len(ext)]
+	// If already pure ASCII, keep as-is
+	if isASCII(base) && !strings.Contains(base, " ") {
+		return name
+	}
+	// Generate short ASCII name from hash, preserving extension
+	h := fnvHash(base)
+	safe := fmt.Sprintf("file_%s%s", h[:8], ext)
+	return safe
+}
+
+func isASCII(s string) bool {
+	for _, r := range s {
+		if r > 127 {
+			return false
+		}
+	}
+	return true
+}
+
+func fnvHash(s string) string {
+	h := uint32(2166136261)
+	for _, c := range s {
+		h ^= uint32(c)
+		h *= 16777619
+	}
+	return fmt.Sprintf("%08x", h)
 }

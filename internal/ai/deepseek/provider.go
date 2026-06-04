@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/base"
+	"github.com/Yunqingqingxi/yunxi-home/internal/ai/resilience"
 )
 
 var log = logger.ForComponent("deepseek")
@@ -219,34 +220,56 @@ func (p *Provider) ChatStream(ctx context.Context, messages []base.Message, tool
 		Thinking: thinking,
 	}
 
-	body, _ := json.Marshal(reqBody)
-	req, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/chat/completions", strings.NewReader(string(body)))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+p.apiKey)
-	req.Header.Set("Accept", "text/event-stream")
-	// v3.1: SHA256 of system prompt for prefix cache identification
-	if len(messages) > 0 && messages[0].Role == "system" {
-		req.Header.Set("X-Prompt-Hash", base.SystemPromptHash(messages[0].Content))
-	}
+	bodyBytes, _ := json.Marshal(reqBody)
 
-	resp, err := p.client.Do(req)
-	if err != nil {
-		return nil, err
+	// 重试循环：处理瞬时网络错误（unexpected EOF, connection reset 等）
+	var resp *http.Response
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			backoff := time.Duration(attempt) * 2 * time.Second
+			log.Debug("DeepSeek retry", "attempt", attempt+1, "backoff", backoff, "error", lastErr)
+			select {
+			case <-time.After(backoff):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+
+		req, err := http.NewRequestWithContext(ctx, "POST", p.baseURL+"/chat/completions", strings.NewReader(string(bodyBytes)))
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+p.apiKey)
+		req.Header.Set("Accept", "text/event-stream")
+		if len(messages) > 0 && messages[0].Role == "system" {
+			req.Header.Set("X-Prompt-Hash", base.SystemPromptHash(messages[0].Content))
+		}
+
+		resp, err = p.client.Do(req)
+		if err != nil {
+			lastErr = err
+			if !resilience.IsRetryable(err) {
+				return nil, err
+			}
+			continue
+		}
+		if resp.StatusCode != 200 {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			resp.Body.Close()
+			return nil, fmt.Errorf("API error: %d - %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		}
+		ct := resp.Header.Get("Content-Type")
+		if !strings.Contains(ct, "text/event-stream") {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+			resp.Body.Close()
+			return nil, fmt.Errorf("非流式响应: %s", strings.TrimSpace(string(body)))
+		}
+		break // success
 	}
-	if resp.StatusCode != 200 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		resp.Body.Close()
-		return nil, fmt.Errorf("API error: %d - %s", resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-	// 检测非 SSE 响应
-	ct := resp.Header.Get("Content-Type")
-	if !strings.Contains(ct, "text/event-stream") {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		resp.Body.Close()
-		return nil, fmt.Errorf("非流式响应: %s", strings.TrimSpace(string(body)))
+	if resp == nil {
+		return nil, fmt.Errorf("all retries exhausted: %w", lastErr)
 	}
 
 	ch := make(chan base.ChatStreamEvent, 64)
@@ -352,6 +375,14 @@ func (p *Provider) readStream(ctx context.Context, resp *http.Response, ch chan<
 	}
 
 	// ── End of stream ──
+	if err := scanner.Err(); err != nil {
+		if resilience.IsRetryable(err) {
+			emit(base.ChatStreamEvent{Type: "error", Content: fmt.Sprintf("流中断: %v (可重试)", err)})
+		} else {
+			emit(base.ChatStreamEvent{Type: "error", Content: fmt.Sprintf("流读取错误: %v", err)})
+		}
+		return
+	}
 	if !finished && contentBuf.Len() == 0 && reasoningBuf.Len() == 0 && len(toolCallMap) == 0 {
 		emit(base.ChatStreamEvent{Type: "error", Content: "模型未返回有效响应"})
 		return

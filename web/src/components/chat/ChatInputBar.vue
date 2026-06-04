@@ -82,7 +82,17 @@
           <span>{{ currentModelLabel }}</span>
           <svg width="8" height="8" viewBox="0 0 8 8"><path d="M2 3l2 2 2-2" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>
         </button>
-        <div class="tb-spacer"></div>
+        <!-- 上下文环形指示器 -->
+      <span v-if="store.sessionId" class="ctx-ring" :title="'上下文 ' + ctxPct + '%'">
+        <svg width="16" height="16" viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="10" fill="none" stroke="var(--border-default)" stroke-width="3"/>
+          <circle cx="12" cy="12" r="10" fill="none" :stroke="ctxColor" stroke-width="3"
+            stroke-dasharray="62.8" :stroke-dashoffset="62.8 * (1 - ctxPct / 100)"
+            stroke-linecap="round" transform="rotate(-90 12 12)" style="transition: all 0.5s"/>
+        </svg>
+      </span>
+
+      <div class="tb-spacer"></div>
         <button class="tb-item" @click="$refs.fileInput.click()" title="附加文件">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
             <path d="M10 4v7a3 3 0 01-6 0V5a2 2 0 014 0v5.5a1 1 0 01-2 0V5"/>
@@ -220,6 +230,20 @@ import CronPanel from './CronPanel.vue'
 
 const router = useRouter()
 const store = useChatStore()
+
+// ── 上下文余量（TODO: 从 SSE context_usage 事件获取实时值）──
+const ctxPct = computed(() => {
+  // TODO: 替换为 store.contextUsagePct，由后端 budget.NeedsCompact() SSE 推送
+  const msgs = store.messages?.length || 0
+  const estTokens = msgs * 500 // 粗略估算：每条消息约500 tokens
+  const maxTokens = 1_000_000 // 1M 上下文窗口（Flash/Pro 均为1M）
+  return Math.min(99, Math.round((estTokens / maxTokens) * 100))
+})
+const ctxColor = computed(() => {
+  if (ctxPct.value > 80) return '#ef4444'
+  if (ctxPct.value > 50) return '#f59e0b'
+  return '#22c55e'
+})
 
 // ── 发送按钮状态计算 ──
 const isBusy = computed(() => store.isStreaming || store.hasRunningAgents || !!store.currentToolName)
@@ -638,6 +662,17 @@ onMounted(() => {
 }
 
 /* ── 拖拽上传 ── */
+/* 上下文余量 */
+.context-meter {
+  display: flex; align-items: center; gap: 6px; padding: 2px 4px 0; font-size: 10px; color: var(--text-muted);
+}
+.ctx-bar {
+  flex: 1; height: 3px; background: var(--surface-hover); border-radius: 2px; overflow: hidden;
+}
+.ctx-bar i { display: block; height: 100%; border-radius: 2px; background: #22c55e; transition: width 0.5s; }
+.context-meter:has(.ctx-bar i[style*=\"8\"]) .ctx-bar i,
+.context-meter:has(.ctx-bar i[style*=\"9\"]) .ctx-bar i { background: #f59e0b; }
+
 .input-bar.drag-over {
   border-color: var(--brand-400);
   box-shadow: 0 0 0 3px rgba(6,182,212,0.12), 0 4px 20px rgba(6,182,212,0.1);

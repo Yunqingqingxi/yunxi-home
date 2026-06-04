@@ -142,21 +142,7 @@
             >
               <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="3" r="1.8"/><circle cx="8" cy="8" r="1.8"/><circle cx="8" cy="13" r="1.8"/></svg>
             </button>
-            <!-- Sub-agents -->
-            <div
-              v-if="subAgents[conv.id]?.length"
-              class="sidebar-subs"
-            >
-              <div
-                v-for="sa in subAgents[conv.id]"
-                :key="sa.id"
-                :class="['sub-line', sa.status]"
-                :title="sa.goal"
-              >
-                <StatusDot :status="sa.status" :size="8" class="sub-dot" />
-                <span class="sub-goal">{{ sa.goal }}</span>
-              </div>
-            </div>
+            <!-- Sub-agents moved to right info panel "活跃助手" -->
           </div>
         </template>
 
@@ -208,20 +194,7 @@
               >
                 <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="3" r="1.8"/><circle cx="8" cy="8" r="1.8"/><circle cx="8" cy="13" r="1.8"/></svg>
               </button>
-              <div
-                v-if="subAgents[conv.id]?.length"
-                class="sidebar-subs"
-              >
-                <div
-                  v-for="sa in subAgents[conv.id]"
-                  :key="sa.id"
-                  :class="['sub-line', sa.status]"
-                  :title="sa.goal"
-                >
-                  <StatusDot :status="sa.status" :size="8" class="sub-dot" />
-                  <span class="sub-goal">{{ sa.goal }}</span>
-                </div>
-              </div>
+              <!-- Sub-agents moved to right info panel -->
             </div>
           </template>
         </template>

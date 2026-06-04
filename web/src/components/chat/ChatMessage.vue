@@ -188,7 +188,7 @@
 
   <!-- AI消息：每个block独立气泡 -->
   <template v-if="msg.role === 'assistant' || msg.role === 'agent'">
-    <div v-for="(block, bi) in (msg.blocks || [])" :key="'blk'+bi">
+    <div v-for="(block, bi) in (msg.blocks || [])" :key="'blk'+bi+'-'+block.type">
       <div v-if="block.type === 'thinking'" class="msg-row assistant thinking-row">
         <div class="avatar ai-avatar"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.2" fill="none"/><circle cx="5.5" cy="7" r="1" fill="currentColor"/><circle cx="10.5" cy="7" r="1" fill="currentColor"/><path d="M5.5 10.5c0 0 1 2 2.5 2s2.5-2 2.5-2" stroke="currentColor" stroke-width="1" fill="none" stroke-linecap="round"/></svg></div>
         <div class="block-body thinking-body-plain"><span class="role-tag">云兮</span><ThinkingBlock :reasoning="block.content" :streaming="msg.streaming" /></div>

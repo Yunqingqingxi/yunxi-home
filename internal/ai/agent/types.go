@@ -51,6 +51,7 @@ type SubAgent struct {
 	Error       string          `json:"error,omitempty"`
 	Round       int             `json:"round"`        // 已完成轮次
 	Progress    string          `json:"progress"`     // 当前进度描述
+	ProgressPct int             `json:"progress_pct"` // 完成百分比 0-100
 	StartedAt   time.Time       `json:"started_at"`
 	FinishedAt  time.Time       `json:"finished_at,omitempty"`
 	progressFn  ProgressFunc    // 创建时捕获的进度回调（nil-safe）
