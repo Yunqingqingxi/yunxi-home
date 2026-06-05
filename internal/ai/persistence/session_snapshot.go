@@ -3,7 +3,6 @@
 package persistence
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -14,7 +13,7 @@ import (
 	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 )
 
-var log = logger.ForComponent("persistence")
+var snapLog = logger.ForComponent("persistence")
 
 // SessionSnapshot captures the full state of an active session for recovery.
 type SessionSnapshot struct {

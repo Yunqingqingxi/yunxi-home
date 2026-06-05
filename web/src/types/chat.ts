@@ -12,6 +12,8 @@ export interface ToolCall {
   name: string
   args: string
   result: string
+  status?: string
+  progress?: string
 }
 
 export interface ChatMessage {

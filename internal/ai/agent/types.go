@@ -122,6 +122,7 @@ type ManagerConfig struct {
 	Registry      *register.Registry
 	ProgressFn    ProgressFunc
 	CompletionFn  CompletionFunc // Agent 全部完成时回调（异步模式）
+	// AgentLoader: loads YAML-defined agent templates for spawn_agent_name
 }
 
 // DefaultConfig 返回默认配置

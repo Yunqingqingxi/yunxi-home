@@ -17,7 +17,6 @@ import (
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/base"
 	"github.com/Yunqingqingxi/yunxi-home/internal/ai/mcp"
 	"github.com/Yunqingqingxi/yunxi-home/internal/models"
-	webmw "github.com/Yunqingqingxi/yunxi-home/internal/web/middleware"
 	"github.com/Yunqingqingxi/yunxi-home/internal/toolreg"
 )
 
@@ -98,11 +97,6 @@ func (h *ChatHandler) Chat(c echo.Context) error {
 	}
 	ctx = context.WithValue(ctx, base.ReasoningIntensityKey{}, intensity)
 
-	// Extract user identity from JWT claims for the adaptation layer
-	userID := ""
-	if claims := webmw.GetClaims(c); claims != nil {
-		userID = fmt.Sprintf("%d", claims.UserID)
-	}
 	// Immediately emit session_status so frontend knows the session ID
 	// before any AI reply arrives — enables sidebar update + URL sync.
 	initEv, _ := json.Marshal(base.ChatStreamEvent{
@@ -112,48 +106,27 @@ func (h *ChatHandler) Chat(c echo.Context) error {
 	fmt.Fprintf(c.Response(), "data: %s\n\n", initEv)
 	flusher.Flush()
 
-	stream := h.aiService.StreamChat(ctx, req.SessionID, userID, req.Message, req.Model)
+	// Claude Code-style continuous session: push to message queue instead of
+	// one-shot StreamChat. The queue processes messages sequentially and the
+	// conversation loop never truly ends until explicitly closed.
+	h.aiService.InjectUserMessage(req.SessionID, req.Message)
 
-	// Subscribe to agent events via eventBus for events that are NOT
-	// also emitted on the main stream channel (agent_progress, agent_result, etc.)
+	// Subscribe to eventBus for ALL events (stream + agent + resume).
+	// The queue processor publishes everything through the event bus.
 	agentCh := h.aiService.SubscribeSession(req.SessionID)
 	defer h.aiService.UnsubscribeSession(req.SessionID, agentCh)
 
-	streamDone := false
-	// dedup set: when Go's select picks agentCh before stream, we must not emit duplicates
-	emittedSeqs := make(map[int64]bool, 256)
 	idleTicks := 0
-	const maxIdleTicks = 5
+	const maxIdleTicks = 20 // 20 * 60s = 20min idle before close
 	heartbeatTicker := time.NewTicker(60 * time.Second)
 	defer heartbeatTicker.Stop()
 
 	for {
 		select {
-		case ev, ok := <-stream:
-			if !ok {
-				stream = nil
-				streamDone = true
-				continue
-			}
-			idleTicks = 0
-			if ev.Seq > 0 {
-				emittedSeqs[ev.Seq] = true
-			}
-			data, _ := json.Marshal(ev)
-			if _, err := fmt.Fprintf(c.Response(), "data: %s\n\n", data); err != nil {
-				return nil
-			}
-			flusher.Flush()
 		case ev, ok := <-agentCh:
 			if !ok {
-				agentCh = nil
-				continue
+				return nil
 			}
-			// Dedup: skip if already emitted via stream channel
-			if ev.Seq > 0 && emittedSeqs[ev.Seq] {
-				continue
-			}
-			emittedSeqs[ev.Seq] = true
 			idleTicks = 0
 			data, _ := json.Marshal(ev)
 			if _, err := fmt.Fprintf(c.Response(), "data: %s\n\n", data); err != nil {
@@ -161,17 +134,15 @@ func (h *ChatHandler) Chat(c echo.Context) error {
 			}
 			flusher.Flush()
 		case <-heartbeatTicker.C:
-			if streamDone {
-				hasAgents := h.aiService.HasRunningAgents(req.SessionID)
-				if !hasAgents {
-					idleTicks++
-					if idleTicks >= maxIdleTicks {
-						log.Info("SSE closing: stream done, idle timeout", "session", req.SessionID)
-						return nil
-					}
-				} else {
-					idleTicks = 0
+			hasAgents := h.aiService.HasRunningAgents(req.SessionID)
+			if !hasAgents {
+				idleTicks++
+				if idleTicks >= maxIdleTicks {
+					log.Info("SSE closing: idle timeout", "session", req.SessionID)
+					return nil
 				}
+			} else {
+				idleTicks = 0
 			}
 			if _, err := fmt.Fprintf(c.Response(), ":keepalive\n\n"); err != nil {
 				return nil
@@ -231,7 +202,7 @@ func (h *ChatHandler) StreamSession(c echo.Context) error {
 	flusher.Flush()
 
 	idleTicks := 0
-	const maxIdleTicks = 10 // 10 * 60s = 10min max idle before close
+	const maxIdleTicks = 20 // 20 * 60s = 20min max idle before close
 	heartbeatTicker := time.NewTicker(60 * time.Second)
 	defer heartbeatTicker.Stop()
 
@@ -457,7 +428,8 @@ func (h *ChatHandler) InjectMessage(c echo.Context) error {
 	if err := c.Bind(&req); err != nil || req.SessionID == "" || req.Message == "" {
 		return c.JSON(http.StatusBadRequest, errorResp("参数错误"))
 	}
-	h.aiService.InjectMessage(req.SessionID, req.Message)
+	// Push to queue — response streams through existing SSE connection
+	h.aiService.InjectUserMessage(req.SessionID, req.Message)
 	return c.JSON(http.StatusOK, successResp(map[string]string{"status": "injected"}))
 }
 
@@ -559,7 +531,7 @@ func (h *ChatHandler) RunCommand(c echo.Context) error {
 			msg += " " + cmdArg
 		}
 		msg += "]\n" + result
-		h.aiService.SaveSystemMessage(req.SessionID, msg)
+		h.aiService.InjectWithPriority(req.SessionID, msg, "info", "command")
 	}
 
 	return c.JSON(http.StatusOK, successResp(map[string]string{"command": cmdName, "result": result}))

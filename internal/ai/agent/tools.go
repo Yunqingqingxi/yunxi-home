@@ -185,6 +185,114 @@ func parseSpawnTask(raw any) (SpawnTask, error) {
 	return SpawnTask{Goal: goal, ToolFilter: toolFilter}, nil
 }
 
+// ToolDefSpawnAgentName returns a tool that spawns agents by their pre-defined YAML name.
+func ToolDefSpawnAgentName(mgr *Manager, loader *AgentLoader) *base.ToolDef {
+	// Build agent list for description
+	agentNames := ""
+	if loader != nil {
+		agentNames = strings.Join(loader.Names(), ", ")
+	}
+	if agentNames == "" {
+		agentNames = "(none loaded)"
+	}
+
+	return &base.ToolDef{
+		Name:        "spawn_agent_name",
+		Description: fmt.Sprintf("按预定义名称派生子Agent。可用Agent: %s。选择最匹配的agent名称，传入任务目标即可自动配置工具和超时。", agentNames),
+		Category:    "agent",
+		RiskLevel:   "mutation",
+		Background:  true,
+		Timeout:     15 * time.Minute,
+		Parameters: base.ToolParams{
+			Type: "object",
+			Properties: map[string]base.ParamProp{
+				"name": {
+					Type:        "string",
+					Description: fmt.Sprintf("预定义的Agent名称。可用: %s", agentNames),
+				},
+				"goal": {
+					Type:        "string",
+					Description: "具体任务目标。留空则使用Agent默认系统提示。四段式：1.目标 2.范围 3.预期产物 4.成功标准",
+				},
+				"async": {
+					Type:        "boolean",
+					Description: "设为 true 时后台异步执行。耗时超过10秒的长任务应使用异步。",
+				},
+			},
+			Required: []string{"name"},
+		},
+		HandlerV2: func(ctx context.Context, args map[string]any) *base.ToolResult {
+			return handleSpawnAgentName(mgr, loader, ctx, args)
+		},
+	}
+}
+
+func handleSpawnAgentName(mgr *Manager, loader *AgentLoader, ctx context.Context, args map[string]any) *base.ToolResult {
+	name, _ := args["name"].(string)
+	if name == "" {
+		return &base.ToolResult{
+			Status:  base.StatusError,
+			Error:   &base.ToolError{Code: base.ErrCodeInvalidArgs, Message: "缺少 name 参数"},
+			Summary: "参数错误：缺少 agent name",
+		}
+	}
+
+	if loader == nil {
+		return &base.ToolResult{
+			Status:  base.StatusError,
+			Error:   &base.ToolError{Code: base.ErrCodeUnknown, Message: "AgentLoader 未初始化"},
+			Summary: "系统错误：Agent模板加载器未就绪",
+		}
+	}
+
+	def := loader.Get(name)
+	if def == nil {
+		return &base.ToolResult{
+			Status:  base.StatusError,
+			Error:   &base.ToolError{Code: base.ErrCodeFileNotFound, Message: fmt.Sprintf("Agent '%s' 不存在", name)},
+			Summary: fmt.Sprintf("未找到Agent '%s'。可用: %s", name, strings.Join(loader.Names(), ", ")),
+		}
+	}
+
+	goal, _ := args["goal"].(string)
+	task := def.ToSpawnTask(goal)
+	async, _ := args["async"].(bool)
+
+	// Set agent timeout from definition
+	if def.ParseTimeout() > 0 {
+		// timeout handled by ManagerConfig.AgentTimeout; we can override via the agent's own Timeout field
+	}
+
+	if async {
+		sessionID := SessionIDFromCtx(ctx)
+		agent := mgr.Spawn(task.Goal, task.ToolFilter, sessionID)
+		agent.Timeout = int(def.ParseTimeout().Seconds())
+		return &base.ToolResult{
+			Status: base.StatusSuccess,
+			Summary: fmt.Sprintf("已启动 Agent '%s' (ID: %s) 后台执行。完成后结果自动注入会话。", name, agent.ID),
+			Data:    []string{agent.ID},
+		}
+	}
+
+	// Sync mode: block and wait
+	results := mgr.SpawnParallel([]SpawnTask{task}, "")
+
+	var parts []string
+	for _, r := range results {
+		if r.Status == StatusDone {
+			parts = append(parts, fmt.Sprintf("✅ %s: %s", r.Goal, r.Summary))
+		} else {
+			parts = append(parts, fmt.Sprintf("❌ %s: %s", r.Goal, r.Error))
+		}
+	}
+
+	return &base.ToolResult{
+		Status:  base.StatusSuccess,
+		Summary: fmt.Sprintf("Agent '%s' 执行完成:\n%s", name, strings.Join(parts, "\n")),
+		Data:    results,
+	}
+}
+
 // ParseArgsString 解析 JSON 参数字符串
 func ParseArgsString(raw string) map[string]any {
 	if raw == "" || raw == "{}" || raw == "null" {

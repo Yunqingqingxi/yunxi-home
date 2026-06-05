@@ -16,6 +16,9 @@ type HTTPClientConfig struct {
 	TLSHandshakeTimeout time.Duration
 	// RequestTimeout is the overall HTTP request timeout (set on http.Client).
 	RequestTimeout time.Duration
+	// ResponseHeaderTimeout is the maximum time to wait for response headers
+	// after the request is fully written. Raised for thinking models.
+	ResponseHeaderTimeout time.Duration
 	// KeepAlive is the TCP keep-alive period for idle connections.
 	KeepAlive time.Duration
 	// IdleConnTimeout is the maximum time an idle connection stays in the pool.
@@ -34,15 +37,16 @@ type HTTPClientConfig struct {
 // These defaults handle weak networks, transient failures, and connection reuse.
 func DefaultHTTPClientConfig() HTTPClientConfig {
 	return HTTPClientConfig{
-		ConnectTimeout:      30 * time.Second,
-		TLSHandshakeTimeout: 15 * time.Second,
-		RequestTimeout:      10 * time.Minute,
-		KeepAlive:           30 * time.Second,
-		IdleConnTimeout:     90 * time.Second,
-		MaxIdleConns:        100,
-		MaxIdleConnsPerHost: 20,
-		ForceIPv4:           false,
-		EnableHTTP2:         true,
+		ConnectTimeout:        30 * time.Second,
+		TLSHandshakeTimeout:   15 * time.Second,
+		RequestTimeout:        10 * time.Minute,
+		ResponseHeaderTimeout: 120 * time.Second, // generous for thinking models under load
+		KeepAlive:             30 * time.Second,
+		IdleConnTimeout:       90 * time.Second,
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   20,
+		ForceIPv4:             false,
+		EnableHTTP2:           true,
 	}
 }
 
@@ -75,8 +79,10 @@ func NewHTTPClient(cfg HTTPClientConfig) *http.Client {
 		IdleConnTimeout:       cfg.IdleConnTimeout,
 		TLSHandshakeTimeout:   cfg.TLSHandshakeTimeout,
 		ExpectContinueTimeout: 1 * time.Second,
-		// ResponseHeaderTimeout limits time waiting for response headers
-		ResponseHeaderTimeout: 30 * time.Second,
+		// ResponseHeaderTimeout limits time waiting for response headers.
+		// Default raised to 120s for thinking models that may be slow to
+		// begin streaming under load (prevents "context deadline exceeded").
+		ResponseHeaderTimeout: cfg.ResponseHeaderTimeout,
 		// DisableKeepAlives=false means connections are reused (pooled)
 		DisableKeepAlives: false,
 	}

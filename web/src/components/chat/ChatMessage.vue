@@ -162,6 +162,15 @@
       >
         <ContentBlock :content="cleanContent" />
       </div>
+      <!-- Copy + Edit buttons below user bubble -->
+      <div v-if="msg.status === 'done' && cleanContent" class="msg-actions user-actions">
+        <button class="act-btn" title="编辑" @click.stop="emit('edit', msg)">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        </button>
+        <button class="act-btn" title="复制" @click.stop="onCopy">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        </button>
+      </div>
     </div>
     <div class="avatar user-avatar">
       <svg
@@ -186,32 +195,40 @@
     </div>
   </div>
 
-  <!-- AI消息：每个block独立气泡 -->
+  <!-- AI message: direct from backend data -->
   <template v-if="msg.role === 'assistant' || msg.role === 'agent'">
-    <div v-for="(block, bi) in (msg.blocks || [])" :key="'blk'+bi+'-'+block.type">
-      <div v-if="block.type === 'thinking'" class="msg-row assistant thinking-row">
-        <div class="avatar ai-avatar"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.2" fill="none"/><circle cx="5.5" cy="7" r="1" fill="currentColor"/><circle cx="10.5" cy="7" r="1" fill="currentColor"/><path d="M5.5 10.5c0 0 1 2 2.5 2s2.5-2 2.5-2" stroke="currentColor" stroke-width="1" fill="none" stroke-linecap="round"/></svg></div>
-        <div class="block-body thinking-body-plain"><span class="role-tag">云兮</span><ThinkingBlock :reasoning="block.content" :streaming="msg.streaming" /></div>
-      </div>
-      <div v-else-if="block.type === 'tool'" class="msg-row assistant">
-        <div class="avatar ai-avatar"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.2" fill="none"/><circle cx="5.5" cy="7" r="1" fill="currentColor"/><circle cx="10.5" cy="7" r="1" fill="currentColor"/><path d="M5.5 10.5c0 0 1 2 2.5 2s2.5-2 2.5-2" stroke="currentColor" stroke-width="1" fill="none" stroke-linecap="round"/></svg></div>
-        <div class="block-body"><span class="role-tag">云兮</span><ToolCallBlock :name="block.name" :args="block.args" :result="block.result" :status="block.status" :progress="block.progress" :streaming="msg.streaming" /></div>
-      </div>
-      <template v-else-if="block.type === 'content'">
-        <div v-for="(seg, si) in splitSegments(block.content || '')" :key="'seg'+si" class="msg-row assistant">
-          <div class="avatar ai-avatar"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.2" fill="none"/><circle cx="5.5" cy="7" r="1" fill="currentColor"/><circle cx="10.5" cy="7" r="1" fill="currentColor"/><path d="M5.5 10.5c0 0 1 2 2.5 2s2.5-2 2.5-2" stroke="currentColor" stroke-width="1" fill="none" stroke-linecap="round"/></svg></div>
-          <div v-if="seg.type === 'text'" class="block-body content-body-bubble"><span class="role-tag">云兮</span><ContentBlock :content="seg.content" :streaming="false" /></div>
-          <div v-else class="block-body"><FileAttachment :name="seg.name" :path="seg.path" @preview="openLightbox(findImageIdx(seg.path))" /></div>
-        </div>
-      </template>
-    </div>
-    <div v-if="!msg.blocks?.length && (msg.content || msg.streaming)" class="msg-row assistant">
+    <!-- thinking -->
+    <div v-if="msg.reasoning" class="msg-row assistant thinking-row">
       <div class="avatar ai-avatar"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.2" fill="none"/><circle cx="5.5" cy="7" r="1" fill="currentColor"/><circle cx="10.5" cy="7" r="1" fill="currentColor"/><path d="M5.5 10.5c0 0 1 2 2.5 2s2.5-2 2.5-2" stroke="currentColor" stroke-width="1" fill="none" stroke-linecap="round"/></svg></div>
-      <div :class="['block-body', (msg.streaming && !msg.content) ? '' : 'content-body-bubble']"><span class="role-tag">云兮</span><div v-if="msg.streaming && !msg.content" class="ai-empty"><span class="dot"/><span class="dot"/><span class="dot"/></div><ContentBlock v-else :content="msg.content" :streaming="false" /></div>
+      <div class="block-body thinking-body-plain"><span class="role-tag">云兮</span><ThinkingBlock :reasoning="msg.reasoning" :streaming="msg.streaming && !msg.content" /></div>
     </div>
-    <div v-if="msg.status === 'error' && !msg.blocks?.length" class="msg-row assistant">
+    <!-- tool calls -->
+    <div v-for="(t, ti) in (msg.tools || [])" :key="'t'+ti" class="msg-row assistant">
       <div class="avatar ai-avatar"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.2" fill="none"/><circle cx="5.5" cy="7" r="1" fill="currentColor"/><circle cx="10.5" cy="7" r="1" fill="currentColor"/><path d="M5.5 10.5c0 0 1 2 2.5 2s2.5-2 2.5-2" stroke="currentColor" stroke-width="1" fill="none" stroke-linecap="round"/></svg></div>
-      <div class="block-body"><span class="error-text">请求失败</span></div>
+      <div class="block-body"><span class="role-tag">云兮</span><ToolCallBlock :name="t.name" :args="t.args" :result="t.result" :status="t.status" :progress="t.progress" :streaming="msg.streaming" /></div>
+    </div>
+    <!-- content -->
+    <div v-if="msg.content" class="msg-row assistant">
+      <div class="avatar ai-avatar"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.2" fill="none"/><circle cx="5.5" cy="7" r="1" fill="currentColor"/><circle cx="10.5" cy="7" r="1" fill="currentColor"/><path d="M5.5 10.5c0 0 1 2 2.5 2s2.5-2 2.5-2" stroke="currentColor" stroke-width="1" fill="none" stroke-linecap="round"/></svg></div>
+      <div class="block-body content-body-bubble"><span class="role-tag">云兮</span><ContentBlock :content="msg.content" :streaming="msg.streaming" /></div>
+    </div>
+    <!-- loading dots (streaming, no content yet) -->
+    <div v-if="!msg.content && !msg.reasoning && msg.streaming" class="msg-row assistant">
+      <div class="avatar ai-avatar"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.2" fill="none"/><circle cx="5.5" cy="7" r="1" fill="currentColor"/><circle cx="10.5" cy="7" r="1" fill="currentColor"/><path d="M5.5 10.5c0 0 1 2 2.5 2s2.5-2 2.5-2" stroke="currentColor" stroke-width="1" fill="none" stroke-linecap="round"/></svg></div>
+      <div class="block-body"><span class="ai-empty"><span class="dot"/><span class="dot"/><span class="dot"/></span></div>
+    </div>
+    <!-- error -->
+    <div v-if="msg.status === 'error'" class="msg-row assistant">
+      <div class="avatar ai-avatar"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.2" fill="none"/><circle cx="5.5" cy="7" r="1" fill="currentColor"/><circle cx="10.5" cy="7" r="1" fill="currentColor"/><path d="M5.5 10.5c0 0 1 2 2.5 2s2.5-2 2.5-2" stroke="currentColor" stroke-width="1" fill="none" stroke-linecap="round"/></svg></div>
+      <div class="block-body"><span class="error-text">{{ msg.content || '请求失败' }}</span></div>
+    </div>
+    <!-- timing + copy -->
+    <div v-if="msg.status === 'done'" class="msg-row assistant msg-timing-row">
+      <span v-if="msg.durationMs" class="msg-duration">{{ formatDuration(msg.durationMs) }}</span>
+      <span v-else class="msg-duration" />
+      <button class="act-btn" title="复制" @click.stop="onCopy">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+      </button>
     </div>
   </template>
 
@@ -232,7 +249,7 @@
 
 <script setup lang="ts">
 // @ts-nocheck
-import { computed, ref } from 'vue'
+import { computed, ref, onMounted, onUpdated } from 'vue'
 import ContentBlock from './ContentBlock.vue'
 import ThinkingBlock from './ThinkingBlock.vue'
 import ToolCallBlock from './ToolCallBlock.vue'
@@ -240,11 +257,44 @@ import FileAttachment from './FileAttachment.vue'
 import ImageLightbox from './ImageLightbox.vue'
 import { formatDuration } from '../../composables/useFormat'
 
+const LOG_ENABLED = true
+function rlog(tag: string, ...args: any[]) {
+  if (!LOG_ENABLED) return
+  console.log(`%c[render][${tag}]`, 'color:#e91e63', ...args)
+}
 
 const props = defineProps({
   msg: { type: Object, required: true },
   showAvatar: { type: Boolean, default: true }
 })
+
+// Debug: log when ChatMessage mounts/updates
+onMounted(() => {
+  rlog('mount', props.msg.role, props.msg.id?.slice(0, 16), (props.msg.content || '').slice(0, 30))
+})
+onUpdated(() => {
+  rlog('update', props.msg.role, props.msg.id?.slice(0, 16), '_v=' + props.msg._v, 'streaming=' + props.msg.streaming)
+})
+
+const emit = defineEmits(['edit'])
+
+function onCopy() {
+  const text = props.msg.content || ''
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(text).catch(() => fallbackCopy(text))
+  } else {
+    fallbackCopy(text)
+  }
+}
+function fallbackCopy(text: string) {
+  const ta = document.createElement('textarea')
+  ta.value = text
+  ta.style.position = 'fixed'; ta.style.left = '-9999px'
+  document.body.appendChild(ta)
+  ta.select()
+  try { document.execCommand('copy') } catch (_) {}
+  document.body.removeChild(ta)
+}
 
 // Parse [文件: name (path)] patterns from user content
 // Split content block by [文件: name (path)] markers into text/file segments
@@ -273,15 +323,11 @@ function splitSegments(content: string): Segment[] {
   return segments
 }
 
-// Get segments from the main content block (NOT from individual blocks)
+// Get segments from message content for user file attachments
 const contentSegments = computed(() => {
-  // 流式传输期间不切分，避免抖动和重复渲染；完成后才切分
   if (props.msg.streaming) {
-    const block = (props.msg.blocks || []).find((b: any) => b.type === 'content')
-    return [{ type: 'text' as const, content: block?.content || props.msg.content || '' }]
+    return [{ type: 'text' as const, content: props.msg.content || '' }]
   }
-  const block = (props.msg.blocks || []).find((b: any) => b.type === 'content')
-  if (block?.content) return splitSegments(block.content)
   return splitSegments(props.msg.content || '')
 })
 
@@ -421,7 +467,22 @@ function fmtDur(ms) {
   display: inline-block; font-size: 11px; font-weight: 600;
   color: var(--brand-500); padding-bottom: 4px; user-select: none;
 }
-.msg-duration { display: inline-block; font-size: 10px; color: var(--text-muted); margin-left: 6px; user-select: none; }
+.msg-duration { display: inline-block; font-size: 10px; color: var(--text-muted); user-select: none; }
+.msg-timing-row { padding: 0 0 4px 40px; margin-top: -4px; display: flex; align-items: center; justify-content: flex-end; gap: 4px; }
+/* Action buttons */
+.msg-actions { display: flex; align-items: center; gap: 2px; }
+.user-actions { justify-content: flex-end; padding: 2px 44px 4px 0; margin-top: -2px; }
+.act-btn {
+  width: 26px; height: 26px; border-radius: 6px; border: none;
+  background: transparent; color: var(--text-muted); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.12s; opacity: 0;
+}
+.msg-row:hover .act-btn,
+.msg-row:hover + .msg-timing-row .act-btn,
+.msg-timing-row:hover .act-btn { opacity: 1; }
+.user-msg-wrap:hover .act-btn { opacity: 1; }
+.act-btn:hover { background: var(--surface-hover); color: var(--text-primary); }
 
 /* ── Streaming dots ── */
 .ai-empty { display: flex; align-items: center; gap: 6px; padding: 4px 0; min-height: 20px; }

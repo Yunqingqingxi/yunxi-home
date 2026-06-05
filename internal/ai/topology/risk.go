@@ -60,7 +60,7 @@ func init() {
 		{Pattern: "systemctl_*", DeltaYMin: 0.5, DeltaYMax: 1.0, DeltaZMin: 0, DeltaZMax: 0.8},
 
 		// Sub-agent spawn — moderate-high complexity
-		{Pattern: "spawn_agent", DeltaYMin: 0.3, DeltaYMax: 0.8, DeltaZMin: 0, DeltaZMax: 0.5},
+		{Pattern: "spawn_agent_name", DeltaYMin: 0.3, DeltaYMax: 0.8, DeltaZMin: 0, DeltaZMax: 0.5},
 
 		// Skill execution — moderate complexity
 		{Pattern: "run_skill", DeltaYMin: 0.2, DeltaYMax: 0.6, DeltaZMin: 0, DeltaZMax: 0.5},
@@ -188,7 +188,7 @@ func EstimateProgressDelta(toolName string) float64 {
 		return 5.0
 
 	// 子Agent/技能/MCP：大幅推进（代表拆分了子任务）
-	case matchPattern("spawn_agent", toolName),
+	case matchPattern("spawn_agent_name", toolName),
 		matchPattern("run_skill", toolName):
 		return 8.0
 

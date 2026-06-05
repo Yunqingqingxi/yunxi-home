@@ -38,6 +38,10 @@ func IsRetryable(err error) bool {
 		return true
 	case errors.Is(err, ErrTemporary):
 		return true
+	case errors.Is(err, context.DeadlineExceeded):
+		return true
+	case errors.Is(err, context.Canceled):
+		return true
 	default:
 		return isTransientNetworkError(err)
 	}
@@ -50,6 +54,8 @@ func isTransientNetworkError(err error) bool {
 		"unexpected EOF", "connection reset by peer",
 		"broken pipe", "TLS handshake timeout",
 		"no route to host", "i/o timeout",
+		"context deadline exceeded", "context canceled",
+		"timeout awaiting response headers",
 	} {
 		if strings.Contains(msg, sub) {
 			return true

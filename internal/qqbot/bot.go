@@ -336,12 +336,18 @@ func (b *Bot) processMessage(ctx context.Context, userID, content string) (strin
 	return "", false
 }
 
-// handleAIChat 通过 AI Service 处理对话并返回 Markdown 格式回复
+// aiChatTimeout defines the maximum duration for a single AI chat stream attempt.
+// After this timeout the stream is cancelled and a retry may be attempted.
+const aiChatTimeout = 10 * time.Minute
+
+// maxAIChatRetries defines how many times to retry a failed AI chat stream
+// before giving up. Only transient errors (network, timeout) are retried.
+const maxAIChatRetries = 2
+
+// handleAIChat 通过 AI Service 处理对话并返回 Markdown 格式回复。
+// 内置超时与自动重连机制：单次流超时 10 分钟，网络/超时类错误自动重试最多 2 次。
 func (b *Bot) handleAIChat(ctx context.Context, userID, message string) (string, bool) {
 	sessionID := "qqbot_" + userID
-
-	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
-	defer cancel()
 
 	// 文件发送指令：通过系统消息注入，不污染用户可见的聊天记录
 	if !b.hasSeenFilePrompt(userID) {
@@ -352,42 +358,103 @@ func (b *Bot) handleAIChat(ctx context.Context, userID, message string) (string,
 		b.markFilePromptSent(userID)
 	}
 
-	stream := b.aiService.StreamChat(ctx, sessionID, userID, message)
-
-	var contentBuf strings.Builder
-	var hadToolResult bool
-
-	for ev := range stream {
-		switch ev.Type {
-		case "thinking":
-		case "content":
-			// 工具结果后的第一段 content 覆盖旧内容（只保留最终轮次回复）
-			if hadToolResult {
-				contentBuf.Reset()
-				hadToolResult = false
+	var lastErr string
+	for attempt := 0; attempt <= maxAIChatRetries; attempt++ {
+		if attempt > 0 {
+			// 指数退避 + 抖动：1s, 2s, 4s ...
+			backoff := time.Duration(1<<(attempt-1)) * time.Second
+			if backoff > 30*time.Second {
+				backoff = 30 * time.Second
 			}
-			contentBuf.WriteString(ev.Content)
-		case "tool_result":
-			hadToolResult = true
-		case "tool_call":
-		case "error":
-			return ev.Content, false
-		case "done":
+			log.Debug("QQ Bot AI 重试", "session", sessionID, "attempt", attempt, "backoff", backoff)
+			select {
+			case <-time.After(backoff):
+			case <-ctx.Done():
+				return "AI 服务暂时不可用，请稍后重试", false
+			}
+		}
+
+		streamCtx, cancel := context.WithTimeout(ctx, aiChatTimeout)
+		stream := b.aiService.StreamChat(streamCtx, sessionID, userID, message)
+
+		var contentBuf strings.Builder
+		var hadToolResult bool
+		var hadError bool
+
+		for ev := range stream {
+			switch ev.Type {
+			case "thinking":
+			case "content":
+				// 工具结果后的第一段 content 覆盖旧内容（只保留最终轮次回复）
+				if hadToolResult {
+					contentBuf.Reset()
+					hadToolResult = false
+				}
+				contentBuf.WriteString(ev.Content)
+			case "tool_result":
+				hadToolResult = true
+			case "tool_call":
+			case "error":
+				lastErr = ev.Content
+				hadError = true
+			case "done":
+			}
+		}
+		cancel()
+
+		if hadError {
+			// 判断是否为可重试的 transient 错误
+			if isTransientAIError(lastErr) && attempt < maxAIChatRetries {
+				log.Warn("QQ Bot AI 调用失败，将重试", "session", sessionID, "attempt", attempt, "error", lastErr)
+				continue
+			}
+			return lastErr, false
+		}
+
+		if contentBuf.Len() == 0 {
+			return "已处理（无返回内容）", false
+		}
+
+		reply := contentBuf.String()
+		// 提取并发送文件，返回纯文本（不含文件引用标记）
+		reply = b.extractAndSendFiles(ctx, userID, reply)
+		if reply == "" {
+			reply = "文件已发送"
+		}
+
+		return reply, true
+	}
+
+	return lastErr, false
+}
+
+// isTransientAIError 判断 AI 错误是否可重试（网络/超时类瞬时错误）
+func isTransientAIError(errMsg string) bool {
+	lower := strings.ToLower(errMsg)
+	transientPatterns := []string{
+		"context deadline exceeded",
+		"context canceled",
+		"timeout",
+		"i/o timeout",
+		"connection reset",
+		"connection refused",
+		"unexpected eof",
+		"broken pipe",
+		"no route to host",
+		"tls handshake timeout",
+		"rate limit",
+		"too many requests",
+		"service unavailable",
+		"internal server error",
+		"bad gateway",
+		"gateway timeout",
+	}
+	for _, p := range transientPatterns {
+		if strings.Contains(lower, p) {
+			return true
 		}
 	}
-
-	if contentBuf.Len() == 0 {
-		return "已处理（无返回内容）", false
-	}
-
-	reply := contentBuf.String()
-	// 提取并发送文件，返回纯文本（不含文件引用标记）
-	reply = b.extractAndSendFiles(ctx, userID, reply)
-	if reply == "" {
-		reply = "文件已发送"
-	}
-
-	return reply, true
+	return false
 }
 
 // sendC2CFile 上传并发送文件给 C2C 用户。
@@ -851,7 +918,8 @@ func (b *Bot) SendGroupMarkdown(ctx context.Context, markdownText string) error 
 	return nil
 }
 
-// downloadAttachments 下载 QQ 消息中的附件到沙箱
+// downloadAttachments 下载 QQ 消息中的附件到沙箱。
+// 下载超时根据文件大小动态调整：基础 2 分钟 + 每 100MB 额外 5 分钟，最大 30 分钟。
 func (b *Bot) downloadAttachments(ctx context.Context, attachments []*dto.MessageAttachment) []string {
 	sandboxRoot := b.cfg.SandboxRoot
 	if sandboxRoot == "" {
@@ -866,7 +934,6 @@ func (b *Bot) downloadAttachments(ctx context.Context, attachments []*dto.Messag
 	os.MkdirAll(botDir, 0755)
 
 	var refs []string
-	client := &http.Client{Timeout: 30 * time.Second}
 
 	for _, att := range attachments {
 		if att.URL == "" {
@@ -878,14 +945,27 @@ func (b *Bot) downloadAttachments(ctx context.Context, attachments []*dto.Messag
 		}
 		destPath := filepath.Join(botDir, fname)
 
+		// 动态超时：基础 2 分钟，每 100MB 额外增加 5 分钟，最大 30 分钟
+		fileSize := att.Size
+		timeout := 2*time.Minute + time.Duration(fileSize/(100*1024*1024))*5*time.Minute
+		if timeout > 30*time.Minute {
+			timeout = 30 * time.Minute
+		}
+		if timeout < 2*time.Minute {
+			timeout = 2 * time.Minute
+		}
+		log.Info("QQ Bot 开始下载附件", "name", fname, "sizeMB", fileSize/(1024*1024), "timeout", timeout)
+
+		client := &http.Client{Timeout: timeout}
+
 		req, err := http.NewRequestWithContext(ctx, "GET", att.URL, nil)
 		if err != nil {
-			log.Warn("QQ Bot 附件下载失败", "url", att.URL, "error", err)
+			log.Warn("QQ Bot 附件下载失败(创建请求)", "url", att.URL, "error", err)
 			continue
 		}
 		resp, err := client.Do(req)
 		if err != nil {
-			log.Warn("QQ Bot 附件下载失败", "url", att.URL, "error", err)
+			log.Warn("QQ Bot 附件下载失败(连接)", "url", att.URL, "error", err)
 			continue
 		}
 		f, err := os.Create(destPath)
@@ -901,7 +981,7 @@ func (b *Bot) downloadAttachments(ctx context.Context, attachments []*dto.Messag
 			log.Warn("QQ Bot 附件写入失败", "path", destPath, "error", err)
 			continue
 		}
-		log.Debug("QQ Bot 附件已下载", "name", fname, "size", att.Size, "path", "/qqbot/"+fname)
+		log.Info("QQ Bot 附件已下载", "name", fname, "sizeMB", fileSize/(1024*1024), "path", "/qqbot/"+fname)
 		// Use the format the AI understands: [文件: name (path)]
 		refs = append(refs, fmt.Sprintf("[文件: %s (/qqbot/%s)]", fname, fname))
 	}

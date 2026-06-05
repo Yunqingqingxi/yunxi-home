@@ -69,6 +69,7 @@ type Service struct {
 	skillRegistry       *skill.Registry
 	skillExecutor       *skill.Executor
 	agentMgr            *agent.Manager
+	agentLoader         *agent.AgentLoader // YAML-based agent definitions
 	mcpManager          *mcp.Manager
 	mcpSubsystem        *mcp.Subsystem    // new MCP subsystem (replaces direct manager usage)
 	mcpCfgPath          string            // mcp.json 路径（可配置）
@@ -92,6 +93,9 @@ type Service struct {
 	sessionDoneCh       map[string]chan struct{} // closed when session fully completes (stream + agents)
 	sessionDoneMu       sync.Mutex
 	chatLogger          *ChatLogger // 完整会话追踪日志
+	msgQueues           *session.QueueRegistry // per-session message queues
+	msgQueueCancels     map[string]context.CancelFunc // cancel current msg processing (for interrupt)
+	msgQueueCancelMu    sync.Mutex
 		sessionStore        *persistence.SessionStore // persistent session snapshots
 		hookRegistry        *middleware.HookRegistry  // Claude Code-style hook system
 }
@@ -243,6 +247,10 @@ func NewService(provider base.AIProvider, reg *register.Registry, sessionRepo da
 		activeStreamChs:     make(map[string]chan base.ChatStreamEvent),
 		sessionDoneCh:       make(map[string]chan struct{}),
 		chatLogger:          NewChatLogger("log/chat"),
+		msgQueues:           session.NewQueueRegistry(),
+		msgQueueCancels:     make(map[string]context.CancelFunc),
+		hookRegistry:        middleware.NewHookRegistry("data"),
+		sessionStore:        persistence.NewSessionStore("data/sessions"),
 	}
 	svc.asyncExec = async.New(3, svc.injectCallback, svc.progressCallback)
 	svc.cronMgr = cron.NewManager(func(sessionID, prompt string) { svc.InjectMessage(sessionID, prompt) }, cfg.CronRepo)
@@ -264,6 +272,8 @@ func NewService(provider base.AIProvider, reg *register.Registry, sessionRepo da
 	// 创建 Executor（暂不依赖 MCPContext）
 	svc.skillExecutor = skill.NewExecutor(svc.skillRegistry, nil)
 	svc.skillExecutor.SetYAMLRunner(svc.skillRunner)
+	svc.agentLoader = agent.NewAgentLoader("agents")
+	log.Info("AgentLoader initialized", "defs", svc.agentLoader.Count(), "names", svc.agentLoader.Names())
 	svc.agentMgr = agent.NewManager(agent.ManagerConfig{
 		MaxConcurrent: 5,
 		MaxRounds:     100,
@@ -327,10 +337,12 @@ func NewService(provider base.AIProvider, reg *register.Registry, sessionRepo da
 			}
 			msg := fmt.Sprintf("[后台任务完成] %d/%d 成功\n%s", ok, ok+fail, strings.Join(parts, "\n"))
 			svc.InjectWithPriority(sessionID, msg, "info", "agent_completion")
+			// Notify frontend that agents are done
+			svc.publishSessionStatus(sessionID, false)
 			// Auto-resume main agent now that all sub-agents are done
 			if !svc.HasActiveStream(sessionID) {
-				svc.resumeMainAgent(sessionID)
-			}
+					svc.resumeMainAgent(sessionID)
+				}
 		},
 	})
 	// Periodic agent cleanup (every 5 min, remove agents older than 30 min)
@@ -553,7 +565,7 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userID, userMessage
 		if len(modelOpt) > 0 {
 			modelOverride = modelOpt[0]
 		}
-		bgCtx := context.Background()
+		bgCtx := ctx // derive from passed ctx so cancellation propagates to LLM calls
 		if modelOverride != "" {
 			bgCtx = context.WithValue(bgCtx, base.ModelOverrideKey{}, modelOverride)
 		}
@@ -609,15 +621,17 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userID, userMessage
 			history = append(history, base.Message{Role: "system", Content: resumePrompt})
 		}
 
-		// Plan mode: guide LLM to use spawn_agent
+		// Plan mode: guide LLM to use spawn_agent_name
 		if planMode, _ := bgCtx.Value(base.PlanModeKey{}).(bool); planMode && planner.ShouldPlan(userMessage) {
 			history = append(history, base.Message{Role: "system", Content: fmt.Sprintf(
 				"## Plan Mode 已启用\n" +
-					"请使用 spawn_agent 工具将任务分解为并行的子 Agent。\n" +
-					"每个子 Agent 有独立上下文，专注执行其子任务。\n" +
-					"- 可并行的独立子任务放入 tasks 数组\n" +
-					"- 为每个子任务指定合适的 tool_filter\n" +
+					"请使用 spawn_agent_name 工具按预定义Agent名称派生子Agent。\n" +
+					"可用的预定义Agent: %s\n" +
+					"- 选择合适的 name 传入\n" +
+					"- 可用 goal 参数覆盖具体任务目标\n" +
+					"- 设置为 async: true 可并行执行多个Agent\n" +
 					"- 简单单一的问题无需分解，直接回答即可",
+				strings.Join(s.agentLoader.Names(), ", "),
 			)})
 		}
 
@@ -805,7 +819,11 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userID, userMessage
 
 			log.Debug("调用LLM", "会话", sessionID, "轮次", state.round, "历史消息数", len(history), "工具数", len(allTools))
 			s.chatLogger.LogRoundStart(sessionID, state.round, len(history), len(allTools))
-			stream, err := s.provider.ChatStream(bgCtx, history, allTools)
+			// Stabilize history for DeepSeek prompt cache: move transient system messages
+	// (topology feedback, retry hints, etc.) to the end so the conversation prefix
+	// [system_prompt, user1, assistant1, user2, ...] stays identical across rounds.
+	history = stabilizeHistoryForCache(history)
+	stream, err := s.provider.ChatStream(bgCtx, history, allTools)
 			if err != nil {
 				s.chatLogger.LogError(sessionID, state.round, "LLM调用失败: "+err.Error())
 				log.Error("LLM调用失败", "会话", sessionID, "轮次", state.round, "错误", err.Error())
@@ -1291,82 +1309,21 @@ func (s *Service) InjectMessage(sessionID, content string) {
 }
 
 func (s *Service) InjectWithPriority(sessionID, content, priority, source string) {
-	s.injectMu.RLock()
-	ch, ok := s.injections[sessionID]
-	s.injectMu.RUnlock()
-	if !ok {
-		// Create injectCh if missing — agent results may arrive after stream ends,
-		// need to be buffered for the next StreamChat to consume during thinking gaps
-		ch = s.getOrCreateInjectCh(sessionID)
+	// User messages → queue for processing
+	if source == "user" {
+		s.queueMessage(&session.QueuedMessage{SessionID: sessionID, Role: "user", Content: content, Priority: 1, Source: source})
+		return
 	}
-	select {
-	case ch <- InjectedMessage{Content: content, Priority: priority, Source: source, Timestamp: time.Now()}:
-	default:
-		log.Warn("InjectWithPriority channel full, dropping", "session", sessionID, "source", source)
-	}
+	// System/agent messages → save to history only (not trigger StreamChat)
+	s.saveInjectToHistory(sessionID, content, source)
 }
 
-func (s *Service) InjectUserMessage(sessionID, content string) {
+func (s *Service) saveInjectToHistory(sessionID, content, source string) {
 	sessionType := models.SessionTypeChat
-	if strings.HasPrefix(sessionID, "qqbot_") {
-		sessionType = models.SessionTypeQQBot
-	}
-	history, _ := s.sessions.GetOrCreate(sessionID, sessionType, content)
-	history = append(history, base.Message{Role: "user", Content: content})
-	s.sessions.Save(sessionID, history)
-
-	// Save to history and push to active stream if available.
-	// If no active StreamChat, start one immediately so the user gets a response
-	// without waiting for all sub-agents to complete.
-	s.InjectWithPriority(sessionID, "[用户消息] "+content, "user", "user")
-	if !s.HasActiveStream(sessionID) {
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-			defer cancel()
-			ctx = context.WithValue(ctx, base.SessionIDKey{}, sessionID)
-			stream := s.StreamChat(ctx, sessionID, "", content)
-			eb := s.eventBus.getOrCreate(sessionID)
-			for ev := range stream {
-				eb.publish(ev)
-			}
-		}()
-	}
-}
-
-// SaveSystemMessage 直接将系统消息持久化到会话历史（不依赖 StreamChat injectCh）
-func (s *Service) SaveSystemMessage(sessionID, content string) {
-	history, _ := s.sessions.GetOrCreate(sessionID, models.SessionTypeChat, "")
-	if len(history) > 0 && history[len(history)-1].Role == "assistant" && history[len(history)-1].Blocks != nil {
-		history[len(history)-1].Blocks = append(history[len(history)-1].Blocks, base.ContentBlock{Type: "content", Content: content})
-	}
+	if strings.HasPrefix(sessionID, "qqbot_") { sessionType = models.SessionTypeQQBot }
+	history, _ := s.sessions.GetOrCreate(sessionID, sessionType, "")
 	history = append(history, base.Message{Role: "system", Content: content})
 	s.sessions.Save(sessionID, history)
-	// 同时尝试通过 injectCh 推送给活跃流（如果存在的话）
-	s.InjectWithPriority(sessionID, content, "info", "command_result")
-}
-
-// resumeMainAgent 在子Agent全部完成后恢复主Agent，事件通过 eventBus 发送。
-func (s *Service) resumeMainAgent(sessionID string) {
-	// 将 agent 结果汇总为 system 消息注入会话历史（前端不渲染 system 消息气泡）
-	history, _ := s.sessions.GetOrCreate(sessionID, models.SessionTypeChat, "")
-	history = append(history, base.Message{
-		Role: "system",
-		Content: "[系统] 所有子Agent已完成。请根据以下 agent_result 汇总后回复用户。不要输出 JSON，直接给用户可读的汇总结果。",
-	})
-	s.sessions.Save(sessionID, history)
-
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-		defer cancel()
-		ctx = context.WithValue(ctx, base.SessionIDKey{}, sessionID)
-		// 使用 "继续" 作为内部触发消息，避免空消息导致无关记忆匹配
-		stream := s.StreamChat(ctx, sessionID, "", "继续")
-		eb := s.eventBus.getOrCreate(sessionID)
-		for ev := range stream {
-			eb.publish(ev)
-		}
-		eb.publish(base.ChatStreamEvent{Type: "session_complete", Content: sessionID})
-	}()
 }
 
 // ── Confirm ──
@@ -1757,6 +1714,96 @@ func (s *Service) GetToolsJSON() []byte {
 	return data
 }
 func (s *Service) HasActiveSession(sessionID string) bool { return s.sessions.Get(sessionID) != nil }
+
+func (s *Service) HasQueuedMessages(sessionID string) bool {
+	if s.msgQueues == nil { return false }
+	mq := s.msgQueues.Get(sessionID)
+	return mq != nil && mq.Len() > 0
+}
+
+func (s *Service) InjectUserMessage(sessionID, content string) {
+	s.queueMessage(&session.QueuedMessage{
+		SessionID: sessionID, Role: "user", Content: content,
+		Priority: 1, Source: "user",
+	})
+}
+
+func (s *Service) queueMessage(msg *session.QueuedMessage) {
+	if s.msgQueues == nil { return }
+	mq := s.msgQueues.GetOrCreate(msg.SessionID, func(m *session.QueuedMessage) {
+		s.processQueuedMessage(m)
+	})
+
+	// User messages interrupt the currently processing message
+	if msg.Priority >= 1 && msg.Source == "user" && mq.IsProcessing() {
+		s.msgQueueCancelMu.Lock()
+		if cancel, ok := s.msgQueueCancels[msg.SessionID]; ok && cancel != nil {
+			log.Info("中断当前Agent处理，插入新用户消息", "session", truncateStr(msg.SessionID, 20))
+			cancel()
+		}
+		s.msgQueueCancelMu.Unlock()
+	}
+
+	mq.Push(msg)
+}
+
+func (s *Service) processQueuedMessage(msg *session.QueuedMessage) {
+	processStart := time.Now()
+	queueLatency := processStart.Sub(msg.CreatedAt).Milliseconds()
+	log.Info("开始处理队列消息", "session", truncateStr(msg.SessionID, 20),
+		"source", msg.Source, "queueLatencyMs", queueLatency)
+
+	// Publish stream_status: the source of truth for frontend isBusy
+	s.publishSessionStatus(msg.SessionID, true)
+	defer func() {
+		if !s.HasRunningAgents(msg.SessionID) {
+			s.publishSessionStatus(msg.SessionID, false)
+		}
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Register cancel func so incoming user messages can interrupt
+	s.msgQueueCancelMu.Lock()
+	s.msgQueueCancels[msg.SessionID] = cancel
+	s.msgQueueCancelMu.Unlock()
+	defer func() {
+		s.msgQueueCancelMu.Lock()
+		delete(s.msgQueueCancels, msg.SessionID)
+		s.msgQueueCancelMu.Unlock()
+	}()
+
+	ctx = context.WithValue(ctx, base.SessionIDKey{}, msg.SessionID)
+
+	stream := s.StreamChat(ctx, msg.SessionID, "", msg.Content)
+	for range stream {}
+
+	log.Info("消息处理完成", "session", truncateStr(msg.SessionID, 20),
+		"source", msg.Source, "totalMs", time.Since(processStart).Milliseconds())
+
+	// If cancelled by interrupt, re-queue as "继续" since the original
+	// user message was already appended to history by the aborted StreamChat.
+	if ctx.Err() != nil {
+		log.Info("处理被中断，重新入队", "session", truncateStr(msg.SessionID, 20), "source", msg.Source)
+		s.msgQueues.Get(msg.SessionID).Push(&session.QueuedMessage{
+			SessionID: msg.SessionID, Role: "system", Content: "继续",
+			Priority: 0, Source: "interrupted_resume",
+		})
+	}
+}
+
+func (s *Service) resumeMainAgent(sessionID string) {
+	mq := s.msgQueues.Get(sessionID)
+	if mq != nil && mq.Len() > 0 { return }
+	history, _ := s.sessions.GetOrCreate(sessionID, models.SessionTypeChat, "")
+	history = append(history, base.Message{Role: "system", Content: "[系统] 所有子Agent已完成。请汇总结果回复用户。"})
+	s.sessions.Save(sessionID, history)
+	s.queueMessage(&session.QueuedMessage{
+		SessionID: sessionID, Role: "system", Content: "继续",
+		Priority: 0, Source: "agent_completion",
+	})
+}
 func (s *Service) SubscribeSession(sessionID string) chan base.ChatStreamEvent {
 	return s.eventBus.getOrCreate(sessionID).subscribe()
 }
@@ -1793,6 +1840,20 @@ func (s *Service) signalSessionDone(sessionID string) {
 	}
 	// Clean up event bus — no more subscribers needed
 	s.eventBus.remove(sessionID)
+}
+
+// publishSessionStatus sends a session_status event to the event bus,
+// telling the frontend whether the backend is actively processing.
+// This is the single source of truth for the frontend's isBusy flag.
+func (s *Service) publishSessionStatus(sessionID string, streaming bool) {
+	if s.eventBus == nil {
+		return
+	}
+	log.Info("publishSessionStatus", "session", truncateStr(sessionID, 20), "streaming", streaming)
+	s.eventBus.getOrCreate(sessionID).publish(base.ChatStreamEvent{
+		Type:    "session_status",
+		Content: fmt.Sprintf(`{"session_id":"%s","streaming":%v}`, sessionID, streaming),
+	})
 }
 
 func (s *Service) ListActiveSessions() []string {
@@ -2109,7 +2170,7 @@ func (s *Service) recentToolNames(history []base.Message, n int) []string {
 }
 
 // hasRecentBackgroundTool checks if any of the last N assistant messages included
-// a background/async tool (spawn_agent, run_command with Background:true, etc.).
+// a background/async tool (spawn_agent_name, run_command with Background:true, etc.).
 // Used to skip interception when work is being handled asynchronously.
 func (s *Service) hasRecentBackgroundTool(history []base.Message, lookback int) bool {
 	count := 0
@@ -2482,8 +2543,10 @@ func boolVal(m map[string]any, key string) bool  { b, _ := m[key].(bool); return
 // RegisterAgentTools 注册子 Agent、Todo、Cron、Skill 工具。
 // 必须在 NewService 之后、StreamChat 之前调用。
 func (s *Service) RegisterAgentTools() {
-	// spawn_agent — 派生并行子 Agent
-	s.registry.Register(agent.ToolDef(s.agentMgr))
+	// spawn_agent_name — 按预定义YAML名称派生Agent
+	if s.agentLoader != nil && s.agentLoader.Count() > 0 {
+		s.registry.Register(agent.ToolDefSpawnAgentName(s.agentMgr, s.agentLoader))
+	}
 
 	// agent_report — 子Agent完成任务后汇报状态（结构化参数保证稳定性）
 	s.registry.Register(&base.ToolDef{
@@ -2640,10 +2703,10 @@ func (s *Service) RegisterAgentTools() {
 		},
 	})
 
-	// web_search — 通过 DuckDuckGo 搜索网页（免费，无需 API Key）
+	// web_search — DuckDuckGo Lite + Bing fallback（免费，无需 API Key）
 	s.registry.Register(&base.ToolDef{
 		Name:        "web_search",
-		Description: "搜索互联网获取实时信息。当需要最新数据、新闻、事实时使用。背后使用 DuckDuckGo，无需 API Key。",
+		Description: "搜索互联网获取实时信息。优先 DuckDuckGo Lite，回退 Bing。当需要最新数据、新闻、事实时使用。",
 		Category:    "search",
 		RiskLevel:   "readonly",
 		Timeout:     15 * time.Second,
@@ -2659,7 +2722,7 @@ func (s *Service) RegisterAgentTools() {
 			if query == "" {
 				return "", fmt.Errorf("query 不能为空")
 			}
-			return bingSearch(ctx, query)
+			return webSearch(ctx, query)
 		},
 	})
 
@@ -3322,55 +3385,51 @@ func (s *Service) preExecCommand(sessionID, cmdName, cmdArgs string) string {
 }
 
 // bingSearch 使用 Bing 搜索（国内可访问，无需 API Key）。
-func bingSearch(ctx context.Context, query string) (string, error) {
-	req, _ := http.NewRequestWithContext(ctx, "GET",
-		"https://www.bing.com/search?"+url.Values{"q": {query}, "setlang": {"zh-cn"}, "count": {"15"}}.Encode(), nil)
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9")
+func webSearch(ctx context.Context, query string) (string, error) {
+	// Try DuckDuckGo Lite first — simpler HTML, bot-friendly
+	result, err := ddgLiteSearch(ctx, query)
+	if err == nil && result != "" && !strings.Contains(result, "未找到") {
+		return result, nil
+	}
+	// Fallback to Bing
+	return bingSearchHTML(ctx, query)
+}
 
-	client := &http.Client{Timeout: 12 * time.Second}
+func ddgLiteSearch(ctx context.Context, query string) (string, error) {
+	req, _ := http.NewRequestWithContext(ctx, "GET",
+		"https://lite.duckduckgo.com/lite/?"+url.Values{"q": {query}, "kl": {"cn-zh"}}.Encode(), nil)
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; YunxiBot/1.0)")
+	client := &http.Client{Timeout: 8 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("搜索请求失败: %w", err)
+		return "", err
 	}
 	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 512*1024))
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 256*1024))
 	html := string(body)
 
-	// 解析 Bing 搜索结果: <li class="b_algo"><h2><a href="URL">Title</a></h2><p>Desc</p>
-	algoRe := regexp.MustCompile(`<li class="b_algo">(.*?)</li>`)
-	linkRe := regexp.MustCompile(`<a[^>]*href="(https?://[^"]*)"[^>]*>([^<]*)</a>`)
-	descRe := regexp.MustCompile(`<p[^>]*>(.*?)</p>`)
+	// DDG Lite: <a rel="nofollow" href="URL" class="result-link">Title</a>
+	// followed by <span class="result-snippet">Description</span>
+	resultRe := regexp.MustCompile(`<a[^>]*rel="nofollow"[^>]*href="(https?://[^"]*)"[^>]*class="result-link"[^>]*>([^<]*)</a>`)
+	matches := resultRe.FindAllStringSubmatch(html, -1)
+	if len(matches) == 0 {
+		return fmt.Sprintf("未找到 '%s' 的搜索结果", query), nil
+	}
 
-	algos := algoRe.FindAllStringSubmatch(html, -1)
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("搜索: %s\n\n", query))
-
 	count := 0
-	for _, algo := range algos {
-		if count >= 10 {
+	for _, m := range matches {
+		if count >= 8 {
 			break
 		}
-		block := algo[1]
-		linkMatch := linkRe.FindStringSubmatch(block)
-		if linkMatch == nil {
-			continue
-		}
-		urlStr := linkMatch[1]
-		title := cleanHTML(linkMatch[2])
+		urlStr := m[1]
+		title := strings.TrimSpace(m[2])
 		if urlStr == "" || title == "" {
 			continue
 		}
 		count++
 		sb.WriteString(fmt.Sprintf("[%d] %s\n%s\n", count, title, urlStr))
-		descMatch := descRe.FindStringSubmatch(block)
-		if descMatch != nil {
-			desc := cleanHTML(descMatch[1])
-			sb.WriteString(truncateStr(strings.TrimSpace(desc), 300))
-			sb.WriteString("\n")
-		}
-		sb.WriteString("\n")
 	}
 	if count == 0 {
 		return fmt.Sprintf("未找到 '%s' 的搜索结果", query), nil
@@ -3378,7 +3437,61 @@ func bingSearch(ctx context.Context, query string) (string, error) {
 	return sb.String(), nil
 }
 
-// cleanHTML 去除 HTML 标签
+func bingSearchHTML(ctx context.Context, query string) (string, error) {
+	req, _ := http.NewRequestWithContext(ctx, "GET",
+		"https://www.bing.com/search?"+url.Values{"q": {query}, "setlang": {"zh-cn"}, "count": {"15"}}.Encode(), nil)
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9")
+	client := &http.Client{Timeout: 12 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("搜索请求失败: %w", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 512*1024))
+	html := string(body)
+
+	// Parse Bing: try multiple patterns
+	patterns := []string{
+		`<li class="b_algo">(.*?)</li>`,
+		`<li class="b_algo"[^>]*>(.*?)</li>`,
+	}
+	var algos [][]string
+	for _, p := range patterns {
+		algos = regexp.MustCompile(p).FindAllStringSubmatch(html, -1)
+		if len(algos) > 0 {
+			break
+		}
+	}
+	if len(algos) == 0 {
+		return fmt.Sprintf("未找到 '%s' 的搜索结果", query), nil
+	}
+
+	linkRe := regexp.MustCompile(`<a[^>]*href="(https?://[^"]*)"[^>]*>([^<]*)</a>`)
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("搜索: %s\n\n", query))
+	count := 0
+	for _, algo := range algos {
+		if count >= 8 {
+			break
+		}
+		linkMatch := linkRe.FindStringSubmatch(algo[1])
+		if linkMatch == nil {
+			continue
+		}
+		urlStr, title := linkMatch[1], cleanHTML(linkMatch[2])
+		if urlStr == "" || title == "" {
+			continue
+		}
+		count++
+		sb.WriteString(fmt.Sprintf("[%d] %s\n%s\n\n", count, title, urlStr))
+	}
+	if count == 0 {
+		return fmt.Sprintf("未找到 '%s' 的搜索结果", query), nil
+	}
+	return sb.String(), nil
+}
+
 func cleanHTML(s string) string {
 	return regexp.MustCompile(`<[^>]*>`).ReplaceAllString(s, "")
 }
@@ -3388,7 +3501,7 @@ var silentTools = map[string]bool{
 	"recall":                       true,
 	"remember":                     true,
 	"request_confirmation":         true,
-	"spawn_agent":                  true,
+	"spawn_agent_name":             true,
 	"agent_report":                 true,
 	"_install_skill":               true,
 	"_install_mcp":                 true,
@@ -3396,6 +3509,27 @@ var silentTools = map[string]bool{
 }
 
 func isSilentTool(name string) bool { return silentTools[name] }
+
+// stabilizeHistoryForCache restructures history so the conversation prefix
+// [system_prompt, user1, assistant1, tool1, user2, assistant2, ...] stays stable
+// across rounds. Transient system messages (topology feedback, retry hints, context
+// activation notices) are moved to the end where they don't break DeepSeek prompt cache.
+func stabilizeHistoryForCache(history []base.Message) []base.Message {
+	if len(history) <= 1 {
+		return history
+	}
+	stable := make([]base.Message, 0, len(history))
+	trailing := make([]base.Message, 0, 8)
+	stable = append(stable, history[0]) // system prompt stays first
+	for i := 1; i < len(history); i++ {
+		if history[i].Role == "system" {
+			trailing = append(trailing, history[i])
+		} else {
+			stable = append(stable, history[i])
+		}
+	}
+	return append(stable, trailing...)
+}
 
 func truncateStr(s string, maxLen int) string {
 	runes := []rune(s)

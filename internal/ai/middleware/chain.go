@@ -23,6 +23,7 @@ type Chain struct {
 	registry    *register.Registry
 	maxRetry    int
 	deny        *DenyEngine // 硬边界：不可绕过的安全规则引擎
+	hooks       *HookRegistry // 可配置的事件钩子系统（Claude Code 风格）
 	onResult    ToolResultCallback
 }
 
@@ -33,6 +34,12 @@ func NewChain(reg *register.Registry) *Chain {
 
 // DenyEngine 返回拒绝规则引擎（供外部添加自定义规则）
 func (c *Chain) DenyEngine() *DenyEngine { return c.deny }
+
+// SetHookRegistry injects a hook registry for tool lifecycle interception.
+func (c *Chain) SetHookRegistry(hr *HookRegistry) { c.hooks = hr }
+
+// HookRegistry returns the current hook registry (may be nil if not set).
+func (c *Chain) HookRegistry() *HookRegistry { return c.hooks }
 
 // SetResultCallback registers a callback invoked after each tool execution.
 // Used by the topology tracker to observe tool outcomes.
@@ -57,9 +64,29 @@ func (c *Chain) Execute(ctx context.Context, toolName string, args map[string]an
 		denied.Metadata.DurationMs = time.Since(start).Milliseconds()
 		log.Warn("tool denied by security rule",
 			"tool", toolName,
-			logger.KeySessionID, sessionID,
+			"session", sessionID,
 			"reason", denied.Error.Message)
 		return denied
+	}
+
+	// 0.5 PreToolUse hook — Claude Code style: exit code 2 blocks, 1 warns
+	if c.hooks != nil {
+		if blocked, warnings := c.hooks.CheckToolPreUse(toolName, args); blocked {
+			return &base.ToolResult{
+				Status: base.StatusError,
+				Error:  &base.ToolError{
+					Code:     base.ErrCodePermissionDenied,
+					Message:  fmt.Sprintf("Hook blocked: %s", warnings[0]),
+					Retryable: false,
+				},
+				Summary:  fmt.Sprintf("[%s 已被 hook 阻止] %s", toolName, warnings[0]),
+				Metadata: base.ToolMetadata{DurationMs: time.Since(start).Milliseconds()},
+			}
+		} else if len(warnings) > 0 {
+			for _, w := range warnings {
+				log.Warn("tool pre-use hook warning", "tool", toolName, "warning", w)
+			}
+		}
 	}
 
 	// 1. PreHook: resolve timeout — AI-assigned > tool default
@@ -100,6 +127,9 @@ func (c *Chain) Execute(ctx context.Context, toolName string, args map[string]an
 
 	// 2b. Check if context was cancelled during execution (timeout)
 	if ctx.Err() != nil {
+		if c.hooks != nil {
+			_, _ = c.hooks.CheckToolPostUse(toolName, args, fmt.Sprintf("timeout: %v", ctx.Err()))
+		}
 		if result.Status != base.StatusError {
 			result = &base.ToolResult{
 				Status: base.StatusError,
@@ -119,7 +149,29 @@ func (c *Chain) Execute(ctx context.Context, toolName string, args map[string]an
 		}
 	}
 
-	// 3. PostHook: 注入工具名称和耗时
+	// 3. PostToolUse hook — Claude Code style: inspect result before retry decision
+	if c.hooks != nil {
+		resultSummary := result.Summary
+		if result.Error != nil {
+			resultSummary = result.Error.Message
+		}
+		blocked, warnings := c.hooks.CheckToolPostUse(toolName, args, resultSummary)
+		if blocked {
+			reason := "unknown"
+			if len(warnings) > 0 { reason = warnings[0] }
+			result = &base.ToolResult{
+				Status:    base.StatusError,
+				Error:     &base.ToolError{Code: base.ErrCodePermissionDenied, Message: "Post-use hook blocked: " + reason, Retryable: false},
+				Summary:   fmt.Sprintf("[%s 已被 hook 阻止] %s", toolName, reason),
+				Metadata:  base.ToolMetadata{DurationMs: time.Since(start).Milliseconds()},
+			}
+		}
+		for _, w := range warnings {
+			log.Warn("tool post-use hook warning", "tool", toolName, "warning", w)
+		}
+	}
+
+	// 4. PostHook: 注入工具名称和耗时
 	duration := time.Since(start).Milliseconds()
 	result.Metadata.DurationMs = duration
 	if result.Error != nil && result.Error.Code == "" {
@@ -129,7 +181,7 @@ func (c *Chain) Execute(ctx context.Context, toolName string, args map[string]an
 		result.Summary = toolName + " 执行完成"
 	}
 
-	// 4. 智能重试
+	// 5. 智能重试
 	if result.Status == base.StatusError && result.Error != nil && result.Error.Retryable {
 		policy := tool.RetryPolicy
 		if policy == nil {
@@ -138,6 +190,13 @@ func (c *Chain) Execute(ctx context.Context, toolName string, args map[string]an
 		for retry := 0; retry < policy.MaxRetries; retry++ {
 			if result.Error.RetryHint != "" {
 				log.Info("retrying tool with hint", "tool", toolName, "hint", result.Error.RetryHint)
+			}
+			// OnRetry hook
+			if c.hooks != nil {
+				if blocked, _ := c.hooks.CheckToolPreUse(toolName, args); blocked {
+					log.Warn("retry blocked by hook", "tool", toolName)
+					return result
+				}
 			}
 			select {
 			case <-ctx.Done():

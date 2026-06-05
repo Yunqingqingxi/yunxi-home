@@ -28,22 +28,40 @@ import (
 var hookLog = logger.ForComponent("hooks")
 
 // HookEvent identifies the tool lifecycle point being intercepted.
+// Inspired by Claude Code's hook event system.
 type HookEvent string
 
 const (
-	HookPreTool  HookEvent = "pre_tool"  // Before tool execution
-	HookPostTool HookEvent = "post_tool" // After tool execution
-	HookPrompt   HookEvent = "prompt"    // On user prompt (pre-processing)
-	HookStop     HookEvent = "stop"      // Before session stop
+	HookPreTool    HookEvent = "pre_tool"    // Before tool execution (after deny check)
+	HookPostTool   HookEvent = "post_tool"   // After tool execution (before retry)
+	HookPrompt     HookEvent = "prompt"      // On user prompt (pre-processing)
+	HookStop       HookEvent = "stop"        // Before session stop
+	HookPreLLMCall HookEvent = "pre_llm"     // Before LLM API call
+	HookPostLLMCall HookEvent = "post_llm"   // After LLM API call completes
+	HookOnError    HookEvent = "on_error"    // On tool execution error
+	HookOnRetry    HookEvent = "on_retry"    // Before each retry attempt
 )
 
 // HookAction determines what happens when a rule matches.
+// Uses Claude Code-style exit codes: 0=success, 1=warn, 2=block.
 type HookAction string
 
 const (
-	HookWarn  HookAction = "warn"  // Show warning, allow operation
-	HookBlock HookAction = "block" // Prevent operation
+	HookWarn  HookAction = "warn"  // Exit code 1: show warning, allow operation
+	HookBlock HookAction = "block" // Exit code 2: prevent operation entirely
 )
+
+// HookExitCode maps hook actions to Claude Code-style exit codes.
+func HookExitCode(action HookAction) int {
+	switch action {
+	case HookBlock:
+		return 2
+	case HookWarn:
+		return 1
+	default:
+		return 0
+	}
+}
 
 // HookCondition defines a matching condition for a hook rule.
 type HookCondition struct {

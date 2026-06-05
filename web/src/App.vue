@@ -154,7 +154,7 @@
         >
           <component
             :is="Component"
-            :key="route.path"
+            :key="route.name"
           />
         </transition>
       </router-view>

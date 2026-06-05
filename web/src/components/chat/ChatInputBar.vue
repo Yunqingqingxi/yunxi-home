@@ -101,8 +101,8 @@
         <button
           class="tb-send"
           :class="{ stop: isBusy && !hasInput, active: hasInput || attachedFiles.length }"
-          :disabled="!hasInput && !attachedFiles.length"
-          :title="isBusy && !hasInput ? '停止生成': '发送消息'"
+          :disabled="(!hasInput && !attachedFiles.length) && !isBusy"
+          :title="isBusy && !hasInput ? '停止生成' : '发送消息'"
           @click="isBusy && !hasInput ? handleStop() : doSend()"
         >
           <svg v-if="isBusy && !hasInput" width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><rect x="2" y="2" width="8" height="8" rx="1.5"/></svg>
@@ -247,8 +247,7 @@ const ctxColor = computed(() => {
 })
 
 // ── 发送按钮状态计算 ──
-const isBusy = computed(() => store.isStreaming || store.hasRunningAgents || !!store.currentToolName)
-const hasAgent = computed(() => store.hasRunningAgents && !store.isStreaming)
+const isBusy = computed(() => !!store.streamingSessions[store.sessionId])
 const hasInput = computed(() => !!input.value.trim())
 
 // ── 中断恢复（拓扑集成在输入栏）──
@@ -495,6 +494,7 @@ function selectCommand(cmd) {
 // ── Placeholder ──
 const inputPlaceholder = computed(() => {
   if (interruptSnapshot.value) return '输入补充内容后点击"继续"，或直接继续...'
+  if (isBusy.value) return 'AI 正在处理中，输入新消息可插入...'
   if (!store.sessionId) return '描述你想做什么...'
   return '输入消息，Enter 发送，/ 指令'
 })
@@ -559,16 +559,19 @@ async function stopGeneration() {
 }
 
 // ── Send ──
+let _sendingInput = false
 async function doSend() {
+  if (_sendingInput) return  // guard against double Enter
   const t = input.value.trim()
   const files = attachedFiles.value.filter(f => f.file)
   if (!t && !files.length) return
+  _sendingInput = true
 
   if (t.startsWith('/') && !files.length) {
     store.sendMessage(t, currentModelName.value, {
       reasoning_intensity: reasoning.value,
       plan_mode: false
-    })
+    }).finally(() => { _sendingInput = false })
     input.value = ''
     inputEl.value && (inputEl.value.style.height = 'auto', inputEl.value.style.overflowY = 'hidden')
     return
@@ -607,7 +610,7 @@ async function doSend() {
   store.sendMessage(msg, currentModelName.value, {
     reasoning_intensity: reasoning.value,
     plan_mode: false
-  })
+  }).finally(() => { _sendingInput = false })
 }
 
 function removeFile(i) { attachedFiles.value.splice(i, 1) }

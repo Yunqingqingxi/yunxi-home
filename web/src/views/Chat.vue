@@ -49,25 +49,16 @@
             v-for="(msg, i) in safeMessages"
             :key="msg?.id || ('_null_' + i)"
           >
-            <!-- Insert button between messages -->
             <div
-              v-if="msg && i > 0 && msg.role === 'user'"
-              class="insert-between"
-              @click="startInsert(i)"
-              title="在此插入消息"
-            >
-              <span class="insert-line"></span>
-              <span class="insert-plus">+</span>
-            </div>
-            <div
-              v-if="msg && i > 0 && minutesBetween(safeMessages[i-1]?.createdAt, msg?.createdAt) > 5"
+              v-if="msg && i > 0 && memoMinutesBetween(safeMessages[i-1]?.createdAt, msg?.createdAt) > 5"
               class="time-divider"
             >
-              <span>{{ msg.createdAt ? formatHM(msg.createdAt) : '' }}</span>
+              <span>{{ msg.createdAt ? memoFormatHM(msg.createdAt) : '' }}</span>
             </div>
-            <!-- Message wrapper with edit controls -->
+            <!-- Message wrapper with v-memo: only re-render when msg identity or _v changes -->
             <div
               v-if="msg"
+              v-memo="[msg._v, editingIndex === i]"
               class="msg-wrapper"
               :class="{ 'msg-editing': editingIndex === i, 'msg-fading': fadingNodes && fadingNodes > 0 && i >= editRebaseIndex }"
               @mouseenter="hoveredMsg = i"
@@ -77,18 +68,8 @@
                 :msg="editingIndex === i ? editDraftMsg : msg"
                 :show-avatar="i === 0 || safeMessages[i-1]?.role !== msg.role"
                 :class="{ 'msg-grouped': i > 0 && safeMessages[i-1]?.role === msg.role }"
+                @edit="startEdit(i, $event)"
               />
-              <!-- Edit pencil on user messages -->
-              <button
-                v-if="msg.role === 'user' && hoveredMsg === i && editingIndex !== i"
-                class="edit-pencil"
-                title="编辑消息"
-                @click="startEdit(i, msg)"
-              >
-                <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
-                  <path d="M11.5 1.5l3 3L5 14H2v-3L11.5 1.5z"/>
-                </svg>
-              </button>
             </div>
             <!-- Edit bar -->
             <div v-if="editingIndex === i" class="edit-bar">
@@ -118,7 +99,7 @@
           class="scroll-to-bottom-btn"
           :style="{ bottom: (inputBarHeight + 8) + 'px' }"
           title="滚动到最新"
-          @click="scrollToBottom(true)"
+          @click="scrollToBottom()"
         >
           <svg
             width="16"
@@ -221,6 +202,23 @@ import LockConflictNotice from '../components/chat/LockConflictNotice.vue'
 import MetaReportCard from '../components/chat/MetaReportCard.vue'
 import { formatHM, minutesBetween } from '../composables/useFormat'
 
+// Memoize time calculations to avoid re-computing in v-for
+const _timeCache = new Map<string, number>()
+const _fmtCache = new Map<number, string>()
+function memoMinutesBetween(a: number | undefined, b: number | undefined): number {
+  const k = `${a ?? 0}|${b ?? 0}`
+  if (_timeCache.has(k)) return _timeCache.get(k)!
+  const v = minutesBetween(a, b)
+  _timeCache.set(k, v)
+  return v
+}
+function memoFormatHM(ts: number): string {
+  if (_fmtCache.has(ts)) return _fmtCache.get(ts)!
+  const v = formatHM(ts)
+  _fmtCache.set(ts, v)
+  return v
+}
+
 const route = useRoute()
 const router = useRouter()
 const store = useChatStore()
@@ -254,19 +252,6 @@ function startEdit(i: number, msg: any) {
   editingIndex.value = i
   editContent.value = msg.content || ''
   editDraftMsg.value = { ...msg, content: msg.content }
-  nextTick(() => {
-    const ta = editTextarea.value
-    if (ta) {
-      if (Array.isArray(ta)) ta[0]?.focus()
-      else ta.focus()
-    }
-  })
-}
-
-function startInsert(i: number) {
-  editingIndex.value = i
-  editContent.value = ''
-  editDraftMsg.value = null
   nextTick(() => {
     const ta = editTextarea.value
     if (ta) {
@@ -416,14 +401,10 @@ function startObserve() {
 const scrolledUp = ref(false)
 const showScrollBtn = ref(false)
 let _userScrolled = false
-let _scrollRaf = 0
 
 function isNearBottom(el) { return el.scrollHeight - el.scrollTop - el.clientHeight < 120 }
-function scrollToBottom(smooth = false) {
-  cancelAnimationFrame(_scrollRaf)
-  const el = msgContainer.value; if (!el) return
-  el.style.scrollBehavior = smooth ? 'smooth' : 'auto'
-  el.scrollTop = el.scrollHeight
+function scrollToBottom() {
+  scrollAnchor.value?.scrollIntoView({ block: 'end', behavior: 'smooth' })
   _userScrolled = false; scrolledUp.value = false; showScrollBtn.value = false
 }
 function onPanelScroll() {
@@ -435,37 +416,27 @@ function onPanelScroll() {
 function onPanelWheel(e) { if (e.deltaY < 0) _userScrolled = true }
 function onPanelTouchMove(e) { _userScrolled = true }
 
-let _lastSmartScroll = 0
-function smartScrollToBottom() {
-  if (scrolledUp.value) return
-  const now = Date.now()
-  if (now - _lastSmartScroll < 200) return
-  _lastSmartScroll = now
-  scrollToEnd(false)
-}
-function scrollToEnd(smooth = true) {
-  const el = msgContainer.value
-  if (el) { el.scrollTo({ top: el.scrollHeight, behavior: smooth ? 'smooth' : 'instant' }) }
-}
-function forceScrollToBottom(retries = 30) {
-  if (scrollAnchor.value) { scrollAnchor.value.scrollIntoView({ block: 'end', behavior: 'instant' }) }
-  else if (retries > 0) { setTimeout(() => forceScrollToBottom(retries - 1), 100) }
+function scrollToEnd() {
+  scrollAnchor.value?.scrollIntoView({ block: 'end', behavior: 'instant' })
 }
 
-watch(() => store.messages.length, () => nextTick(() => smartScrollToBottom()))
-watch(() => store.isStreaming, (v) => { if (!v) { _userScrolled = false; nextTick(() => smartScrollToBottom()) } })
-// 流式时内容增长（_v 递增）自动滚动到底部
-watch(() => {
-  const msgs = store.messages
-  const last = msgs.length > 0 ? msgs[msgs.length - 1] : null
+// Content growth watcher: auto-scroll unless user scrolled up
+watch([() => store.messages.length, () => store.isStreaming, () => {
+  const msgs = store.messages; const last = msgs.length > 0 ? msgs[msgs.length - 1] : null
   return last?._v ?? 0
-}, () => { if (store.isStreaming) nextTick(() => smartScrollToBottom()) })
+}], ([len, streaming], [oldLen]) => {
+  if (!streaming) { _userScrolled = false }
+  if (!_userScrolled && !scrolledUp.value) {
+    scrollToEnd()
+  }
+})
 watch(() => store.sessionId, (sid, oldSid) => {
+  console.log('[Chat] sessionId changed:', (oldSid||'').slice(-8), '→', (sid||'').slice(-8), 'route:', route.path)
   _observer?.disconnect()
   if (sid) {
     inputBarHeight.value = 120; nextTick(startObserve)
-    // Immediately sync URL when session ID is first created
     if (!oldSid && route.path !== '/chat/' + sid) {
+      console.log('[Chat] syncing URL to /chat/' + sid)
       router.replace('/chat/' + sid)
     }
   }
@@ -474,30 +445,24 @@ watch(() => store.sessionId, (sid, oldSid) => {
 onMounted(() => { if (store.sessionId && store.messages.length) { nextTick(() => scrollToEnd()); setTimeout(() => scrollToEnd(), 200) } })
 
 // ── Route / session ──
-function loadSessionFromRoute(sid) {
-  if (!sid || sid === 'default') { store.clearCurrent(); router.replace('/chat'); return }
-  // If we already have messages for this session, don't overwrite (cache may be newer than DB)
-  if (store.sessionId === sid && store.messages.length > 0) return
-  store.disconnectStream()
-  store.resetStreaming(); store.sessionId = sid
-  store.activeConversationId = sid  // keep in sync with sessionId
-  store.fetchSessionMessages(sid).then(ok => {
-    if (!ok) { store.clearCurrent(); return }
-    _userScrolled = false; scrolledUp.value = false; showScrollBtn.value = false
-    const msgs = store.messages
-    const last = msgs.length > 0 ? msgs[msgs.length - 1] : null
-    const hasPendingTools = last && last.role === 'assistant' && (
-      (last.tools && last.tools.some(t => !t.result)) ||
-      (last.blocks && last.blocks.some(b => b.type === 'tool' && !b.result))
-    )
-    const conv = store.conversations.find((c: any) => c.id === sid)
-	    const isActive = conv?.isActive || false
-	    if (hasPendingTools || isActive) { store.connectStream(sid) }
-    // Scroll to bottom — instant first, then smooth re-check
-    nextTick(() => { scrollToEnd(false) })
-    setTimeout(() => { scrollToEnd(true) }, 150)
-    setTimeout(() => { scrollToEnd(true) }, 400)
-  })
+async function loadSessionFromRoute(sid) {
+	if (!sid || sid === 'default') { store.clearCurrent(); router.replace('/chat'); return }
+	// Already viewing this session — just ensure stream is connected
+	if (store.sessionId === sid && store.messages.length > 0) {
+		store.connectStream(sid)
+		nextTick(() => { scrollToEnd() })
+		return
+	}
+	// Keep old session's SSE alive — just swap displayed session
+	store.resetStreaming()
+	store.sessionId = sid
+	store.activeConversationId = sid
+	const ok = await store.fetchSessionMessages(sid)
+	if (!ok) { store.clearCurrent(); return }
+	_userScrolled = false; scrolledUp.value = false; showScrollBtn.value = false
+	// Always start persistent SSE for the newly loaded session
+	store.connectStream(sid)
+	nextTick(() => { scrollToEnd() })
 }
 
 watch(() => route.params.sessionId, loadSessionFromRoute, { immediate: true })
@@ -539,9 +504,15 @@ watch(
 
 function onSidebarSelect(id) {
   if (id === store.sessionId) return
-  store.switchConversation(id).then(ok => { if (ok) router.replace('/chat/' + id) })
+  store.switchConversation(id).then(ok => {
+    if (ok) {
+      _userScrolled = false; scrolledUp.value = false; showScrollBtn.value = false
+      nextTick(() => { scrollToEnd() })
+      router.replace('/chat/' + id)
+    }
+  })
 }
-function onNewChat() { store.clearCurrent(); router.replace('/chat') }
+function onNewChat() { console.log('[Chat] onNewChat'); store.clearCurrent(); router.replace('/chat') }
 
 async function onSidebarRename(id: string, title: string) {
   await store.renameConversation(id, title)
@@ -569,22 +540,20 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  console.log('[Chat] ⚠️ onUnmounted — component destroyed')
   _observer?.disconnect()
   if (_beforeUnload) {
     window.removeEventListener('beforeunload', _beforeUnload)
     _beforeUnload = null
   }
-  // Bug 1-3 fix: aggressive cleanup on unmount — all streams + all send flags
-  store.disconnectStream()
   store.cleanupAllStreams()
   store.forceClearSending()
 })
 
-// Bug 3 fix: watch route path — when leaving /chat/*, clean up all streams
+// Only cleanup streams when actually leaving chat page (not session switching)
 watch(() => route.path, (newPath, oldPath) => {
-  if (oldPath && oldPath.startsWith('/chat') && !newPath.startsWith('/chat')) {
+  if (oldPath && oldPath.startsWith('/chat/') && !newPath.startsWith('/chat')) {
     console.log('[Chat] leaving chat route, cleaning up all streams')
-    store.disconnectStream()
     store.cleanupAllStreams()
     store.forceClearSending()
   }
@@ -688,75 +657,8 @@ watch(() => route.path, (newPath, oldPath) => {
 /* ── v3.1 Message editing ── */
 .msg-wrapper {
   position: relative;
-}
-
-.edit-pencil {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  width: 28px;
-  height: 28px;
-  border: none;
-  border-radius: 6px;
-  background: var(--color-bg-3);
-  color: var(--color-text-3);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0;
-  transition: opacity 0.15s, background 0.15s;
-  z-index: 2;
-}
-
-.msg-wrapper:hover .edit-pencil {
-  opacity: 1;
-}
-
-.edit-pencil:hover {
-  background: var(--color-primary-light, #6366f122);
-  color: var(--color-primary, #6366f1);
-}
-
-.insert-between {
-  display: flex;
-  align-items: center;
-  height: 20px;
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.15s;
-  margin: -4px 0;
-}
-
-.insert-between:hover {
-  opacity: 1;
-}
-
-.insert-line {
-  flex: 1;
-  height: 1px;
-  background: var(--color-border);
-}
-
-.insert-plus {
-  margin: 0 12px;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: var(--color-bg-3);
-  border: 1px solid var(--color-border);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-  color: var(--color-text-3);
-  transition: all 0.15s;
-}
-
-.insert-between:hover .insert-plus {
-  background: var(--color-primary, #6366f1);
-  color: #fff;
-  border-color: var(--color-primary, #6366f1);
+  content-visibility: auto;
+  contain-intrinsic-size: auto 120px;
 }
 
 .edit-bar {
