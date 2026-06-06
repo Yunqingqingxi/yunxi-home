@@ -292,7 +292,7 @@ func (b *Bot) handlePrivateMessage(ctx context.Context, data *dto.WSC2CMessageDa
 		fileRefs := b.downloadAttachments(ctx, data.Attachments)
 		if len(fileRefs) > 0 {
 			if content == "" {
-				content = "请分析这些文件:"
+				content = "请分析这些文件并归档:"
 			}
 			content = strings.Join(fileRefs, "\n") + "\n" + content
 		}
@@ -349,12 +349,14 @@ const maxAIChatRetries = 2
 func (b *Bot) handleAIChat(ctx context.Context, userID, message string) (string, bool) {
 	sessionID := "qqbot_" + userID
 
-	// 文件发送指令：通过系统消息注入，不污染用户可见的聊天记录
+	// 文件处理指令：通过系统消息注入，不污染用户可见的聊天记录
+	// 包含分析 + 发送 + 归档三步流程
 	if !b.hasSeenFilePrompt(userID) {
 		b.aiService.InjectSystemMessage(sessionID,
-			"[系统指令] 发送文件流程：用 recall/file_search 找到文件路径 → **立即**返回 `[文件: 显示名 (/沙箱路径)]`。"+
-				"不要逐段读取文件内容，文件会被直接发送给用户。一行格式示例：`[文件: 设计文档.md (/docs/design.md)]`。"+
-				"即使文件很大也只需标记引用，系统会自动传输。在 `[文件: ...]` 后加一句简短说明即可。")
+			"[系统指令] 收到用户上传的文件后，按以下流程处理："+
+				"1. **分析文件**：用 file_read 读取文件内容，用 file_info 获取元信息（大小、类型、修改时间等）。简要总结文件内容、用途和关键信息，告诉用户你的分析结果。"+
+				"2. **发送文件**：如需让用户下载，返回 `[文件: 显示名 (/沙箱路径)]`。格式示例：`[文件: 设计文档.md (/docs/design.md)]`。不要逐段输出大文件内容，系统会自动传输。在标记后加一句简短说明即可。"+
+				"3. **归档文件**：分析完成后，根据文件类型和内容将文件移动到合理的归档目录。例如：文档类 → /归档/文档/，图片类 → /归档/图片/，代码类 → /归档/代码/，数据类 → /归档/数据/。使用 file_move 将文件从 qqbot 临时目录移动到对应的归档路径。归档后告知用户文件存放位置。")
 		b.markFilePromptSent(userID)
 	}
 

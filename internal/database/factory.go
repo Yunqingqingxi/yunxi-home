@@ -168,7 +168,7 @@ func fileInitDefaultAdmin(repo UserRepository) {
 	if err != nil || len(users) > 0 {
 		return
 	}
-	hash, _ := bcrypt.GenerateFromPassword([]byte("admin"), bcrypt.DefaultCost)
+	hash, _ := bcrypt.GenerateFromPassword([]byte("admin"), 12)
 	repo.Create(ctx, &models.User{
 		Username:     "admin",
 		PasswordHash: string(hash),

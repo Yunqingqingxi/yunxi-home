@@ -246,6 +246,10 @@ func reloadAISection(cfg *config.Config, data map[string]any) {
 			if s, ok := val.(string); ok {
 				cfg.AI.DefaultReasoning = s
 			}
+		case "expand_thinking_on_stream":
+			if b, ok := val.(bool); ok {
+				cfg.AI.ExpandThinkingOnStream = b
+			}
 		case "skills_dir":
 			if s, ok := val.(string); ok {
 				cfg.AI.SkillsDir = s
@@ -405,7 +409,7 @@ func buildConfigView(cfg *config.Config) map[string]any {
 			"has_password": cfg.Auth.Password != "",
 		},
 		"ai": func() map[string]any {
-			m := make(map[string]any, len(cfg.AI.Providers)+2)
+			m := make(map[string]any, len(cfg.AI.Providers)+3)
 			for pkey, pcfg := range cfg.AI.Providers {
 				m[pkey] = map[string]any{
 					"enabled":  pcfg.Enabled,
@@ -414,6 +418,7 @@ func buildConfigView(cfg *config.Config) map[string]any {
 			}
 			m["default_model"] = cfg.AI.DefaultModel
 			m["default_reasoning"] = cfg.AI.DefaultReasoning
+			m["expand_thinking_on_stream"] = cfg.AI.ExpandThinkingOnStream
 			return m
 		}(),
 		"qqbot": map[string]any{

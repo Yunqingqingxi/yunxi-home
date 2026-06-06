@@ -117,7 +117,7 @@ func (r *MySQLFullUserRepo) InitDefaultAdmin(ctx context.Context, username, pass
 	if len(users) > 0 {
 		return nil
 	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), 12)
 	if err != nil {
 		return fmt.Errorf("generate hash: %w", err)
 	}

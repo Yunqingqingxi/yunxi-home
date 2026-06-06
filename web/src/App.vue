@@ -316,12 +316,14 @@ import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from './stores/auth'
 import { useThemeStore } from './stores/theme'
 import { useUploadStore } from './stores/upload'
+import { useSettingsStore } from './stores/settings'
 import PageAnalyzer from './components/chat/PageAnalyzer.vue'
 import { formatRelativeShort } from './composables/useFormat'
 
 const router = useRouter()
 const route = useRoute()
 const theme = useThemeStore()
+const settingsStore = useSettingsStore()
 const uploadStore = useUploadStore()
 const authStore = useAuthStore()
 const gupCollapsed = ref(false)
@@ -494,6 +496,7 @@ async function deleteSession(id) {
 onMounted(() => {
   loadChatSessions()
   uploadStore.resumeFromStorage()
+  settingsStore.load()
   window.addEventListener('resize', onResize)
   nextTick(() => {
     ready.value = true

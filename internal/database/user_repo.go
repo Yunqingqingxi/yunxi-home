@@ -144,7 +144,7 @@ func (r *UserRepo) InitDefaultAdmin(ctx context.Context, username, password stri
 		return nil // 已有用户，跳过初始化
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), 12)
 	if err != nil {
 		return fmt.Errorf("生成密码哈希失败: %w", err)
 	}

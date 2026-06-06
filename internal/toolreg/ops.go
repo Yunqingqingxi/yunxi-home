@@ -184,6 +184,10 @@ func sshExecSafe(ctx context.Context, host, command string) (string, error) {
 
 	// localhost/本机 → 直接本地执行，不走 SSH
 	if host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "local" || host == "本机" {
+		// 复用注入检测
+		if warns := bashInjectionPatterns(cmd); len(warns) > 0 {
+			return "", fmt.Errorf("检测到潜在危险操作: %s", strings.Join(warns, ", "))
+		}
 		execCmd := exec.CommandContext(ctx, "sh", "-c", cmd)
 		out, err := execCmd.CombinedOutput()
 		if err != nil {
@@ -340,6 +344,18 @@ func bashInjectionPatterns(cmd string) []string {
 	// sudo apt/dpkg/npm 等包管理操作（允许但需警告）
 	if strings.Contains(lower, "sudo apt") || strings.Contains(lower, "sudo dpkg") || strings.Contains(lower, "sudo npm") {
 		// 这些是合法的包管理操作，不阻止，但在提示词中要求 AI 先确认
+	}
+	// bash 间接引用 ${}
+	if strings.Contains(cmd, "${") { warnings = append(warnings, "shell变量替换") }
+	// eval 执行
+	if strings.Contains(lower, "eval ") { warnings = append(warnings, "eval执行") }
+	// base64 编码管道执行
+	if (strings.Contains(lower, "base64") || strings.Contains(lower, "echo ")) && (strings.Contains(cmd, "| sh") || strings.Contains(cmd, "| bash")) {
+		warnings = append(warnings, "base64编码命令执行")
+	}
+	// 内联代码执行
+	if strings.Contains(lower, "python -c") || strings.Contains(lower, "php -r") || strings.Contains(lower, "ruby -e") || strings.Contains(lower, "perl -e") {
+		warnings = append(warnings, "内联代码执行")
 	}
 	return warnings
 }

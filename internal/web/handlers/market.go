@@ -28,7 +28,7 @@ func (h *ChatHandler) SearchSkills(c echo.Context) error {
 	return c.JSON(http.StatusOK, successResp(map[string]any{"items": results}))
 }
 
-// InstallSkill 下载并安装技能  POST /api/market/install-skill
+// InstallSkill 下载并安装技能（SSE 流式进度） POST /api/market/install-skill
 func (h *ChatHandler) InstallSkill(c echo.Context) error {
 	var req struct {
 		DownloadURL string `json:"download_url"`
@@ -40,15 +40,31 @@ func (h *ChatHandler) InstallSkill(c echo.Context) error {
 	if req.SkillsDir == "" {
 		req.SkillsDir = h.getSkillsDir()
 	}
-	result, err := toolreg.DownloadAndInstallSkill(req.DownloadURL, req.SkillsDir)
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, errorResp(err.Error()))
+
+	c.Response().Header().Set("Content-Type", "text/event-stream")
+	c.Response().Header().Set("Cache-Control", "no-cache")
+	c.Response().Header().Set("Connection", "keep-alive")
+	c.Response().WriteHeader(http.StatusOK)
+	flusher, _ := c.Response().Writer.(http.Flusher)
+
+	emit := func(step, status, msg string, pct int) {
+		data, _ := json.Marshal(map[string]any{"step": step, "status": status, "message": msg, "progress": pct})
+		fmt.Fprintf(c.Response(), "data: %s\n\n", data)
+		if flusher != nil { flusher.Flush() }
 	}
-	// 热重载技能
+
+	result, err := toolreg.DownloadAndInstallSkill(req.DownloadURL, req.SkillsDir, emit)
+	if err != nil {
+		emit("error", "error", err.Error(), 0)
+		return nil
+	}
+
+	emit("reload", "running", "热重载技能...", 95)
 	if h.aiService != nil {
 		h.aiService.ReloadSkills()
 	}
-	return c.JSON(http.StatusOK, successResp(map[string]string{"result": result}))
+	emit("done", "success", result, 100)
+	return nil
 }
 
 // ── MCP 安装 ─────────────────────────────────────────────────────────

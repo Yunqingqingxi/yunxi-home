@@ -3,6 +3,7 @@
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 
@@ -70,6 +71,10 @@ func (h *DockerHandler) ComposeAction(c echo.Context) error {
 	projectDir := c.QueryParam("dir")
 	if projectDir == "" {
 		projectDir = "/app/deploy"
+	}
+	// 路径穿越防护
+	if strings.Contains(projectDir, "..") {
+		return c.JSON(http.StatusBadRequest, errorResp("无效的项目目录"))
 	}
 	out, err := h.mgr.ComposeAction(c.Request().Context(), projectDir, action)
 	if err != nil {

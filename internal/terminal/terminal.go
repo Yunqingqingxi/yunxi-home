@@ -6,6 +6,7 @@ import (
 	"io"
 	"github.com/Yunqingqingxi/yunxi-home/internal/logger"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -32,7 +33,12 @@ const (
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  1024,
 	WriteBufferSize: 1024,
-	CheckOrigin:     func(r *http.Request) bool { return true },
+	CheckOrigin: func(r *http.Request) bool {
+		origin := r.Header.Get("Origin")
+		if origin == "" { return true } // 无 Origin 头 = 同源请求
+		host := r.Host
+		return strings.Contains(origin, host)
+	},
 }
 
 // WSMessage WebSocket 消息格式

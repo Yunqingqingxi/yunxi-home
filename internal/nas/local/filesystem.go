@@ -121,11 +121,15 @@ func (s *FileSystem) resolve(requestPath string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("路径解析失败: %w", err)
 	}
+	// 解析符号链接防止逃逸
+	if realPath, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = realPath
+	}
 	allowed := false
 	for _, dir := range s.allowedDirs {
 		absDir, _ := filepath.Abs(dir)
 		absDir = filepath.Clean(absDir)
-		if strings.HasPrefix(abs, absDir) {
+		if abs == absDir || strings.HasPrefix(abs, absDir+string(filepath.Separator)) {
 			allowed = true
 			break
 		}
@@ -509,14 +513,8 @@ func (s *FileSystem) MetaPath(uploadID string) string {
 	return s.metaPath(uploadID)
 }
 
-// InitChunkUpload 初始化分片上传
+// InitChunkUpload 初始化分片上传（支持断点续传）
 func (s *FileSystem) InitChunkUpload(dir, filename string, totalSize, chunkSize int64) (*base.ChunkMeta, error) {
-	b := make([]byte, 12)
-	if _, err := rand.Read(b); err != nil {
-		return nil, fmt.Errorf("生成上传ID失败: %w", err)
-	}
-	uploadID := hex.EncodeToString(b)
-
 	filename = strings.ReplaceAll(filename, "\\", "/")
 	if idx := strings.LastIndex(filename, "/"); idx >= 0 {
 		filename = filename[idx+1:]
@@ -534,6 +532,21 @@ func (s *FileSystem) InitChunkUpload(dir, filename string, totalSize, chunkSize 
 		return nil, err
 	}
 	fullPath := filepath.Join(absDir, filename)
+
+	// 断点续传：查找同文件同大小已有的上传会话
+	existingMeta := s.findExistingUpload(dir, filename, totalSize, chunkSize)
+	if existingMeta != nil {
+		// 验证目标文件仍然存在且大小正确
+		if st, err := os.Stat(fullPath); err == nil && st.Size() == totalSize {
+			return existingMeta, nil
+		}
+	}
+
+	b := make([]byte, 12)
+	if _, err := rand.Read(b); err != nil {
+		return nil, fmt.Errorf("生成上传ID失败: %w", err)
+	}
+	uploadID := hex.EncodeToString(b)
 
 	f, err := os.Create(fullPath)
 	if err != nil {
@@ -573,6 +586,43 @@ func (s *FileSystem) InitChunkUpload(dir, filename string, totalSize, chunkSize 
 	return meta, nil
 }
 
+// findExistingUpload 查找同文件路径的未完成上传（用于断点续传）
+func (s *FileSystem) findExistingUpload(dir, filename string, totalSize, chunkSize int64) *base.ChunkMeta {
+	s.chunkMu.Lock()
+	defer s.chunkMu.Unlock()
+
+	chunkDir := s.chunkDir()
+	entries, err := os.ReadDir(chunkDir)
+	if err != nil {
+		return nil
+	}
+	// 只保留 24 小时内的上传会话
+	cutoff := time.Now().Add(-24 * time.Hour).Unix()
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".meta") {
+			continue
+		}
+		metaPath := filepath.Join(chunkDir, e.Name())
+		data, err := os.ReadFile(metaPath)
+		if err != nil {
+			continue
+		}
+		var m base.ChunkMeta
+		if err := json.Unmarshal(data, &m); err != nil {
+			continue
+		}
+		if m.CreatedAt < cutoff {
+			// 清理过期会话
+			os.Remove(metaPath)
+			continue
+		}
+		if m.Dir == dir && m.Filename == filename && m.TotalSize == totalSize {
+			return &m
+		}
+	}
+	return nil
+}
+
 // SaveChunk 将分片写入预分配目标文件的正确偏移位置
 func (s *FileSystem) SaveChunk(uploadID string, chunkIndex int, reader io.Reader) error {
 	metaFile := s.metaPath(uploadID)
@@ -592,7 +642,7 @@ func (s *FileSystem) SaveChunk(uploadID string, chunkIndex int, reader io.Reader
 	}
 	if meta.ChunksDone[chunkIndex] {
 		s.chunkMu.Unlock()
-		return fmt.Errorf("分片 %d 已上传过", chunkIndex)
+		return nil // 断点续传：已上传分片跳过，不报错
 	}
 	absDir, err := s.resolve(meta.Dir)
 	if err != nil {

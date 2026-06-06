@@ -17,10 +17,11 @@ func defaultSandboxRoot() string {
 }
 
 type ServerConfig struct {
-	Host            string `mapstructure:"host" json:"host"`
-	Port            int    `mapstructure:"port" json:"port"`
-	ShutdownTimeout int    `mapstructure:"shutdown_timeout" json:"shutdown_timeout"`
-	RateLimit       int    `mapstructure:"rate_limit" json:"rate_limit"`
+	Host            string   `mapstructure:"host" json:"host"`
+	Port            int      `mapstructure:"port" json:"port"`
+	ShutdownTimeout int      `mapstructure:"shutdown_timeout" json:"shutdown_timeout"`
+	RateLimit       int      `mapstructure:"rate_limit" json:"rate_limit"`
+	AllowedOrigins  []string `mapstructure:"allowed_origins" json:"allowed_origins"`
 }
 
 type DatabaseConfig struct {
@@ -95,21 +96,23 @@ type AIProviderConfig struct {
 }
 
 type AIConfig struct {
-	Providers        map[string]AIProviderConfig `json:"-" mapstructure:"-"`
-	DefaultModel     string                      `json:"default_model" mapstructure:"default_model"`
-	DefaultReasoning string                      `json:"default_reasoning" mapstructure:"default_reasoning"` // low|medium|high
-	SkillsDir        string                      `json:"skills_dir,omitempty" mapstructure:"skills_dir"`     // 技能 YAML 目录路径
+	Providers              map[string]AIProviderConfig `json:"-" mapstructure:"-"`
+	DefaultModel           string                      `json:"default_model" mapstructure:"default_model"`
+	DefaultReasoning       string                      `json:"default_reasoning" mapstructure:"default_reasoning"` // low|medium|high
+	ExpandThinkingOnStream bool                        `json:"expand_thinking_on_stream" mapstructure:"expand_thinking_on_stream"`
+	SkillsDir              string                      `json:"skills_dir,omitempty" mapstructure:"skills_dir"` // 技能 YAML 目录路径
 }
 
 // MarshalJSON produces a flat JSON object where provider keys (e.g. "deepseek", "qwen")
 // are at the same level as scalar fields like "default_model".
 func (a AIConfig) MarshalJSON() ([]byte, error) {
-	m := make(map[string]any, len(a.Providers)+3)
+	m := make(map[string]any, len(a.Providers)+4)
 	for k, v := range a.Providers {
 		m[k] = v
 	}
 	m["default_model"] = a.DefaultModel
 	m["default_reasoning"] = a.DefaultReasoning
+	m["expand_thinking_on_stream"] = a.ExpandThinkingOnStream
 	if a.SkillsDir != "" {
 		m["skills_dir"] = a.SkillsDir
 	}
@@ -132,6 +135,10 @@ func (a *AIConfig) UnmarshalJSON(data []byte) error {
 			}
 		case "default_reasoning":
 			if err := json.Unmarshal(v, &a.DefaultReasoning); err != nil {
+				return err
+			}
+		case "expand_thinking_on_stream":
+			if err := json.Unmarshal(v, &a.ExpandThinkingOnStream); err != nil {
 				return err
 			}
 		case "skills_dir":
@@ -178,10 +185,11 @@ type DynamicRecordConfig struct {
 }
 
 type NASConfig struct {
-	Enabled     bool     `mapstructure:"enabled" json:"enabled"`
-	RootDir     string   `mapstructure:"root_dir" json:"root_dir"`
-	AllowedDirs []string `mapstructure:"allowed_dirs" json:"allowed_dirs,omitempty"`
-	SandboxRoot string   `mapstructure:"sandbox_root" json:"sandbox_root"`
+	Enabled        bool     `mapstructure:"enabled" json:"enabled"`
+	RootDir        string   `mapstructure:"root_dir" json:"root_dir"`
+	AllowedDirs    []string `mapstructure:"allowed_dirs" json:"allowed_dirs,omitempty"`
+	SandboxRoot    string   `mapstructure:"sandbox_root" json:"sandbox_root"`
+	DownloadSecret string   `mapstructure:"download_secret" json:"download_secret,omitempty"`
 }
 
 type TerminalConfig struct {

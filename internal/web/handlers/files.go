@@ -113,6 +113,11 @@ func (h *FilesHandler) UploadFile(c echo.Context) error {
 		}
 	}
 
+	// 防止超大文件上传（最大 500MB）
+	if file.Size > 500*1024*1024 {
+		return c.JSON(http.StatusRequestEntityTooLarge, errorResp("文件大小超过限制（最大 500MB）"))
+	}
+
 	savedPath, err := h.fs.SaveFile(dir, file.Filename, src)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, errorResp(err.Error()))
@@ -404,7 +409,18 @@ func (h *FilesHandler) PreviewFile(c echo.Context) error {
 		contentType = "text/plain; charset=utf-8"
 	}
 
+	// 禁止以可执行 MIME 渲染预览（防 XSS）
+	dangerousMIMEs := map[string]bool{
+		"text/html": true, "text/javascript": true, "application/javascript": true,
+		"application/x-javascript": true, "application/xml": true, "text/xml": true,
+		"application/xhtml+xml": true,
+	}
+	if dangerousMIMEs[contentType] {
+		contentType = "text/plain; charset=utf-8"
+	}
+
 	c.Response().Header().Set("Content-Type", contentType)
+	c.Response().Header().Set("X-Content-Type-Options", "nosniff")
 	c.Response().Header().Set("X-File-Size", strconv.FormatInt(stat.Size(), 10))
 
 	// 限制预览大小: 最大 4MB

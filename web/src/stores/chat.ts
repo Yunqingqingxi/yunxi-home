@@ -76,7 +76,7 @@ export function renderMarkdown(text: string): string {
   try {
     let raw = marked.parse(text, { gfm: true, breaks: true }) as string
     raw = raw.replace(/<a\s+href=/g, '<a target="_blank" rel="noopener" href=')
-    return DOMPurify.sanitize(raw, {
+    raw = DOMPurify.sanitize(raw, {
       ALLOWED_TAGS: [
         'p',
         'br',
@@ -109,6 +109,14 @@ export function renderMarkdown(text: string): string {
       ],
       ALLOWED_ATTR: ['href', 'target', 'class', 'src', 'alt', 'type', 'checked', 'disabled'],
     })
+    // Post-process: wrap code blocks with copy button (after DOMPurify so div/button survive)
+    raw = raw.replace(
+      /<pre><code( class="language-(\w+)")?>/g,
+      (_m: string, _cls: string, lang: string) =>
+        `<div class="md-code-block"><div class="md-code-hdr"><span class="md-code-lang">${lang || 'code'}</span><button class="md-code-copy" data-copy>复制</button></div><pre><code${_cls || ''}>`,
+    )
+    raw = raw.replace(/<\/code><\/pre>/g, '</code></pre></div>')
+    return raw
   } catch (e) {
     return DOMPurify.sanitize(text)
   }
@@ -310,6 +318,8 @@ export const useChatStore = defineStore('chat', () => {
     setLifecycle(sessionId.value, 'streaming')
 
     try {
+      // Ensure SSE is connected so response events can be received
+      connectStream(sessionId.value)
       // Always inject via the persistent SSE stream — no second SSE connection.
       const body: Record<string, any> = { message: text, session_id: sessionId.value }
       if (model) body.model = model
@@ -383,7 +393,15 @@ export const useChatStore = defineStore('chat', () => {
         const st = JSON.parse(ev.content || '{}')
         console.log('[chat] session_status event:', st)
         if (st.session_id) {
-          streamingSessions.value[st.session_id] = !!st.streaming
+          // Busy if main stream is active OR sub-agents are still running
+          const busy = !!(st.streaming || st.has_agents)
+          streamingSessions.value[st.session_id] = busy
+          // Sync lifecycle so isStreaming / isBusy stay consistent
+          if (busy) {
+            setLifecycle(st.session_id, 'streaming')
+          } else {
+            setLifecycle(st.session_id, 'idle')
+          }
           // Persist agent-active flag across page refreshes
           if (st.has_agents) {
             agentActiveSessions.value[st.session_id] = true
@@ -652,9 +670,15 @@ export const useChatStore = defineStore('chat', () => {
     } else if (t === 'done') {
       const dur = parseInt(ev.content || '') || 0
       if (dur > 0) msg.durationMs = dur
-      // Always set idle — even if this placeholder is empty
-      // (previous rounds already finalized by tool_result)
-      setLifecycle(targetSid, 'idle')
+      // Only set idle if no sub-agents are still running.
+      // Otherwise the frontend would show idle while agents work in background.
+      const hasRunning = agentActiveSessions.value[targetSid] ||
+        (sessionAgents.value[targetSid] || []).some(a =>
+          a.agent_status === 'running' || a.agent_status === 'pending' ||
+          a.status === 'running' || a.status === 'pending')
+      if (!hasRunning) {
+        setLifecycle(targetSid, 'idle')
+      }
       currentToolName.value = ''
       currentToolProgress.value = ''
       if (msg.content || msg.reasoning || (msg.tools && msg.tools.length > 0)) {

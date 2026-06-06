@@ -50,7 +50,7 @@ func (h *AdminHandler) CreateUser(c echo.Context) error {
 		req.Role = "user"
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), 12)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, errorResp("密码加密失败"))
 	}
@@ -70,7 +70,10 @@ func (h *AdminHandler) CreateUser(c echo.Context) error {
 
 // DeleteUser DELETE /api/admin/users/:id
 func (h *AdminHandler) DeleteUser(c echo.Context) error {
-	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		return c.JSON(http.StatusBadRequest, errorResp("无效的用户 ID"))
+	}
 	if err := h.userRepo.Delete(c.Request().Context(), id); err != nil {
 		return c.JSON(http.StatusInternalServerError, errorResp(err.Error()))
 	}
@@ -79,7 +82,10 @@ func (h *AdminHandler) DeleteUser(c echo.Context) error {
 
 // UpdateUser PUT /api/admin/users/:id
 func (h *AdminHandler) UpdateUser(c echo.Context) error {
-	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		return c.JSON(http.StatusBadRequest, errorResp("无效的用户 ID"))
+	}
 	var req struct {
 		Password     string `json:"password"`
 		Role         string `json:"role"`
@@ -89,7 +95,7 @@ func (h *AdminHandler) UpdateUser(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, errorResp("参数错误"))
 	}
 	if req.Password != "" {
-		hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+		hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), 12)
 		if err != nil {
 			return c.JSON(http.StatusInternalServerError, errorResp("密码加密失败"))
 		}
@@ -116,7 +122,10 @@ func (h *AdminHandler) UpdateUser(c echo.Context) error {
 func (h *AdminHandler) ListFilePerms(c echo.Context) error {
 	userIDStr := c.QueryParam("user_id")
 	if userIDStr != "" {
-		userID, _ := strconv.ParseInt(userIDStr, 10, 64)
+		userID, err := strconv.ParseInt(userIDStr, 10, 64)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, errorResp("无效的用户 ID"))
+		}
 		perms, err := h.permRepo.ListByUser(c.Request().Context(), userID)
 		if err != nil {
 			return c.JSON(http.StatusInternalServerError, errorResp(err.Error()))
@@ -164,7 +173,10 @@ func (h *AdminHandler) UpsertFilePerm(c echo.Context) error {
 
 // DeleteFilePerm DELETE /api/admin/file-permissions/:id
 func (h *AdminHandler) DeleteFilePerm(c echo.Context) error {
-	id, _ := strconv.ParseInt(c.Param("id"), 10, 64)
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil || id <= 0 {
+		return c.JSON(http.StatusBadRequest, errorResp("无效的权限 ID"))
+	}
 	if err := h.permRepo.Delete(c.Request().Context(), id); err != nil {
 		return c.JSON(http.StatusInternalServerError, errorResp(err.Error()))
 	}

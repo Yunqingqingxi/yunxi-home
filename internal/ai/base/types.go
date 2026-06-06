@@ -40,6 +40,9 @@ type Message struct {
 	// Blocks 按时间顺序排列的内容块，仅用于渲染。
 	// 旧会话中此字段为空，前端会 fallback 到扁平字段重建。
 	Blocks []ContentBlock `json:"blocks,omitempty"`
+	// Internal marks a message that should appear in LLM context but NOT be persisted to DB.
+	// Used for main-agent ↔ sub-agent coordination messages.
+	Internal bool `json:"-"`
 }
 
 // ToolCall 工具调用
@@ -435,6 +438,10 @@ type JSONOutputKey struct{}
 // CmdResultKey 用于在 context 中传递斜杠命令的后台预执行结果。
 // 值为 string 类型：命令执行结果摘要，将作为 system 消息注入到 AI 对话历史中。
 type CmdResultKey struct{}
+
+// EphemeralMsgKey 标记当前消息为内部触发器（如 "继续"），不应持久化到会话历史。
+// 值为 bool 类型。
+type EphemeralMsgKey struct{}
 
 // ── AI 服务接口 ─────────────────────────────────────────────
 

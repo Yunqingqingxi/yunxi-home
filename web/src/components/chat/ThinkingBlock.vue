@@ -11,10 +11,15 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
 import { renderMarkdown } from '../../stores/chat'
+import { useSettingsStore } from '../../stores/settings'
 const props = defineProps<{ reasoning?: string; streaming?: boolean }>()
 const open = ref(false)
 const displayHtml = computed(() => renderMarkdown(props.reasoning || ''))
-watch(() => props.streaming, (s) => { open.value = !!s })
+const settings = useSettingsStore()
+const autoExpand = computed(() => !!settings.aiConfig?.expand_thinking_on_stream)
+watch([() => props.streaming, autoExpand], ([s, expand]) => {
+  if (expand) open.value = !!s
+})
 </script>
 
 <style scoped>

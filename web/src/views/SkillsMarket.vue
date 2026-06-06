@@ -92,10 +92,10 @@
           <button
             v-else
             class="card-action accent"
-            :disabled="installing === s.name"
+            :disabled="installing?.name === s.name"
             @click="installSkill(s)"
           >
-            {{ installing === s.name ? '安装中...' : '下载安装' }}
+            {{ installing?.name === s.name ? installing.step + ' ' + installing.pct + '%' : '下载安装' }}
           </button>
         </div>
       </div>
@@ -443,22 +443,45 @@ function parseMCPSearchResults(text) {
 }
 
 // ── Install ──
-const installing = ref(null)
+const installing = ref(null) // { name, pct, step }
 const installError = ref('')
 const installSuccess = ref('')
 const resultModal = ref('')
 const resultTitle = ref('安装结果')
 
 async function installSkill(s) {
-  installing.value = s.name
+  installing.value = { name: s.name, pct: 0, step: '下载...' }
+  const token = localStorage.getItem('token')
   try {
-    const res = await fetch('/api/market/install-skill', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ download_url: s.download_url }) })
-    const data = await res.json()
-    resultTitle.value = '技能安装'
-    resultModal.value = data.data?.result || data.message || '安装完成'
-    if (data.code === 200) { s._installed = true; loadInstalled() }
-  } catch (e) { resultModal.value = '安装失败: ' + e.message }
-  installing.value = null
+    const res = await fetch('/api/market/install-skill', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+      body: JSON.stringify({ download_url: s.download_url })
+    })
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buf = ''
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      const lines = buf.split('\n')
+      buf = lines.pop() || ''
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        try {
+          const ev = JSON.parse(line.slice(6))
+          if (ev.step === 'done' || ev.step === 'error') {
+            installing.value = null
+            if (ev.step === 'done') { s._installed = true; loadInstalled() }
+            else { resultModal.value = ev.message }
+          } else {
+            installing.value = { name: s.name, pct: ev.progress || 0, step: ev.message || ev.step }
+          }
+        } catch (_) {}
+      }
+    }
+  } catch (e) { installing.value = null; resultModal.value = '安装失败: ' + e.message }
 }
 
 // ── 安装（后端异步 + 前端轮询）──

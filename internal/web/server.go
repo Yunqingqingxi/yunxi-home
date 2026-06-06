@@ -119,13 +119,39 @@ func New(cfg *config.Config, configRepo database.ConfigRepository, domainRepo da
 		}
 	})
 	e.Use(middleware.Recover())
+
+	// 安全响应头（防 XSS/点击劫持/MIME 嗅探）
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			c.Response().Header().Set("X-Content-Type-Options", "nosniff")
+			c.Response().Header().Set("X-Frame-Options", "DENY")
+			c.Response().Header().Set("Referrer-Policy", "no-referrer-when-downgrade")
+			c.Response().Header().Set("Content-Security-Policy",
+				"default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; "+
+					"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "+
+					"font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; "+
+					"connect-src 'self' ws: wss:; frame-ancestors 'none'; form-action 'self'")
+			return next(c)
+		}
+	})
+
+	// CORS：仅允许配置的白名单来源，默认拒绝所有跨域
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
-		AllowOriginFunc: func(origin string) (bool, error) { return true, nil },
-		AllowMethods:    []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodOptions},
-		AllowHeaders:    []string{"Origin", "Content-Type", "Accept", "Authorization"},
-		MaxAge:          86400,
+		AllowOriginFunc: func(origin string) (bool, error) {
+			if len(cfg.Server.AllowedOrigins) == 0 {
+				return false, nil // 默认拒绝跨域，前端同源不需要 CORS
+			}
+			for _, allowed := range cfg.Server.AllowedOrigins {
+				if allowed == origin || allowed == "*" {
+					return true, nil
+				}
+			}
+			return false, nil
+		},
+		AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodOptions},
+		AllowHeaders: []string{"Origin", "Content-Type", "Accept", "Authorization"},
+		MaxAge:       86400,
 	}))
-	e.Use(middleware.RateLimiter(middleware.NewRateLimiterMemoryStore(rate.Limit(cfg.Server.RateLimit))))
 
 	jwtCfg := echomw.JWTConfig{
 		Secret:     cfg.Auth.JWTSecret,
@@ -178,14 +204,20 @@ func New(cfg *config.Config, configRepo database.ConfigRepository, domainRepo da
 		if p == "" || t == "" || e == "" {
 			return c.String(http.StatusBadRequest, "missing params")
 		}
-		mac := hmac.New(sha256.New, []byte(cfg.Auth.JWTSecret))
+		dlSecret := cfg.NAS.DownloadSecret
+		if dlSecret == "" {
+			dlSecret = cfg.Auth.JWTSecret // 回退兼容旧配置
+		}
+		mac := hmac.New(sha256.New, []byte(dlSecret))
 		mac.Write([]byte(p + "|" + e))
 		expected := hex.EncodeToString(mac.Sum(nil))[:32]
 		if t != expected {
 			return c.String(http.StatusForbidden, "invalid token")
 		}
+		cleanRoot := filepath.Clean(cfg.NAS.SandboxRoot)
 		fullPath := filepath.Join(cfg.NAS.SandboxRoot, p)
-		if !strings.HasPrefix(filepath.Clean(fullPath), filepath.Clean(cfg.NAS.SandboxRoot)) {
+		cleanFull := filepath.Clean(fullPath)
+		if cleanFull != cleanRoot && !strings.HasPrefix(cleanFull, cleanRoot+string(filepath.Separator)) {
 			return c.String(http.StatusForbidden, "path traversal")
 		}
 		return c.File(fullPath)
@@ -198,6 +230,7 @@ func New(cfg *config.Config, configRepo database.ConfigRepository, domainRepo da
 
 	// Protected routes
 	api := e.Group("/api")
+	api.Use(middleware.RateLimiter(middleware.NewRateLimiterMemoryStore(rate.Limit(cfg.Server.RateLimit))))
 	api.Use(echomw.JWTAuth(cfg.Auth.JWTSecret))
 
 	api.POST("/auth/refresh", authH.Refresh)
@@ -328,12 +361,12 @@ func New(cfg *config.Config, configRepo database.ConfigRepository, domainRepo da
 		nasAPI.GET("/files/tree", filesH.GetFileTree)
 		nasAPI.POST("/files/move", filesH.MoveFile)
 		nasAPI.POST("/files/batch-download", filesH.BatchDownload)
-		// 分片上传路由 (不使用 FileAccess 中间件，分片本身没有文件路径)
-		api.POST("/nas/files/upload/init", filesH.InitChunkUpload)
-		api.POST("/nas/files/upload/chunk", filesH.SaveChunk)
-		api.POST("/nas/files/upload/complete", filesH.CompleteChunkUpload)
-		api.GET("/nas/files/upload/status", filesH.GetChunkStatus)
-		api.POST("/nas/files/upload/abort", filesH.AbortChunkUpload)
+		// 分片上传路由（受 FileAccess 保护，InitChunkUpload 的 dir 参数需校验）
+		nasAPI.POST("/files/upload/init", filesH.InitChunkUpload)
+		nasAPI.POST("/files/upload/chunk", filesH.SaveChunk)
+		nasAPI.POST("/files/upload/complete", filesH.CompleteChunkUpload)
+		nasAPI.GET("/files/upload/status", filesH.GetChunkStatus)
+		nasAPI.POST("/files/upload/abort", filesH.AbortChunkUpload)
 		}
 	// ── 沙箱状态 ────────────────────────────────────
 	api.GET("/sandbox/status", func(c echo.Context) error {
@@ -345,9 +378,9 @@ func New(cfg *config.Config, configRepo database.ConfigRepository, domainRepo da
 	})
 
 
-	// ── 系统控制路由 ──────────────────────────────────
+	// ── 系统控制路由（仅管理员） ─────────────────────────
 	if sysctlH != nil {
-		sysctlAPI := api.Group("/sysctl")
+		sysctlAPI := api.Group("/sysctl", adminOnly(cfg.Auth.JWTSecret))
 		sysctlAPI.GET("/info", sysctlH.GetSystemInfo)
 		sysctlAPI.GET("/processes", sysctlH.ListProcesses)
 		sysctlAPI.POST("/processes/:pid/kill", sysctlH.KillProcess)
@@ -411,14 +444,33 @@ func (s *Server) WireSharesAndDocker(shareRepo database.ShareRepository, nasCfg 
 	// Public share access
 	s.echo.GET("/s/:token", sharesH.AccessShare)
 
-	// Docker API
+	// Docker API（仅管理员）
 	if dockerMgr != nil {
 		dockerH := handlers.NewDockerHandler(dockerMgr)
-		s.api.GET("/docker/containers", dockerH.ListContainers)
-		s.api.POST("/docker/containers/:name/:action", dockerH.ContainerAction)
-		s.api.GET("/docker/containers/:name/logs", dockerH.GetLogs)
-		s.api.GET("/docker/containers/:name/stats", dockerH.Stats)
-		s.api.POST("/docker/compose/:action", dockerH.ComposeAction)
+		dockerAPI := s.api.Group("/docker", adminOnly(s.jwtSecret))
+		dockerAPI.GET("/containers", dockerH.ListContainers)
+		dockerAPI.POST("/containers/:name/:action", dockerH.ContainerAction)
+		dockerAPI.GET("/containers/:name/logs", dockerH.GetLogs)
+		dockerAPI.GET("/containers/:name/stats", dockerH.Stats)
+		dockerAPI.POST("/compose/:action", dockerH.ComposeAction)
+	}
+}
+
+// adminOnly 中间件：仅允许管理员角色访问
+func adminOnly(secret string) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			tokenStr := c.Request().Header.Get("Authorization")
+			tokenStr = strings.TrimPrefix(tokenStr, "Bearer ")
+			if tokenStr == "" {
+				return c.JSON(http.StatusForbidden, map[string]string{"error": "仅管理员可操作"})
+			}
+			claims, err := echomw.ParseToken(tokenStr, secret)
+			if err != nil || claims.Role != "admin" {
+				return c.JSON(http.StatusForbidden, map[string]string{"error": "仅管理员可操作"})
+			}
+			return next(c)
+		}
 	}
 }
 

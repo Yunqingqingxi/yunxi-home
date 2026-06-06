@@ -65,7 +65,7 @@
       ref="inputEl"
       v-model="input"
       class="input-field"
-      :class="{ 'cmd-mode': showCommands }"
+      :class="{ 'cmd-mode': cmdMode }"
       :placeholder="inputPlaceholder"
       rows="1"
       maxlength="4000"
@@ -470,6 +470,7 @@ async function loadCommands() {
 }
 loadCommands()
 
+const cmdMode = computed(() => input.value.startsWith('/'))
 const showCommands = computed(() => input.value.startsWith('/') && !input.value.includes(' '))
 const filteredCommands = computed(() => {
   const q = input.value.slice(1).toLowerCase()

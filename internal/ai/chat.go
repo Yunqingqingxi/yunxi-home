@@ -110,6 +110,7 @@ type InjectedMessage struct {
 	Content   string    `json:"content"`
 	Priority  string    `json:"priority"`
 	Timestamp time.Time `json:"timestamp"`
+	Ephemeral bool      `json:"-"` // skip adding to conversation history
 }
 
 // sessionEventBus buffers events per session and allows late subscribers to reconnect.
@@ -635,11 +636,30 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userID, userMessage
 			)})
 		}
 
-		history = append(history, base.Message{Role: "user", Content: userMessage})
-		s.chatLogger.LogUserMessage(sessionID, 0, userMessage)
+		// ── 统一命令系统：预检测 /command ──
+		// 只有系统已知的命令才按命令处理；未识别的 /xxx 视作普通文本
+		cmdName, cmdArgs, isCmd := parseSlashCommand(userMessage)
+		isKnownCmd := isCmd && (builtinCommandSet[cmdName] || s.skillRegistry.Has(cmdName))
 
-		// ── 意图路由（v3.2）──
-		if s.intentPipeline != nil {
+		// 内置命令（非 compact）：清洗用户消息，去掉 /command 只留参数给 AI
+		cleanUserMsg := userMessage
+		if isCmd && cmdName != "compact" && builtinCommandSet[cmdName] {
+			if cmdArgs != "" {
+				cleanUserMsg = cmdArgs
+			} else {
+				cleanUserMsg = "(/" + cmdName + ")"
+			}
+		}
+
+		// Ephemeral messages (e.g. auto-resume "继续") are internal triggers,
+		// not real user input — skip saving to conversation history.
+		if _, ephemeral := bgCtx.Value(base.EphemeralMsgKey{}).(bool); !ephemeral {
+			history = append(history, base.Message{Role: "user", Content: cleanUserMsg})
+			s.chatLogger.LogUserMessage(sessionID, 0, cleanUserMsg)
+		}
+
+		// ── 意图路由（v3.2）── 已知命令跳过意图路由，未识别 /xxx 走正常路由 ──
+		if !isKnownCmd && s.intentPipeline != nil {
 			result := s.intentPipeline.Route(bgCtx, userMessage)
 			switch result.Stage {
 			case "rule":
@@ -661,7 +681,8 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userID, userMessage
 			}
 		}
 
-		// ── 记忆匹配注入（v3.3）──
+		// ── 记忆匹配注入（v3.3）── 已知命令跳过记忆匹配 ──
+		if !isKnownCmd {
 		// ── 专用提示词自动激活（关键词匹配）──
 		if s.promptStore != nil {
 			activated := s.promptStore.TryAutoActivate(sessionID, userMessage)
@@ -680,6 +701,7 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userID, userMessage
 				log.Info("记忆匹配注入", "会话", sessionID, "记忆", mem.Name)
 			}
 		}
+		} // end !isKnownCmd guard (记忆匹配)
 
 		// ── 用户适应层：首次用户消息时注入 profile 摘要 ──
 		if s.adaptLayer != nil && userID != "" && len(history) <= 2 {
@@ -704,8 +726,8 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userID, userMessage
 			}
 		}
 
-		// ── 斜杠命令解析 ──
-		if cmdName, cmdArgs, ok := parseSlashCommand(userMessage); ok {
+		// ── 斜杠命令执行（仅已知命令）──
+		if isKnownCmd {
 			// /compact: AI 摘要 + 静默执行（不调 AI 回复）
 			if cmdName == "compact" {
 				s.handleCompactCommand(&history, sessionID, cmdArgs, bgCtx, emit, startTime)
@@ -713,7 +735,7 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userID, userMessage
 				s.chatLogger.LogSessionSave(sessionID)
 				return
 			}
-			// 其他内置命令：后台执行 + AI 简短确认
+			// 其他内置命令：预执行 + 结果注入 AI 上下文
 			if builtinCommandSet[cmdName] {
 				if result := s.preExecCommand(sessionID, cmdName, cmdArgs); result != "" {
 					log.Info("斜杠命令预执行", "session", sessionID, "command", cmdName, "args", cmdArgs)
@@ -758,11 +780,14 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userID, userMessage
 				if msg.Priority == "interrupt" && msg.Source == "cancel_session" {
 					continue // handled by interrupted flag below
 				}
-				if msg.Source == "user" {
-					history = append(history, base.Message{Role: "user", Content: strings.TrimPrefix(msg.Content, "[用户消息] ")})
-					s.chatLogger.LogUserMessage(sessionID, state.round, strings.TrimPrefix(msg.Content, "[用户消息] "))
-				} else {
-					history = append(history, base.Message{Role: "system", Content: msg.Content})
+				if !msg.Ephemeral {
+					if msg.Source == "user" {
+						history = append(history, base.Message{Role: "user", Content: strings.TrimPrefix(msg.Content, "[用户消息] ")})
+						s.chatLogger.LogUserMessage(sessionID, state.round, strings.TrimPrefix(msg.Content, "[用户消息] "))
+					} else {
+						internal := msg.Source == "agent_completion" || msg.Source == "agent_result"
+						history = append(history, base.Message{Role: "system", Content: msg.Content, Internal: internal})
+					}
 				}
 				log.Debug("消息注入", "会话", sessionID, "来源", msg.Source, "优先级", msg.Priority)
 				s.chatLogger.LogInject(sessionID, state.round, msg.Content)
@@ -774,7 +799,7 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userID, userMessage
 					Type:    "interrupted",
 					Content: fmt.Sprintf("进度 %d%%，最后执行：%s", snapshot.Progress, snapshot.LastTask),
 				})
-				s.sessions.Save(sessionID, history)
+				s.saveHistory(sessionID, history)
 				s.chatLogger.LogSessionSave(sessionID)
 				return
 			}
@@ -828,7 +853,7 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userID, userMessage
 				s.chatLogger.LogError(sessionID, state.round, "LLM调用失败: "+err.Error())
 				log.Error("LLM调用失败", "会话", sessionID, "轮次", state.round, "错误", err.Error())
 				emit(base.ChatStreamEvent{Type: "error", Content: "AI 服务异常: " + err.Error()})
-				s.sessions.Save(sessionID, history)
+				s.saveHistory(sessionID, history)
 				return
 			}
 			var contentBuf, reasoningBuf strings.Builder
@@ -885,7 +910,7 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userID, userMessage
 						Timestamp: time.Now(), Type: "llm_request",
 						Labels: map[string]string{"model": modelOverride, "session": sessionID, "status": "error"},
 					})
-					s.sessions.Save(sessionID, history)
+					s.saveHistory(sessionID, history)
 					return
 				}
 			}
@@ -939,7 +964,7 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userID, userMessage
 							 emit(base.ChatStreamEvent{Type: "tool_result", Tool: tc.Function.Name, Content: obs})
 							}
 						history = append(history, base.Message{Role: "tool", Content: obs, ToolCallID: tc.ID})
-						s.sessions.Save(sessionID, history)
+						s.saveHistory(sessionID, history)
 							continue
 						}
 					}
@@ -974,7 +999,7 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userID, userMessage
 						}
 						placeholder := fmt.Sprintf("[后台执行] 任务 '%s' 已提交，正在后台运行。完成后结果会自动注入对话。", tc.Function.Name)
 						history = append(history, base.Message{Role: "tool", Content: placeholder, ToolCallID: tc.ID})
-						s.sessions.Save(sessionID, history)
+						s.saveHistory(sessionID, history)
 						state.round++
 						continue
 					}
@@ -1062,7 +1087,7 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userID, userMessage
 					state.infoGainHistory[state.infoGainPtr%5] = gain
 					state.infoGainPtr++
 					// Save after each tool so crash doesn't lose results
-					s.sessions.Save(sessionID, history)
+					s.saveHistory(sessionID, history)
 					// ── 拓扑计数器更新 ──
 					if result.Status == base.StatusError {
 						state.consecutiveToolFailures++
@@ -1255,13 +1280,13 @@ func (s *Service) StreamChat(ctx context.Context, sessionID, userID, userMessage
 			}
 
 			s.sessions.SetState(sessionID, models.SessionStateIdle, "", "")
-			s.sessions.Save(sessionID, history)
+			s.saveHistory(sessionID, history)
 			s.sessions.SetState(sessionID, models.SessionStateIdle, "", "")
 			return
 		}
 		s.chatLogger.LogError(sessionID, state.round, "操作超过最大轮次限制")
 		emit(base.ChatStreamEvent{Type: "error", Content: "操作超过最大轮次限制"})
-		s.sessions.Save(sessionID, history)
+		s.saveHistory(sessionID, history)
 		s.chatLogger.LogSessionSave(sessionID)
 	}()
 	return ch
@@ -1319,11 +1344,20 @@ func (s *Service) InjectWithPriority(sessionID, content, priority, source string
 }
 
 func (s *Service) saveInjectToHistory(sessionID, content, source string) {
+	// Agent coordination messages: inject into stream context only (LLM sees them,
+	// but they are filtered before DB persist by saveHistory).
+	if source == "agent_completion" || source == "agent_result" {
+		s.getOrCreateInjectCh(sessionID) <- InjectedMessage{
+			Source: source, Content: content,
+			Priority: "system", Timestamp: time.Now(),
+		}
+		return
+	}
 	sessionType := models.SessionTypeChat
 	if strings.HasPrefix(sessionID, "qqbot_") { sessionType = models.SessionTypeQQBot }
 	history, _ := s.sessions.GetOrCreate(sessionID, sessionType, "")
 	history = append(history, base.Message{Role: "system", Content: content})
-	s.sessions.Save(sessionID, history)
+	s.saveHistory(sessionID, history)
 }
 
 // ── Confirm ──
@@ -1775,6 +1809,9 @@ func (s *Service) processQueuedMessage(msg *session.QueuedMessage) {
 	}()
 
 	ctx = context.WithValue(ctx, base.SessionIDKey{}, msg.SessionID)
+	if msg.Ephemeral {
+		ctx = context.WithValue(ctx, base.EphemeralMsgKey{}, true)
+	}
 
 	stream := s.StreamChat(ctx, msg.SessionID, "", msg.Content)
 	for range stream {}
@@ -1796,12 +1833,16 @@ func (s *Service) processQueuedMessage(msg *session.QueuedMessage) {
 func (s *Service) resumeMainAgent(sessionID string) {
 	mq := s.msgQueues.Get(sessionID)
 	if mq != nil && mq.Len() > 0 { return }
-	history, _ := s.sessions.GetOrCreate(sessionID, models.SessionTypeChat, "")
-	history = append(history, base.Message{Role: "system", Content: "[系统] 所有子Agent已完成。请汇总结果回复用户。"})
-	s.sessions.Save(sessionID, history)
+	// Inject the coordination prompt into the active stream context (LLM sees it,
+	// but it won't be persisted thanks to Internal marking in the drain loop).
+	s.getOrCreateInjectCh(sessionID) <- InjectedMessage{
+		Source: "agent_completion", Content: "[系统] 所有子Agent已完成。请汇总结果回复用户。",
+		Priority: "system", Timestamp: time.Now(),
+	}
 	s.queueMessage(&session.QueuedMessage{
 		SessionID: sessionID, Role: "system", Content: "继续",
 		Priority: 0, Source: "agent_completion",
+		Ephemeral: true,
 	})
 }
 func (s *Service) SubscribeSession(sessionID string) chan base.ChatStreamEvent {
@@ -1840,6 +1881,18 @@ func (s *Service) signalSessionDone(sessionID string) {
 	}
 	// Clean up event bus — no more subscribers needed
 	s.eventBus.remove(sessionID)
+}
+
+// saveHistory persists the session history, filtering out Internal messages
+// (main-agent ↔ sub-agent coordination) that should only be in LLM context.
+func (s *Service) saveHistory(sessionID string, history []base.Message) {
+	filtered := make([]base.Message, 0, len(history))
+	for _, m := range history {
+		if !m.Internal {
+			filtered = append(filtered, m)
+		}
+	}
+	s.sessions.Save(sessionID, filtered)
 }
 
 // publishSessionStatus sends a session_status event to the event bus,

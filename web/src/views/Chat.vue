@@ -39,8 +39,6 @@
           class="panel-body"
           :style="{ paddingBottom: inputBarHeight + 'px' }"
           @scroll="onPanelScroll"
-          @wheel.passive="onPanelWheel"
-          @touchmove.passive="onPanelTouchMove"
         >
           <div class="sticky-panels"></div>
           <LockConflictNotice :conflicts="store.lockConflicts" />
@@ -99,7 +97,7 @@
           class="scroll-to-bottom-btn"
           :style="{ bottom: (inputBarHeight + 8) + 'px' }"
           title="滚动到最新"
-          @click="scrollToBottom()"
+          @click="forceScrollToBottom()"
         >
           <svg
             width="16"
@@ -398,38 +396,41 @@ function startObserve() {
 }
 
 // ── Scroll behavior ──
-const scrolledUp = ref(false)
+// Two mechanisms:
+// 1. Auto-scroll watcher: fires on content changes, follows only if not scrolled up
+// 2. forceScrollToBottom(): imperative sites (session switch, sidebar, mount) use rAF retry
+const userScrolledUp = ref(false)
 const showScrollBtn = ref(false)
-let _userScrolled = false
-
-function isNearBottom(el) { return el.scrollHeight - el.scrollTop - el.clientHeight < 120 }
-function scrollToBottom() {
-  scrollAnchor.value?.scrollIntoView({ block: 'end', behavior: 'smooth' })
-  _userScrolled = false; scrolledUp.value = false; showScrollBtn.value = false
-}
-function onPanelScroll() {
-  const el = msgContainer.value; if (!el) return
-  const near = isNearBottom(el)
-  if (!near && _userScrolled) { scrolledUp.value = true; showScrollBtn.value = true }
-  else if (near) { scrolledUp.value = false; showScrollBtn.value = false }
-}
-function onPanelWheel(e) { if (e.deltaY < 0) _userScrolled = true }
-function onPanelTouchMove(e) { _userScrolled = true }
 
 function scrollToEnd() {
-  scrollAnchor.value?.scrollIntoView({ block: 'end', behavior: 'instant' })
+  const el = msgContainer.value as HTMLElement | null
+  if (el) el.scrollTop = el.scrollHeight
 }
 
-// Content growth watcher: auto-scroll unless user scrolled up
-watch([() => store.messages.length, () => store.isStreaming, () => {
-  const msgs = store.messages; const last = msgs.length > 0 ? msgs[msgs.length - 1] : null
-  return last?._v ?? 0
-}], ([len, streaming], [oldLen]) => {
-  if (!streaming) { _userScrolled = false }
-  if (!_userScrolled && !scrolledUp.value) {
-    scrollToEnd()
-  }
-})
+function forceScrollToBottom() {
+  userScrolledUp.value = false
+  showScrollBtn.value = false
+  scrollToEnd()
+  let tries = 0
+  const retry = () => { if (tries++ < 4) { scrollToEnd(); requestAnimationFrame(retry) } }
+  requestAnimationFrame(retry)
+}
+
+function onPanelScroll() {
+  const el = msgContainer.value as HTMLElement | null
+  if (!el) return
+  const near = el.scrollHeight - el.scrollTop - el.clientHeight < 120
+  if (!near) { userScrolledUp.value = true; showScrollBtn.value = true }
+  else { userScrolledUp.value = false; showScrollBtn.value = false }
+}
+
+// Auto-scroll: primitive string watcher — only fires on real changes
+watch(
+  () => store.messages.length + '_' + (store.messages[store.messages.length - 1]?._v ?? 0),
+  () => { if (!userScrolledUp.value) nextTick(() => scrollToEnd()) },
+)
+
+// Session switch: only manage observer + URL, scrolling handled by callers
 watch(() => store.sessionId, (sid, oldSid) => {
   console.log('[Chat] sessionId changed:', (oldSid||'').slice(-8), '→', (sid||'').slice(-8), 'route:', route.path)
   _observer?.disconnect()
@@ -442,7 +443,7 @@ watch(() => store.sessionId, (sid, oldSid) => {
   }
   else { inputBarHeight.value = 0 }
 })
-onMounted(() => { if (store.sessionId && store.messages.length) { nextTick(() => scrollToEnd()); setTimeout(() => scrollToEnd(), 200) } })
+onMounted(() => { if (store.sessionId && store.messages.length) forceScrollToBottom() })
 
 // ── Route / session ──
 async function loadSessionFromRoute(sid) {
@@ -450,7 +451,7 @@ async function loadSessionFromRoute(sid) {
 	// Already viewing this session — just ensure stream is connected
 	if (store.sessionId === sid && store.messages.length > 0) {
 		store.connectStream(sid)
-		nextTick(() => { scrollToEnd() })
+		forceScrollToBottom()
 		return
 	}
 	// Keep old session's SSE alive — just swap displayed session
@@ -459,10 +460,8 @@ async function loadSessionFromRoute(sid) {
 	store.activeConversationId = sid
 	const ok = await store.fetchSessionMessages(sid)
 	if (!ok) { store.clearCurrent(); return }
-	_userScrolled = false; scrolledUp.value = false; showScrollBtn.value = false
-	// Always start persistent SSE for the newly loaded session
 	store.connectStream(sid)
-	nextTick(() => { scrollToEnd() })
+	forceScrollToBottom()
 }
 
 watch(() => route.params.sessionId, loadSessionFromRoute, { immediate: true })
@@ -506,8 +505,7 @@ function onSidebarSelect(id) {
   if (id === store.sessionId) return
   store.switchConversation(id).then(ok => {
     if (ok) {
-      _userScrolled = false; scrolledUp.value = false; showScrollBtn.value = false
-      nextTick(() => { scrollToEnd() })
+      forceScrollToBottom()
       router.replace('/chat/' + id)
     }
   })

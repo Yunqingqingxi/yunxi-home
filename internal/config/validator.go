@@ -56,10 +56,15 @@ func Validate(cfg *Config) error {
 		}
 	}
 
-	// 认证配置：密码为空时自动生成初始密码
+	// 认证配置：密码为空时自动生成随机密码（不再使用写死的默认密码）
 	if cfg.Auth.Password == "" {
-		cfg.Auth.Password = "admin123"
-		log.Warn("管理后台密码未配置，已使用默认密码 admin123，请尽快修改！")
+		randomPw := generateRandomPassword(16)
+		cfg.Auth.Password = randomPw
+		log.Warn("管理后台密码未配置，已生成随机初始密码，请尽快修改！")
+		log.Warn("===========================================================")
+		log.Warn(fmt.Sprintf("  初始密码: %s", randomPw))
+		log.Warn("  请登录后立即修改！此密码仅在首次启动时显示。")
+		log.Warn("===========================================================")
 	}
 
 	// 动态记录校验
@@ -115,8 +120,21 @@ func Validate(cfg *Config) error {
 func generateJWTSecret() string {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
-		// 极端情况回退到固定值
-		return "yunxi-home-auto-generated-secret-please-change"
+		// crypto/rand 失败时 panic，不应静默用固定值
+		panic("crypto/rand.Read failed: " + err.Error())
 	}
 	return hex.EncodeToString(b)
+}
+
+// generateRandomPassword 生成指定长度的随机密码
+func generateRandomPassword(length int) string {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*"
+	b := make([]byte, length)
+	if _, err := rand.Read(b); err != nil {
+		panic("crypto/rand.Read failed: " + err.Error())
+	}
+	for i := range b {
+		b[i] = charset[int(b[i])%len(charset)]
+	}
+	return string(b)
 }

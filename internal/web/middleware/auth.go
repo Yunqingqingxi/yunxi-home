@@ -65,7 +65,7 @@ func JWTAuth(secret string) echo.MiddlewareFunc {
 	GlobalJWTSecret = secret
 	config := echomw.JWTConfig{
 		SigningKey:  []byte(secret),
-		TokenLookup: "header:Authorization:Bearer ,cookie:token,query:token",
+		TokenLookup: "header:Authorization:Bearer ,cookie:token",
 		ContextKey:  "user",
 		ErrorHandler: func(err error) error {
 			return echo.NewHTTPError(http.StatusUnauthorized, map[string]string{

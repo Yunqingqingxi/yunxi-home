@@ -1,6 +1,6 @@
 <template>
   <div class="content-block">
-    <div class="content-body" v-html="displayHtml" />
+    <div class="content-body" v-html="displayHtml" @click="onContentClick" />
     <span v-if="streaming" class="cursor-blink">|</span>
   </div>
 </template>
@@ -24,14 +24,44 @@ const linkedText = computed(() => {
 })
 
 const displayHtml = computed(() => renderMarkdown(linkedText.value))
+
+function onContentClick(e: MouseEvent) {
+  const btn = (e.target as HTMLElement).closest('[data-copy]')
+  if (!btn) return
+  const block = (btn as HTMLElement).closest('.md-code-block')
+  const code = block?.querySelector('code')
+  if (code) {
+    navigator.clipboard.writeText(code.textContent || '')
+    btn.textContent = '已复制'
+    setTimeout(() => { btn.textContent = '复制' }, 2000)
+  }
+}
 </script>
 
 <style scoped>
 .content-body :deep(p) { margin: 0 0 4px; }
 .content-body :deep(p:last-child) { margin-bottom: 0; }
+/* Code block wrapper */
+.content-body :deep(.md-code-block) {
+  position: relative; margin: 8px 0; border-radius: 8px; overflow: hidden;
+  background: #1e293b;
+}
+.content-body :deep(.md-code-hdr) {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 12px; background: #0f172a; border-bottom: 1px solid #334155;
+}
+.content-body :deep(.md-code-lang) {
+  font-size: 11px; color: #94a3b8; font-family: var(--font-mono, monospace);
+}
+.content-body :deep(.md-code-copy) {
+  background: none; border: 1px solid #475569; color: #94a3b8; cursor: pointer;
+  font-size: 11px; padding: 2px 10px; border-radius: 4px; line-height: 1.6;
+  transition: all 0.15s;
+}
+.content-body :deep(.md-code-copy:hover) { border-color: #94a3b8; color: #e2e8f0; }
 .content-body :deep(pre) {
-  background: #1e293b; color: #e2e8f0; padding: 12px; border-radius: 8px; overflow-x: auto;
-  margin: 8px 0; font-size: 12px; line-height: 1.6;
+  background: #1e293b; color: #e2e8f0; padding: 12px; overflow-x: auto;
+  margin: 0; font-size: 12px; line-height: 1.6; border-radius: 0;
 }
 .content-body :deep(code) { background: var(--surface-hover, #f1f5f9); padding: 2px 4px; border-radius: 4px; font-size: 11.5px; }
 .content-body :deep(pre code) { background: none; padding: 0; font-size: 12px; color: inherit; }

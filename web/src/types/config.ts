@@ -38,7 +38,8 @@ export interface AIProviderConfig {
 export interface AIConfig {
   default_model?: string
   default_reasoning?: 'low' | 'medium' | 'high'
-  [provider: string]: AIProviderConfig | string | undefined
+  expand_thinking_on_stream?: boolean
+  [provider: string]: AIProviderConfig | string | boolean | undefined
 }
 
 export interface DetectConfig {

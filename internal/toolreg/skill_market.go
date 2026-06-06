@@ -8,10 +8,10 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
-
 )
 
 // ── 技能市场：在线搜索 + 下载安装 ──────────────────────────
@@ -176,78 +176,140 @@ func getBuiltinSkills(query string) []SkillMarketItem {
 	return filtered
 }
 
-// DownloadAndInstallSkill 下载技能 YAML 并安装到 skills 目录
-func DownloadAndInstallSkill(downloadURL, skillsDir string) (string, error) {
-	// 1. 下载 YAML
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Get(downloadURL)
+// ProgressCallback 进度回调（step: download/parse/save, status: running/done/error, pct: 0-100）
+type ProgressCallback func(step, status, msg string, pct int)
+
+// DownloadAndInstallSkill 下载技能并安装到 skills 目录（支持进度回调 + 重试）
+func DownloadAndInstallSkill(downloadURL, skillsDir string, onProgress ProgressCallback) (string, error) {
+	emit := func(step, status, msg string, pct int) {
+		if onProgress != nil { onProgress(step, status, msg, pct) }
+	}
+
+	emit("download", "running", "正在下载技能...", 10)
+
+	// 1. 下载（120s 超时 + 1 次重试）
+	var yamlData []byte
+	var err error
+	for attempt := 0; attempt < 2; attempt++ {
+		if attempt > 0 {
+			emit("download", "running", fmt.Sprintf("重试下载 (%d/2)...", attempt+1), 10)
+		}
+		client := &http.Client{Timeout: 120 * time.Second}
+		var resp *http.Response
+		resp, err = client.Get(downloadURL)
+		if err != nil {
+			continue
+		}
+		if resp.StatusCode != 200 {
+			resp.Body.Close()
+			err = fmt.Errorf("HTTP %d", resp.StatusCode)
+			continue
+		}
+		yamlData, err = io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err == nil { break }
+	}
 	if err != nil {
+		emit("download", "error", fmt.Sprintf("下载失败: %v", err), 20)
 		return "", fmt.Errorf("下载失败: %w", err)
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("下载失败: HTTP %d", resp.StatusCode)
-	}
-
-	yamlData, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("读取响应失败: %w", err)
-	}
+	emit("download", "done", "下载完成", 30)
 
 	content := string(yamlData)
 
-	// 2. 检测格式并提取技能名称
+	// 2. 检测格式并提取名称
+	emit("parse", "running", "解析技能文件...", 40)
 	var name string
 	var ext string
 
-	if strings.HasPrefix(strings.TrimSpace(content), "# ") || strings.Contains(content, "\n## ") {
-		// SKILL.md 格式（Markdown）
-		name = extractMDTitle(content)
-		ext = ".md"
-	} else if strings.Contains(content, "name:") && strings.Contains(content, "steps:") {
-		// skill.yaml 格式（YAML）
+	trimmed := strings.TrimSpace(content)
+	switch {
+	case strings.HasPrefix(trimmed, "---") || (strings.Contains(content, "name:") && (strings.Contains(content, "steps:") || strings.Contains(content, "description:"))):
+		// YAML 格式（含 frontmatter）
 		name = extractYAMLField(content, "name")
 		ext = ".yaml"
-	} else {
+	case strings.HasPrefix(trimmed, "# ") || strings.Contains(content, "\n## "):
+		// Markdown 格式
+		name = extractMDTitle(content)
+		ext = ".md"
+	default:
+		emit("parse", "error", "文件格式不支持（需为 SKILL.md 或 skill.yaml）", 40)
 		return "", fmt.Errorf("文件格式不正确：不支持的文件类型（需为 SKILL.md 或 skill.yaml）")
 	}
 
+	// 名称 fallback：从 URL 提取
 	if name == "" {
+		name = extractNameFromURL(downloadURL)
+	}
+	if name == "" {
+		emit("parse", "error", "无法提取技能名称", 40)
 		return "", fmt.Errorf("无法从文件中提取技能名称")
 	}
 
-	// 3. 确保目录存在
+	emit("parse", "done", fmt.Sprintf("技能名称: %s", name), 60)
+
+	// 3. 保存
+	emit("save", "running", "写入文件...", 70)
 	if err := os.MkdirAll(skillsDir, 0755); err != nil {
+		emit("save", "error", fmt.Sprintf("创建目录失败: %v", err), 70)
 		return "", fmt.Errorf("创建 skills 目录失败: %w", err)
 	}
 
-	// 4. 写入文件（保留原始扩展名）
 	filePath := filepath.Join(skillsDir, name+ext)
 	if err := os.WriteFile(filePath, yamlData, 0644); err != nil {
+		emit("save", "error", fmt.Sprintf("写入失败: %v", err), 70)
 		return "", fmt.Errorf("写入文件失败: %w", err)
 	}
+	emit("save", "done", "文件已保存", 90)
 
 	return fmt.Sprintf("✅ 技能 '%s' 已安装\n📄 %s", name, filePath), nil
 }
 
-// extractYAMLField 从 YAML 文本提取字段值
+var yamlNameRe = regexp.MustCompile(`(?m)^\s*name\s*:\s*"?([^"\n#]+?)"?\s*(?:#.*)?$`)
+var mdTitleRe = regexp.MustCompile(`(?m)^#\s+(.+?)(?:\s*\{.*?\})?\s*$`)
+
+// extractYAMLField 从 YAML 文本提取字段值（正则匹配）
 func extractYAMLField(yaml, key string) string {
+	if key == "name" {
+		if m := yamlNameRe.FindStringSubmatch(yaml); len(m) >= 2 {
+			return strings.TrimSpace(m[1])
+		}
+	}
+	// 回退到逐行扫描
 	for _, line := range strings.Split(yaml, "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, key+":") {
-			return strings.TrimSpace(strings.TrimPrefix(line, key+":"))
+			val := strings.TrimSpace(strings.TrimPrefix(line, key+":"))
+			return strings.Trim(val, `"'`)
 		}
 	}
 	return ""
 }
 
-// extractMDTitle 从 Markdown 文本提取标题（第一个 # 开头的内容）
+// extractMDTitle 从 Markdown 文本提取标题（正则匹配）
 func extractMDTitle(md string) string {
+	if m := mdTitleRe.FindStringSubmatch(md); len(m) >= 2 {
+		return strings.TrimSpace(m[1])
+	}
+	// 回退到逐行扫描
 	for _, line := range strings.Split(md, "\n") {
 		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "# ") {
 			return strings.TrimSpace(strings.TrimPrefix(line, "# "))
+		}
+	}
+	return ""
+}
+
+// extractNameFromURL 从下载 URL 中提取技能名称（fallback）
+func extractNameFromURL(downloadURL string) string {
+	// URL 示例: https://raw.githubusercontent.com/anthropics/skills/main/skills/xlsx/SKILL.md
+	parts := strings.Split(strings.TrimRight(downloadURL, "/"), "/")
+	if len(parts) >= 2 {
+		// 取倒数第二段作为名称（倒数第一是文件名如 SKILL.md）
+		name := parts[len(parts)-2]
+		if name != "skills" && name != "main" && name != "master" {
+			return name
 		}
 	}
 	return ""

@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/labstack/echo/v4"
 	"golang.org/x/crypto/bcrypt"
@@ -13,9 +15,15 @@ import (
 	"github.com/Yunqingqingxi/yunxi-home/internal/web/middleware"
 )
 
+type loginAttempt struct {
+	count     int
+	firstSeen time.Time
+}
+
 type AuthHandler struct {
-	userRepo database.UserRepository
-	jwtCfg   middleware.JWTConfig
+	userRepo     database.UserRepository
+	jwtCfg       middleware.JWTConfig
+	loginLimiter sync.Map // map[string]*loginAttempt (per-IP)
 }
 
 func NewAuthHandler(userRepo database.UserRepository, jwtCfg middleware.JWTConfig) *AuthHandler {
@@ -35,6 +43,21 @@ type LoginResponse struct {
 
 // POST /api/auth/login
 func (h *AuthHandler) Login(c echo.Context) error {
+	// 登录限流：每 IP 每分钟最多 5 次，超过锁定 15 分钟
+	ip := c.RealIP()
+	now := time.Now()
+	if v, ok := h.loginLimiter.Load(ip); ok {
+		attempt := v.(*loginAttempt)
+		if now.Sub(attempt.firstSeen) > 15*time.Minute {
+			h.loginLimiter.Delete(ip)
+		} else if attempt.count >= 5 {
+			if now.Sub(attempt.firstSeen) < 15*time.Minute {
+				return c.JSON(http.StatusTooManyRequests, errorResp("登录尝试过于频繁，请 15 分钟后重试"))
+			}
+			h.loginLimiter.Delete(ip)
+		}
+	}
+
 	var req LoginRequest
 	if err := c.Bind(&req); err != nil {
 		return c.JSON(http.StatusBadRequest, errorResp("请求参数无效"))
@@ -45,12 +68,17 @@ func (h *AuthHandler) Login(c echo.Context) error {
 
 	user, err := h.userRepo.GetByUsername(c.Request().Context(), req.Username)
 	if err != nil {
+		h.recordLoginFailure(ip, now)
 		return c.JSON(http.StatusUnauthorized, errorResp("用户名或密码错误"))
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
+		h.recordLoginFailure(ip, now)
 		return c.JSON(http.StatusUnauthorized, errorResp("用户名或密码错误"))
 	}
+
+	// 登录成功，清除限流记录
+	h.loginLimiter.Delete(ip)
 
 	token, err := middleware.GenerateToken(h.jwtCfg, user.ID, user.Username, string(user.Role))
 	if err != nil {
@@ -89,7 +117,7 @@ func (h *AuthHandler) Setup(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, errorResp("密码至少 6 位"))
 	}
 	adminUser, err := h.userRepo.GetByUsername(c.Request().Context(), "admin")
-	hash, _ := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+	hash, _ := bcrypt.GenerateFromPassword([]byte(req.Password), 12)
 	if err != nil {
 		// Admin user doesn't exist yet — create it
 		_, err = h.userRepo.Create(c.Request().Context(), &models.User{
@@ -132,7 +160,7 @@ func (h *AuthHandler) ChangePassword(c echo.Context) error {
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Current)); err != nil {
 		return c.JSON(http.StatusBadRequest, errorResp("当前密码错误"))
 	}
-	hash, _ := bcrypt.GenerateFromPassword([]byte(req.New), bcrypt.DefaultCost)
+	hash, _ := bcrypt.GenerateFromPassword([]byte(req.New), 12)
 	if err := h.userRepo.UpdatePassword(c.Request().Context(), user.ID, string(hash)); err != nil {
 		return c.JSON(http.StatusInternalServerError, errorResp("修改失败: "+err.Error()))
 	}
@@ -162,4 +190,11 @@ func (h *AuthHandler) Refresh(c echo.Context) error {
 		Username: claims.Username,
 		Role:     claims.Role,
 	}))
+}
+
+// recordLoginFailure 记录登录失败，per-IP 限流
+func (h *AuthHandler) recordLoginFailure(ip string, now time.Time) {
+	v, _ := h.loginLimiter.LoadOrStore(ip, &loginAttempt{count: 0, firstSeen: now})
+	attempt := v.(*loginAttempt)
+	attempt.count++
 }

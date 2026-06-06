@@ -194,7 +194,7 @@ func extractFilePath(c echo.Context) string {
 		return ""
 	}
 	// 按优先级检查各字段
-	for _, key := range []string{"path", "old_path", "src", "dst"} {
+	for _, key := range []string{"path", "old_path", "src", "dst", "dir"} {
 		if p, ok := body[key].(string); ok && p != "" && p != "/" {
 			return p
 		}

@@ -16,6 +16,7 @@ type QueuedMessage struct {
 	Content   string    `json:"content"`
 	Priority  int       `json:"priority"`   // 0=normal, 1=high (user interrupt), 2=system
 	Source    string    `json:"source"`     // "user" | "inject" | "agent" | "system"
+	Ephemeral bool      `json:"-"`          // if true, skip saving to conversation history
 	CreatedAt time.Time `json:"created_at"`
 	Done      chan struct{} `json:"-"`      // closed when message is fully processed
 }
